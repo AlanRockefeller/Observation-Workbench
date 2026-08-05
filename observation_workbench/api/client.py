@@ -476,6 +476,14 @@ class INatClient:
                 time.sleep(wait_s)
             except httpx.HTTPStatusError as exc:
                 msg = _extract_error_message(exc.response)
+                # Mirror the v2 handling: for unsafe writes, a 5xx/429 status
+                # means the request reached iNaturalist but its outcome can't
+                # be known (it may have been applied despite the error), so
+                # callers must not treat it as a definite failure safe to retry.
+                outcome_unknown = (
+                    not retry_safe
+                    and exc.response.status_code not in {400, 401, 403, 404, 409, 422}
+                )
                 raise INatAPIError(
                     msg,
                     endpoint=path,
@@ -483,6 +491,7 @@ class INatClient:
                     response_body=exc.response.text,
                     request_phase=request_phase,
                     response_received=True,
+                    outcome_unknown=outcome_unknown,
                     method=method_upper,
                 ) from exc
         raise INatAPIError(f"Max retries exceeded for {path}", endpoint=path)
