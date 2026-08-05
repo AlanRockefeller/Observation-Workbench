@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# Project-specific
+# ---------------------------------------------------------------------------
+phase*txt
+catall.sh
+inat.api.txt
+users_not_to_tag.txt
+
+# AI / assistant tooling
+.claude/
+.ai/
+.agents/
+.codex
+.codex/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+WARP.md
+ai.query
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.so
+
+# Testing / type-checking caches
+.pytest_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Local runtime data, logs, caches (settings/auth live in ~/.config & ~/.cache)
+# ---------------------------------------------------------------------------
+*.log
+api_log.txt
+nohup.out
+*.db
+*.sqlite
+*.sqlite3
+*.wal
+*.conf
+tokens.json
+
+# Backup / patch / merge leftovers
+*.bak
+*.orig
+*.swp
+*.new
+*.old
+*.patch
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+mycomap.com.api.md
+mycomap_api_documentation.md
+.rsync-command
