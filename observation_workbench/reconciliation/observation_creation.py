@@ -1598,11 +1598,11 @@ class ObservationCreationService:
             current = self.db.action(profile_id, action_id) or row
             return ObservationCreationResult(action_id, str(current["state"]), "Finalize is no longer pending.")
         progress(f"Finalize action {action_id}: verifying the completed saga")
-        ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
-        pair_id = int(row["pair_id"])
-        approved_gaps = set(json.loads(str(ledger["approved_field_gaps"] or "[]"))) if ledger else set()
-        pair = self.db.pair_detail(profile_id, pair_id) if hasattr(self.db, "pair_detail") else None
         try:
+            ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
+            pair_id = int(row["pair_id"])
+            approved_gaps = set(json.loads(str(ledger["approved_field_gaps"] or "[]"))) if ledger else set()
+            pair = self.db.pair_detail(profile_id, pair_id) if hasattr(self.db, "pair_detail") else None
             profile = self.db.profile(profile_id)
             from .inat_reader import INatReconciliationReader
             from .specimen_state import evaluate_specimen_state

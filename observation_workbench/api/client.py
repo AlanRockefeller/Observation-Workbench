@@ -1354,7 +1354,7 @@ class INatClient:
                     continue
                 resp.raise_for_status()
                 return resp.content
-            except httpx.TimeoutException:
+            except httpx.TransportError:
                 if attempt == MAX_RETRIES - 1:
                     raise
                 time.sleep(2 ** attempt)

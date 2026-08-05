@@ -189,19 +189,21 @@ class TaxonTreePanel(QWidget):
         )
         sigs = worker.signals
         self._live_summary_signals.add(sigs)
-        sigs.finished.connect(lambda r, s=sigs: (self._live_summary_signals.discard(s), self._on_summary_loaded(r)))
-        sigs.error.connect(lambda e, s=sigs: (self._live_summary_signals.discard(s), self._on_summary_error(e)))
+        sigs.finished.connect(lambda r, s=sigs, g=gen: (self._live_summary_signals.discard(s), self._on_summary_loaded(r, g)))
+        sigs.error.connect(lambda e, s=sigs, g=gen: (self._live_summary_signals.discard(s), self._on_summary_error(e, g)))
         self._pool.start(worker)
 
-    @Slot(object)
-    def _on_summary_loaded(self, summary: TaxonSummary) -> None:
+    def _on_summary_loaded(self, summary: TaxonSummary, generation: int) -> None:
+        if generation != self._generation:
+            return
         self._progress.setVisible(False)
         self._refresh_btn.setEnabled(True)
         self._populate(summary)
         self.summary_finished.emit()
 
-    @Slot(str)
-    def _on_summary_error(self, msg: str) -> None:
+    def _on_summary_error(self, msg: str, generation: int) -> None:
+        if generation != self._generation:
+            return
         self._progress.setVisible(False)
         self._refresh_btn.setEnabled(True)
         self._status_label.setText(f"Error: {msg[:80]}")

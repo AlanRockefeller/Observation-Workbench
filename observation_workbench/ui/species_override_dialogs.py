@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QThreadPool, Qt, Slot
+from PySide6.QtCore import QRect, QThreadPool, Qt, Slot
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from observation_workbench.api.client import INatClient
+from observation_workbench.models import StudyPhoto
 from observation_workbench.services.image_cache import ImageCache
 from observation_workbench.services.species_override import (
     SPECIES_NAME_OVERRIDE_FIELD_NAME,
@@ -46,6 +47,10 @@ from observation_workbench.ui.table_sort import (
 
 
 _OBS_URL_ID_RE = re.compile(r"/observations/(\d+)")
+
+# Matches ImagePrefetcher._MAX_CONCURRENT_BACKGROUND_PREFETCH so this dialog's
+# photo downloads share the same modest, bounded concurrency budget.
+_MAX_CONCURRENT_PHOTO_LOADS = 3
 
 
 class SpeciesOverridePhotoBrowserDialog(QDialog):
@@ -72,6 +77,11 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         self._photo_labels: dict[tuple[int, int], QLabel] = {}
         self._live_image_signals: set[object] = set()
         self._undo_stack: list[int] = []
+        self._card_pending_photos: dict[int, list[StudyPhoto]] = {}
+        self._cards_started: set[int] = set()
+        self._photo_queue: list[tuple[int, StudyPhoto]] = []
+        self._queued_photo_keys: set[tuple[int, int]] = set()
+        self._in_flight_loads = 0
 
         layout = QVBoxLayout(self)
         intro = QLabel(
@@ -102,6 +112,8 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         content_layout.addStretch(1)
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
+        self._scroll = scroll
+        scroll.verticalScrollBar().valueChanged.connect(self._check_visible_cards)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
@@ -110,6 +122,14 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         buttons.rejected.connect(self.accept)
         layout.addWidget(buttons)
         self._update_count()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._check_visible_cards()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._check_visible_cards()
 
     def included_observation_ids(self) -> list[int]:
         return [
@@ -168,13 +188,52 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
                 label.setStyleSheet("QLabel { background: #111; color: #ddd; }")
                 grid.addWidget(label, index // columns, index % columns)
                 self._photo_labels[(row.observation_id, photo.photo_id)] = label
-                self._load_photo(row.observation_id, photo)
             layout.addLayout(grid)
+            self._card_pending_photos[row.observation_id] = list(row.photos)
         return card
+
+    def _check_visible_cards(self) -> None:
+        if not self._card_pending_photos:
+            return
+        viewport = self._scroll.viewport()
+        viewport_rect = viewport.rect()
+        for obs_id in list(self._card_pending_photos):
+            if obs_id in self._cards_started:
+                continue
+            card = self._cards.get(obs_id)
+            if card is None or not card.isVisible():
+                continue
+            top_left = card.mapTo(viewport, card.rect().topLeft())
+            card_rect = QRect(top_left, card.size())
+            if not card_rect.intersects(viewport_rect):
+                continue
+            self._cards_started.add(obs_id)
+            for photo in self._card_pending_photos.pop(obs_id):
+                self._enqueue_photo(obs_id, photo)
+        self._pump_photo_queue()
+
+    def _enqueue_photo(self, obs_id: int, photo) -> None:
+        key = (obs_id, photo.photo_id)
+        if key in self._queued_photo_keys:
+            return
+        self._queued_photo_keys.add(key)
+        self._photo_queue.append((obs_id, photo))
+
+    def _pump_photo_queue(self) -> None:
+        while self._photo_queue and self._in_flight_loads < _MAX_CONCURRENT_PHOTO_LOADS:
+            obs_id, photo = self._photo_queue.pop(0)
+            self._queued_photo_keys.discard((obs_id, photo.photo_id))
+            self._in_flight_loads += 1
+            self._load_photo(obs_id, photo)
+
+    def _photo_load_finished(self) -> None:
+        self._in_flight_loads = max(0, self._in_flight_loads - 1)
+        self._pump_photo_queue()
 
     def _load_photo(self, obs_id: int, photo) -> None:
         target = _photo_fetch_target(photo, "large")
         if target is None:
+            self._photo_load_finished()
             return
         size, url = target
         worker = _GalleryImageWorker(
@@ -203,6 +262,7 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
 
     @Slot(int, int, object)
     def _on_photo_loaded(self, obs_id: int, photo_id: int, data: bytes) -> None:
+        self._photo_load_finished()
         label = self._photo_labels.get((obs_id, photo_id))
         if label is None:
             return
@@ -221,6 +281,7 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         label.setMinimumHeight(max(180, scaled.height()))
 
     def _on_photo_failed(self, obs_id: int, photo_id: int, message: str) -> None:
+        self._photo_load_finished()
         label = self._photo_labels.get((obs_id, photo_id))
         if label is not None:
             label.setText(f"Could not load photo: {message}")

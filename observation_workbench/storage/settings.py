@@ -27,7 +27,7 @@ LEGACY_ORG_NAME = "iNatStudy"
 # Cache/journal directory.  Also renamed, also migrated — see
 # _migrate_legacy_cache_dir().
 DEFAULT_CACHE_DIR_NAME = "observation_workbench"
-LEGACY_CACHE_DIR_NAME = "observation_workbench"
+LEGACY_CACHE_DIR_NAME = "inat_study"
 
 # Defaults
 DEFAULT_CACHE_MAX_GB = 2.0
@@ -71,7 +71,7 @@ class AppSettings:
                  len(keys), legacy.fileName(), self._s.fileName())
 
     def _migrate_legacy_cache_dir(self) -> None:
-        """Move ~/.cache/observation_workbench to ~/.cache/observation_workbench, once.
+        """Move ~/.cache/inat_study to ~/.cache/observation_workbench, once.
 
         Skipped entirely when the user has pinned an explicit cache directory,
         and when the destination already exists — two populated cache/journal
@@ -131,7 +131,7 @@ class AppSettings:
     @property
     def last_place_id(self) -> Optional[int]:
         v = self._s.value("filter/place_id", None)
-        return int(v) if v is not None else None
+        return int(v) if v not in (None, "") else None
 
     @last_place_id.setter
     def last_place_id(self, v: Optional[int]) -> None:
@@ -148,7 +148,7 @@ class AppSettings:
     @property
     def last_taxon_id(self) -> Optional[int]:
         v = self._s.value("filter/taxon_id", None)
-        return int(v) if v is not None else None
+        return int(v) if v not in (None, "") else None
 
     @last_taxon_id.setter
     def last_taxon_id(self, v: Optional[int]) -> None:

@@ -7,6 +7,8 @@ Eviction: remove least-recently-accessed files when total size exceeds limit.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
@@ -51,7 +53,17 @@ class ImageCache:
         p = self._path(photo_id, size, ext)
         try:
             with self._lock:
-                p.write_bytes(data)
+                fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), prefix=f".{p.name}.")
+                try:
+                    with os.fdopen(fd, "wb") as f:
+                        f.write(data)
+                    os.replace(tmp_name, p)
+                except BaseException:
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+                    raise
                 self._remove_stale_variants(key, keep=p)
                 self._db.log_image_access(key, str(p), len(data))
                 self._maybe_evict()

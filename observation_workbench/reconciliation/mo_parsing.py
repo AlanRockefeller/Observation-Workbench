@@ -341,14 +341,18 @@ def _observation_media(raw: dict[str, Any]) -> tuple[MediaIdentity, ...]:
             identity = parse_mo_media_identity(item)
             if identity:
                 values.append(identity)
+    primary_id = positive_int(raw.get("primary_image_id"))
+    if primary_id:
+        values.append(MediaIdentity(RemoteSite.MO, str(primary_id), "display"))
     primary = raw.get("primary_image")
     if isinstance(primary, dict):
         identity = parse_mo_media_identity(primary)
         if identity:
             values.append(identity)
-    primary_id = positive_int(raw.get("primary_image_id"))
-    if primary_id:
-        values.append(MediaIdentity(RemoteSite.MO, str(primary_id), "display"))
+    # The bare primary_image_id entry above is appended first so that, when
+    # deduplicating below, the richer parsed primary_image identity (with
+    # source attribution) overwrites it on a matching key rather than the
+    # other way around.
     unique = {(item.site, item.photo_id, item.rendition): item for item in values}
     return tuple(sorted(unique.values(), key=lambda item: (item.photo_id, item.rendition)))
 

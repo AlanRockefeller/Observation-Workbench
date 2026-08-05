@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
+from PySide6.QtCore import QStandardPaths
+
 from observation_workbench.api.client import INatClient
 from observation_workbench.api.parsers import parse_observation
 from observation_workbench.models import StudyIdentification, StudyObservation
@@ -192,12 +194,39 @@ def _agreement_should_suppress_mentions(
     return non_self_target_count >= 1
 
 
+def _users_not_to_tag_path() -> Path:
+    root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+    return root / "users_not_to_tag.txt"
+
+
+_users_not_to_tag_cache: Optional[set[str]] = None
+_users_not_to_tag_cache_mtime: Optional[float] = None
+
+
 def load_users_not_to_tag() -> set[str]:
-    path = Path.cwd() / "users_not_to_tag.txt"
+    global _users_not_to_tag_cache, _users_not_to_tag_cache_mtime
+
+    path = _users_not_to_tag_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        _users_not_to_tag_cache = set()
+        _users_not_to_tag_cache_mtime = None
+        return _users_not_to_tag_cache
+
+    if (
+        _users_not_to_tag_cache is not None
+        and _users_not_to_tag_cache_mtime == mtime
+    ):
+        return _users_not_to_tag_cache
+
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return set()
+    except (OSError, UnicodeDecodeError):
+        _users_not_to_tag_cache = set()
+        _users_not_to_tag_cache_mtime = None
+        return _users_not_to_tag_cache
+
     users: set[str] = set()
     for line in lines:
         value = line.strip()
@@ -208,6 +237,9 @@ def load_users_not_to_tag() -> set[str]:
         value = value.lstrip("@").rstrip("@").strip()
         if value:
             users.add(value.casefold())
+
+    _users_not_to_tag_cache = users
+    _users_not_to_tag_cache_mtime = mtime
     return users
 
 

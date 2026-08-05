@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -109,6 +109,9 @@ class IdentifySetupDialog(QDialog):
         self._execution_active = False
         self._table_updates = False
         self._live_signals: set[_ReadSignals] = set()
+        self._pending_reads: dict[
+            _ReadSignals, tuple[Callable[[object], None], Callable[[Exception], None]]
+        ] = {}
         self._name_cache: dict[tuple[str, int], str | None] = {}
         self._name_errors: dict[tuple[str, int], Exception] = {}
         self._name_inflight: dict[tuple[str, int], set[_ResolutionSubscriber]] = {}
@@ -692,18 +695,36 @@ class IdentifySetupDialog(QDialog):
         worker = _ReadWorker(read)
         signals = worker.signals
         self._live_signals.add(signals)
+        self._pending_reads[signals] = (success, failure)
 
-        def on_success(value: object) -> None:
-            self._live_signals.discard(signals)
-            success(value)
-
-        def on_failure(exc: Exception) -> None:
-            self._live_signals.discard(signals)
-            failure(exc)
-
-        signals.result.connect(on_success)
-        signals.error.connect(on_failure)
+        # Connect to bound slots on this QDialog (a GUI-thread QObject), not
+        # nested plain functions -- Qt's auto connection type is decided by
+        # the receiver's thread affinity, which it can only detect for a
+        # QObject method. A plain closure receiver would run on the worker
+        # thread that emits the signal, touching widgets off the GUI thread.
+        signals.result.connect(self._on_read_result)
+        signals.error.connect(self._on_read_error)
         QThreadPool.globalInstance().start(worker)
+
+    @Slot(object)
+    def _on_read_result(self, value: object) -> None:
+        signals = self.sender()
+        pending = self._pending_reads.pop(signals, None)
+        self._live_signals.discard(signals)
+        if pending is None:
+            return
+        success, _failure = pending
+        success(value)
+
+    @Slot(object)
+    def _on_read_error(self, exc: Exception) -> None:
+        signals = self.sender()
+        pending = self._pending_reads.pop(signals, None)
+        self._live_signals.discard(signals)
+        if pending is None:
+            return
+        _success, failure = pending
+        failure(exc)
 
     def _set_query_controls_enabled(self, enabled: bool) -> None:
         self._url_edit.setEnabled(enabled)

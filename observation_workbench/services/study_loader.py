@@ -97,7 +97,8 @@ class LoadFilters:
         self.d1 = None if self.observation_query else (d1 or None)
         self.d2 = None if self.observation_query else (d2 or None)
         self.rank_level = None if self.observation_query else rank_level
-        self.rank_name = None if self.observation_query else rank_name
+        normalized_rank_name = rank_name.strip().lower() if rank_name else None
+        self.rank_name = None if self.observation_query else normalized_rank_name
         self.exact_rank = False if self.observation_query else exact_rank
         self.provisional_name_only = provisional_name_only
 
@@ -266,8 +267,10 @@ class StudyLoader:
                 taxon_rank = (obs.target_identification.taxon.rank or "").lower()
                 if filters.exact_rank:
                     # Match by rank name so ranks that share a level (e.g. species
-                    # and hybrid, both level 10) are not conflated.
-                    if taxon_rank != filters.rank_name:
+                    # and hybrid, both level 10) are not conflated. If no rank
+                    # name was given, fail closed rather than accidentally
+                    # matching every rank at this level.
+                    if filters.rank_name is None or taxon_rank != filters.rank_name:
                         continue
                 else:
                     obs_level = RANK_LEVELS.get(taxon_rank)

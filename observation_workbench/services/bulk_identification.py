@@ -52,6 +52,7 @@ def plan_provisional_candidates(
     filters: LoadFilters,
     login: str,
     *,
+    api_token: str = "",
     per_page: int = 200,
     max_observations: Optional[int] = None,
     require_dna_barcode_its: bool = True,
@@ -65,7 +66,9 @@ def plan_provisional_candidates(
     ``max_observations`` caps how many results are scanned, mirroring the bulk
     disagree workflow; ``None`` scans every page. ``require_dna_barcode_its``
     keeps the long-standing default of only agreeing to observations that carry
-    a DNA Barcode ITS observation field.
+    a DNA Barcode ITS observation field. ``api_token``, when supplied,
+    authenticates the refresh-observations call so the identifications list
+    reflects the caller's own visibility (matching the bulk disagree planners).
     """
     candidates: List[BulkAgreeCandidate] = []
     stats = BulkAgreePlanStats()
@@ -117,7 +120,7 @@ def plan_provisional_candidates(
         if provisional_targets:
             refreshed = refresh_observations(
                 loader._client,
-                "",
+                api_token,
                 [obs.obs_id for obs, _ident in provisional_targets],
             )
             fresh_by_id = {obs.obs_id: obs for obs in refreshed}

@@ -26,7 +26,7 @@ from observation_workbench.api.auth import AuthState
 from observation_workbench.api.client import INatAPIError, INatClient
 
 from .db import ReconciliationDB
-from .inat_reader import INatReconciliationReader
+from .inat_reader import INatReconciliationReader, inat_fungi_status
 from .mo_client import MOAPIError, MOClient, ReconciliationCancelled
 from .mo_parsing import mo_record_fingerprint, parse_mo_coordinate, parse_mo_observation, positive_int
 from .normalization import public_fingerprint
@@ -888,12 +888,15 @@ def _parse_date(value: object) -> Optional[date]:
 
 
 def _fungi_status(raw: dict[str, Any]) -> str:
-    taxon = raw.get("taxon") if isinstance(raw.get("taxon"), dict) else {}
-    ancestry = str(taxon.get("ancestry") or "")
-    iconic = str(taxon.get("iconic_taxon_name") or "").casefold()
-    if iconic == "fungi" or "47170" in ancestry.split("/"):
-        return "fungi"
-    return "nonfungal" if taxon else "unknown"
+    # Delegates to the scan's own classifier instead of re-deriving the rule.
+    # The re-derived copy disagreed with it in two ways that hard-block writes:
+    # it missed the Fungi kingdom taxon itself, and it called any taxon with
+    # neither an iconic name nor an ancestry "nonfungal" -- so a pair whose
+    # iNaturalist record carries only a coarse ID (for example "State of Matter
+    # Life", which the deliberately unfiltered delta scan does record) failed
+    # every preview and every post-write verification with inat_out_of_scope.
+    taxon = raw.get("taxon")
+    return inat_fungi_status(taxon if isinstance(taxon, dict) else {})
 
 
 def _inat_record_fingerprint(raw: dict[str, Any]) -> str:

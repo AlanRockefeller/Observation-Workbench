@@ -231,6 +231,7 @@ class _BulkPlanWorker(QRunnable):
         generation: int,
         get_gen,
         options: Optional[dict] = None,
+        api_token: str = "",
     ) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -240,6 +241,7 @@ class _BulkPlanWorker(QRunnable):
         self.generation = generation
         self.get_gen = get_gen
         self.options = options or {}
+        self.api_token = api_token
         self.signals = _BulkPlanSignals()
 
     def run(self) -> None:
@@ -248,6 +250,7 @@ class _BulkPlanWorker(QRunnable):
                 self.loader,
                 self.filters,
                 self.login,
+                api_token=self.api_token,
                 max_observations=self.options.get("max_observations"),
                 require_dna_barcode_its=self.options.get("require_dna_barcode_its", True),
                 only_if_needed=self.options.get("only_if_needed", True),
@@ -3297,6 +3300,7 @@ class MainWindow(QMainWindow):
             gen,
             lambda: getattr(self, "_bulk_generation", 0),
             self._bulk_agree_options,
+            api_token=self._auth_state.api_token,
         )
         sigs = worker.signals
         self._live_bulk_signals.add(sigs)

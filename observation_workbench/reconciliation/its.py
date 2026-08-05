@@ -1423,6 +1423,9 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
             # Half the bounding-box diagonal is a conservative accuracy radius.
             accuracy = _distance_m(north, west, south, east) / 2
 
+    owner_raw = raw.get("owner")
+    owner = owner_raw if isinstance(owner_raw, dict) else {}
+
     return HydratedObservation(
         inventory,
         voucher_identifiers=tuple(sorted(vouchers)),
@@ -1439,7 +1442,7 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
         # docs/gate_2a_capability_note.md) — a Gate 2A marker embedded here on
         # a MO destination would round-trip through this same key.
         description=str(raw.get("notes") or ""),
-        attribution_name=str((raw.get("owner") or {}).get("login_name") or ""),
+        attribution_name=str(owner.get("login_name") or ""),
         specimen_available=bool(raw["has_specimen"]) if "has_specimen" in raw else None,
     )
 
