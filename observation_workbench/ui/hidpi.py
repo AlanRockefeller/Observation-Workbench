@@ -52,9 +52,21 @@ def probe_display() -> tuple[float, int] | None:
     start.  Callers treat None as "do not scale", which is the safe direction:
     text that is too small beats a window larger than the screen.
     """
+    if getattr(sys, "frozen", False):
+        # In a PyInstaller build, sys.executable IS the app (there is no
+        # separate `python` to invoke), and this module is not a loose file
+        # on disk to run as a script. Re-invoke the frozen exe itself with a
+        # sentinel flag that main.py dispatches straight to _run_probe(),
+        # instead of `[sys.executable, __file__, "--probe"]` — which would
+        # silently launch a second full copy of the app (main.py tolerates
+        # unknown args via parse_known_args), which launches a third to probe
+        # itself, recursing until the process/handle limit is hit.
+        cmd = [sys.executable, "--hidpi-probe"]
+    else:
+        cmd = [sys.executable, os.path.abspath(__file__), "--probe"]
     try:
         proc = subprocess.run(
-            [sys.executable, os.path.abspath(__file__), "--probe"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_SEC,
