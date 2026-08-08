@@ -60,11 +60,13 @@ if ($scaleExplicit -and -not [string]::IsNullOrWhiteSpace($scale)) {
     $env:QT_SCALE_FACTOR = $scale
 }
 
-# Keep text sizing stable across display reconnects. Set SCALE or --scale to
-# adjust overall UI scaling, or use the in-app UI scale setting.
-if ([string]::IsNullOrWhiteSpace($env:QT_FONT_DPI)) {
-    $env:QT_FONT_DPI = "96"
-}
+# Note: unlike start.sh, this does not pin QT_FONT_DPI. That pin works around
+# WSLg re-negotiating the virtual display's DPI on suspend/resume; native
+# Windows reports stable DPI and already scales fonts correctly on its own.
+# Forcing QT_FONT_DPI=96 here would override that scaling down to a 100%
+# baseline, producing tiny text on any display above 100% OS scaling (e.g.
+# the default 150-200% on a 4K panel). Set SCALE or --scale to adjust overall
+# UI scaling, or use the in-app UI scale setting.
 
 & $python main.py @appArgs
 exit $LASTEXITCODE
