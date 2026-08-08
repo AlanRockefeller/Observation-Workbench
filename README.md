@@ -86,10 +86,10 @@ Navigation shortcuts work globally, except when a text input field is active.
 
 Use **Action -> Authenticate to iNaturalist...** to open iNaturalist's API token page, paste the browser token into the app, and validate the login. Authenticated actions refresh the observation before posting, and the app avoids duplicate or self agreements.
 
+Single-observation agreements are keyboard-only: press `a` to agree with the most recent non-self ID, or `A` to agree with the consensus/community ID.
+
 The same menu also exposes:
 
-- Agree with most recent ID
-- Agree with consensus ID
 - Agree to provisional IDs, which opens a guided review flow with optional pauses
 - Bulk disagree to taxon from URL, which opens a separate supervised corrective-ID workflow
 
