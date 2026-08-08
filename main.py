@@ -111,10 +111,15 @@ def main() -> None:
     # helpers below leave any existing value alone, so running `python main.py`
     # directly gets the same sizing as launching through the script.
     ensure_scale_factor()
-    # Pin the logical font DPI: WSLg re-negotiates the virtual display on
-    # suspend/resume and can report a different DPI afterwards, which makes all
-    # text change size mid-session.
-    os.environ.setdefault("QT_FONT_DPI", "96")
+    # Pin the logical font DPI on Linux only: WSLg re-negotiates the virtual
+    # display on suspend/resume and can report a different DPI afterwards,
+    # which makes all text change size mid-session. Windows and macOS report
+    # stable native DPI and already scale fonts correctly on their own —
+    # forcing 96 there overrides that correct scaling down to a 100% baseline,
+    # producing tiny text on any display running above 100% OS scaling (e.g.
+    # the default 150-200% on a 4K panel).
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("QT_FONT_DPI", "96")
 
     app = QApplication([sys.argv[0]] + qt_args)
     app.setApplicationName("Observation Workbench")
