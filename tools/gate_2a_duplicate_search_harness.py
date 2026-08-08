@@ -219,7 +219,10 @@ def test_dateless_source_goes_straight_to_full_scan() -> None:
         ok = False
         print(f"  unexpected exception: {exc}")
     check("source with no observed date still completes via full-account scan", ok)
-    check("no date-window params sent for a dateless source", all(c["d1"] == "" for c in inat.calls))
+    check(
+        "no date-window params sent for a dateless source",
+        bool(inat.calls) and all(c["d1"] == "" for c in inat.calls),
+    )
 
 
 def main() -> int:

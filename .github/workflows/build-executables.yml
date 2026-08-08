@@ -1,0 +1,82 @@
+name: Build executables
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: ObservationWorkbench-windows-x64
+            artifact_path: dist/ObservationWorkbench
+          - os: macos-13
+            asset_name: ObservationWorkbench-macos-x64
+            artifact_path: dist/ObservationWorkbench.app
+          - os: macos-14
+            asset_name: ObservationWorkbench-macos-arm64
+            artifact_path: dist/ObservationWorkbench.app
+          - os: ubuntu-latest
+            asset_name: ObservationWorkbench-linux-x64
+            artifact_path: dist/ObservationWorkbench
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller packaging/observation_workbench.spec --noconfirm --clean
+
+      - name: Zip artifact (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path "${{ matrix.artifact_path }}" -DestinationPath "${{ matrix.asset_name }}.zip"
+        shell: pwsh
+
+      - name: Zip artifact (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: |
+          cd "$(dirname "${{ matrix.artifact_path }}")"
+          zip -r "${GITHUB_WORKSPACE}/${{ matrix.asset_name }}.zip" "$(basename "${{ matrix.artifact_path }}")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            artifacts/*.zip \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

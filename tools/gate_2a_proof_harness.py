@@ -449,8 +449,8 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
         status, _ = inat.delete_observation(obs_uuid)
         deleted_ok = status < 400
         try:
-            check_status, _ = inat.observation(obs_uuid)
-            gone = check_status >= 400 or not _first(inat.observation(obs_uuid)[1])
+            check_status, check_payload = inat.observation(obs_uuid)
+            gone = check_status >= 400 or not _first(check_payload)
         except Ambiguous:
             gone = None
         if deleted_ok and obs_uuid in ledger.inat_observation_uuids:
@@ -1044,6 +1044,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         if args.mo or args.mo_recover_id:
             key = os.environ.get("MO_API_KEY", "") or getpass.getpass("Mushroom Observer API key (hidden): ")
+            if not key.strip():
+                print("No Mushroom Observer API key supplied.", file=sys.stderr)
+                return 2
             mo = MOProof(key, verbose=args.verbose)
             print("\n--- Mushroom Observer proofs ---")
             if args.mo_recover_id:

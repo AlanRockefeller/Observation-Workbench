@@ -391,7 +391,7 @@ def scenario_evidence_edge_removed() -> None:
     env = Environment((10, 11), (20,))
     try:
         preview = env.preview((10, 11), (20,), 10, 20)
-        consolidation_id, attempt_id, group_id = env.journal(preview)
+        _cid, attempt_id, group_id = env.journal(preview)
         # Exact-date/close-coordinate edges remain, but the reviewed voucher
         # edge for this donor disappears. The attempt must not silently switch
         # to the alternate route.
@@ -583,7 +583,6 @@ def scenario_restart_each_ordinal() -> None:
         except SystemExit:
             pass
         env.reopen()
-        original_finalize = env.service._execute_finalize
 
         def crash_before_finalize(*args, **kwargs):
             raise SystemExit("simulated process stop before finalize")
@@ -597,7 +596,6 @@ def scenario_restart_each_ordinal() -> None:
         final = env.run(group_id)
         assert final[-1].state == "succeeded", final
         assert env.mo.write_calls == 1 and env.inat.write_calls == 1
-        env.service._execute_finalize = original_finalize
         print("restart between every dynamically minted saga ordinal: PASS")
     finally:
         env.close()
@@ -1453,10 +1451,10 @@ def scenario_read_auth_and_cancellation_guards() -> None:
         ).fetchone()[0] == 0
 
         preview = env.preview((10, 11), (20,), 10, 20)
-        consolidation_id, attempt_id, group_id = env.journal(preview)
+        _cid, attempt_id, group_id = env.journal(preview)
         cancelled = {"value": False}
         env.mo.after_write = lambda: cancelled.update(value=True)
-        result = env.service.execute_group(
+        env.service.execute_group(
             PROFILE_ID, group_id, lambda: cancelled["value"],
             lambda _message: None,
         )

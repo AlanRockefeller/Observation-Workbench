@@ -186,6 +186,10 @@ def main() -> int:
     except Exception:
         crashed = True
     check("closing the dialog while a worker is in flight does not crash", not crashed)
+    check(
+        "the in-flight download still completed after the dialog was closed",
+        late_calls == ["stub://late"],
+    )
 
     failed = [n for n, s in _results if s == FAIL]
     print(f"\n{len(_results) - len(failed)}/{len(_results)} checks passed.")

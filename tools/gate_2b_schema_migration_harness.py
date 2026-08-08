@@ -146,16 +146,7 @@ def _build_seeded_v10() -> None:
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    for version in range(1, 11):
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            getattr(db_module, f"_migration_v{version}")(conn)
-            conn.execute(f"PRAGMA user_version={version}")
-        except Exception:
-            conn.rollback()
-            raise
-        else:
-            conn.commit()
+    _migrate_range(conn, 1, 10)
 
     now = _utc_now()
     conn.execute("BEGIN IMMEDIATE")
@@ -270,16 +261,7 @@ def _validate_populated_v12_upgrade() -> None:
     conn = sqlite3.connect(V12_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    for version in range(1, 12):
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            getattr(db_module, f"_migration_v{version}")(conn)
-            conn.execute(f"PRAGMA user_version={version}")
-        except Exception:
-            conn.rollback()
-            raise
-        else:
-            conn.commit()
+    _migrate_range(conn, 1, 11)
     now = _utc_now()
     conn.execute(
         "INSERT INTO sync_profiles(profile_id,inat_user_id,inat_login,mo_user_id,"
@@ -496,16 +478,7 @@ def _validate_malformed_legacy_account_rejected() -> None:
     conn = sqlite3.connect(MALFORMED_ACCOUNT_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    for version in range(1, 14):
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            getattr(db_module, f"_migration_v{version}")(conn)
-            conn.execute(f"PRAGMA user_version={version}")
-        except Exception:
-            conn.rollback()
-            raise
-        else:
-            conn.commit()
+    _migrate_range(conn, 1, 13)
     now = _utc_now()
     conn.execute(
         "INSERT INTO sync_profiles(profile_id,inat_user_id,inat_login,"
@@ -567,16 +540,7 @@ def _validate_malformed_v14_baselines_rejected() -> None:
         conn = sqlite3.connect(target, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
-        for version in range(1, 15):
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                getattr(db_module, f"_migration_v{version}")(conn)
-                conn.execute(f"PRAGMA user_version={version}")
-            except Exception:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
+        _migrate_range(conn, 1, 14)
         now = _utc_now()
         for profile_id in (1, 2):
             conn.execute(

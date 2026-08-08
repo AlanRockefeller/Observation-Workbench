@@ -252,7 +252,7 @@ def _record(
     client: _ProbeClient, run_id: str, scenario: str, probe: str, subject: str,
     path: str, *, params: dict, elapsed: float = -1.0, note: str = "",
     token: Optional[str] = None, authenticate: bool = True,
-    timeout: Optional[float] = None,
+    timeout: Optional[float] = None, store_excerpt: bool = True,
 ) -> Probe:
     at = datetime.now(timezone.utc).isoformat()
     try:
@@ -271,7 +271,7 @@ def _record(
         run_id=run_id, scenario=scenario, probe=probe, subject=subject,
         elapsed_s=round(elapsed, 3), at=at, status_code=status, outcome=outcome,
         total_results=total, returned_uuid=ruuid, returned_id=rid, note=note,
-        body_excerpt=json.dumps(payload, sort_keys=True)[:300],
+        body_excerpt=json.dumps(payload, sort_keys=True)[:300] if store_excerpt else "",
     )
 
 
@@ -373,17 +373,19 @@ def scenario_whoami(client: _ProbeClient, log: Log, run_id: str) -> int:
         print("\nThe token did not authenticate. Everything else in this probe "
               "depends on it, so stop here.")
         return 1
-    print(f"\nAuthenticated. Only delete observations owned by this account.")
+    print("\nAuthenticated. Only delete observations owned by this account.")
     return 0
 
 
 def scenario_baseline(client: _ProbeClient, log: Log, run_id: str, obs_uuid: str) -> int:
     """Deep pre-deletion snapshot, so a later cascade check has a reference."""
     print("\n--- baseline (deep read, before any deletion) ---")
+    # DEEP_FIELDS pulls in other users' logins/comments and place_guess;
+    # don't persist that into the evidence log.
     probe = log.add(_record(
         client, run_id, "baseline", "auth_uuid_deep", obs_uuid,
         f"/observations/{obs_uuid}", params={"fields": DEEP_FIELDS},
-        note="pre-deletion content inventory",
+        note="pre-deletion content inventory", store_excerpt=False,
     ))
     if probe.outcome != "present":
         print("\nThe observation is not readable, so there is nothing to watch.")
@@ -404,15 +406,19 @@ def scenario_watch(
     # Resolve the numeric id from the UUID so the weaker-identity probe has a
     # subject, and so a later numeric hit can be compared against this UUID.
     if observation_id is None:
-        _status, payload = client.get(
-            f"/observations/{obs_uuid}", params={"fields": IDENTITY_FIELDS},
-        )
-        results = payload.get("results") if isinstance(payload, dict) else None
-        if isinstance(results, list) and results and isinstance(results[0], dict):
-            raw = results[0].get("id")
-            observation_id = int(raw) if isinstance(raw, int) else None
-        elif isinstance(payload, dict) and isinstance(payload.get("id"), int):
-            observation_id = int(payload["id"])
+        try:
+            _status, payload = client.get(
+                f"/observations/{obs_uuid}", params={"fields": IDENTITY_FIELDS},
+            )
+        except Ambiguous:
+            payload = None
+        if isinstance(payload, dict):
+            results = payload.get("results")
+            if isinstance(results, list) and results and isinstance(results[0], dict):
+                raw = results[0].get("id")
+                observation_id = int(raw) if isinstance(raw, int) else None
+            elif isinstance(payload.get("id"), int):
+                observation_id = int(payload["id"])
     print(f"\nWatching uuid={obs_uuid} id={observation_id}")
 
     if not assume_deleted:
@@ -536,7 +542,16 @@ def scenario_summarise(records: list[Probe]) -> int:
     print(f"\n{len(records)} probe records\n")
 
     look = [r for r in records if r.scenario == "lookalike"]
-    watch = [r for r in records if r.scenario == "watch"]
+    watch_all = [r for r in records if r.scenario == "watch"]
+    # A log file can accumulate several `watch` invocations (each a separate
+    # process, each with its own run_id) against different observations. Mix
+    # their elapsed-time samples together and the stability/timing analysis
+    # below becomes meaningless — so only the most recent watch run is used
+    # for that. Look-alike signatures are structural (status/outcome only,
+    # not tied to a particular observation or run), so they are intentionally
+    # left aggregated across all runs.
+    watch_run_id = max((r.run_id for r in watch_all), default=None)
+    watch = [r for r in watch_all if r.run_id == watch_run_id]
 
     print("=" * 72)
     print("DISTINGUISHABILITY  (can a verifier ever say 'deleted'?)")
@@ -595,11 +610,15 @@ def scenario_summarise(records: list[Probe]) -> int:
                 if all(_signature(p) == final for p in auth[index:]):
                     stable_from = probe.elapsed_s
                     break
-            if stable_from is not None and stable_from > 0:
+            # elapsed_s is a wall-clock float, so treat anything within a
+            # small tolerance of zero as zero rather than requiring an exact
+            # match — the schedule's first sample is rarely at t=0.000 sharp.
+            STABLE_TOLERANCE_S = 0.05
+            if stable_from is not None and stable_from > STABLE_TOLERANCE_S:
                 print(f"\n  *** The signature only became stable at t={stable_from:.0f}s.")
                 print("      A verifier reading earlier than that can see a stale")
                 print("      positive and wrongly report 'present'. Build in the delay. ***")
-            elif stable_from == 0:
+            elif stable_from is not None:
                 print("\n  Stable from t=0: no post-return visibility lag observed.")
 
     print("\n" + "=" * 72)

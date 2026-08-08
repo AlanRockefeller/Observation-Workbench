@@ -99,10 +99,20 @@ class LostResponseMO(MOClient):
 
 def run(args: argparse.Namespace) -> int:
     inat_jwt = os.environ.get("INAT_JWT", "") or getpass.getpass("iNaturalist JWT (hidden): ")
-    mo_key = os.environ.get("MO_API_KEY", "") or getpass.getpass("Mushroom Observer API key (hidden): ")
-    if not inat_jwt.strip() or not mo_key.strip():
-        print("Both INAT_JWT and MO_API_KEY are required.", file=sys.stderr)
+    if not inat_jwt.strip():
+        print("INAT_JWT is required.", file=sys.stderr)
         return 2
+
+    # MO_API_KEY is only needed pre-`--run` when MO is the source (its owner
+    # verification requires it); once `--run` is set it is always needed, for
+    # both directions, to actually execute the saga. A dry run with iNat as
+    # the source can print the plan without ever prompting for it.
+    mo_key = ""
+    if args.source_site == "mo" or args.run:
+        mo_key = os.environ.get("MO_API_KEY", "") or getpass.getpass("Mushroom Observer API key (hidden): ")
+        if not mo_key.strip():
+            print("MO_API_KEY is required.", file=sys.stderr)
+            return 2
 
     inat_client_cls = LostResponseINat if args.simulate_lost_response and args.source_site == "mo" else INatClient
     mo_client_cls = LostResponseMO if args.simulate_lost_response and args.source_site == "inat" else MOClient
@@ -192,12 +202,45 @@ def run(args: argparse.Namespace) -> int:
 
     if args.db_path:
         db_path = args.db_path
+        db_owned = False
     else:
         fd, tmp_name = tempfile.mkstemp(suffix=".gate2a-saga.sqlite3")
         os.close(fd)
         db_path = Path(tmp_name)
+        db_owned = True
     print(f"Using throwaway database: {db_path}")
     db = ReconciliationDB(str(db_path))
+    try:
+        return _run_saga_with_db(
+            args, db, inat_client, mo_client, inat_jwt, mo_key,
+            inat_user_id, inat_login, mo_user_id, mo_login, inventory, cancelled,
+        )
+    finally:
+        db.close_thread_connection()
+        # Never unlink an operator-supplied --db-path, regardless of --keep-db.
+        if db_owned and not args.keep_db:
+            try:
+                db_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        elif db_owned:
+            print(f"\n--keep-db: throwaway database left at {db_path}")
+
+
+def _run_saga_with_db(
+    args: argparse.Namespace,
+    db: ReconciliationDB,
+    inat_client: INatClient,
+    mo_client: MOClient,
+    inat_jwt: str,
+    mo_key: str,
+    inat_user_id: int,
+    inat_login: str,
+    mo_user_id: int,
+    mo_login: str,
+    inventory,
+    cancelled,
+) -> int:
     profile = db.save_profile(inat_user_id, inat_login, mo_user_id, mo_login)
     print(f"Profile {profile.profile_id} ready.")
 
@@ -362,14 +405,6 @@ def run(args: argparse.Namespace) -> int:
                 print(f"  DELETE MO observation {destination_id} FAILED: {exc}. Delete manually.")
     elif destination_id:
         print(f"\n--no-cleanup: destination observation {destination_id} on {destination_site} left in place.")
-
-    if not args.keep_db:
-        try:
-            db_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-    else:
-        print(f"\n--keep-db: throwaway database left at {db_path}")
 
     return 0 if all_succeeded else 1
 

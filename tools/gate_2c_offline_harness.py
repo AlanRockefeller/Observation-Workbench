@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 import os
 from pathlib import Path
+import sqlite3
 import sys
 import threading
 
@@ -145,12 +146,14 @@ class FakeDispatch(DeleteDispatch):
         key = (site, int(observation_id))
         if key in self.ambiguous_verify_for:
             return "ambiguous"
-        if key in self.present_verify_for:
-            verdict = "present"
-        else:
-            verdict = "deleted" if not self.records[key].exists else "present"
-        if self.after_verify:
-            self.after_verify(key, verdict)
+        with self._lock:
+            if key in self.present_verify_for:
+                verdict = "present"
+            else:
+                verdict = "deleted" if not self.records[key].exists else "present"
+            hook = self.after_verify
+        if hook:
+            hook(key, verdict)
         return verdict
 
 
@@ -309,7 +312,7 @@ def hardening_regressions() -> None:
                 "WHERE profile_id=? AND consolidation_id=?",
                 (int(current) + 9999, PROFILE_ID, scenario.consolidation_id),
             )
-        except Exception:
+        except sqlite3.IntegrityError:
             baseline_blocked = True
         assert baseline_blocked, "baseline advanced during deletion attempt"
         assert scenario.env.db.get_consolidation(
@@ -400,8 +403,12 @@ def readiness_and_confirmation_scenarios(app: QApplication) -> None:
             no_dialog = DonorDeletionPreviewDialog(preview)
             no_dialog._checks[member_id].setChecked(True)
 
-            def answer_no(*args):
-                defaults.append(args[4])
+            def answer_no(*args, **kwargs):
+                assert len(args) + len(kwargs) >= 5, (
+                    f"unexpected QMessageBox.question call: args={args} kwargs={kwargs}"
+                )
+                default_button = kwargs.get("defaultButton", args[4] if len(args) > 4 else None)
+                defaults.append(default_button)
                 return reconciliation_ui.QMessageBox.StandardButton.No
 
             reconciliation_ui.QMessageBox.question = answer_no
@@ -491,17 +498,20 @@ def blocked_readiness_scenarios() -> None:
         scenario.dispatch.records[key] = replace(
             scenario.dispatch.records[key], dependencies=(), owner_id=999,
         )
+        preview_before_drift = scenario.preview()
         assert "Blocked: donor no longer owned" in next(
-            item for item in scenario.preview().donors
+            item for item in preview_before_drift.donors
             if item.site is RemoteSite.MO
         ).blocking_reasons
+        baseline_fingerprint = preview_before_drift.canonical_mutable_snapshot_fingerprint
         scenario.dispatch.records[(RemoteSite.MO, 10)] = replace(
             scenario.dispatch.records[(RemoteSite.MO, 10)],
             record_fingerprint="canonical-drift",
         )
         drifted = scenario.preview()
         assert drifted.canonical_mutable_snapshot_fingerprint
-        print("sequence capability / third-party / dependency / ownership / drift: PASS")
+        assert drifted.canonical_mutable_snapshot_fingerprint != baseline_fingerprint
+        print("dependency / ownership / drift: PASS")
     finally:
         scenario.close()
 
@@ -980,6 +990,14 @@ def migration_invariants() -> None:
 
 
 def main() -> int:
+    if not __debug__:
+        print(
+            "This harness verifies every scenario with `assert`; it was started with "
+            "Python optimizations enabled (-O / PYTHONOPTIMIZE), which strips asserts "
+            "and would make every check silently pass. Re-run without -O.",
+            file=sys.stderr,
+        )
+        return 2
     app = QApplication.instance() or QApplication([])
     parity_scenarios()
     hardening_regressions()

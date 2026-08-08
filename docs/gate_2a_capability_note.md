@@ -89,8 +89,7 @@ passing.
    between, nothing is downgraded: the item's real ambiguous/in-flight state
    is preserved and reported instead of a fabricated cancellation failure.
 4. **Finalization didn't verify `sync_created_observations.pair_id` matches
-   the supplied pair (confirmed defect, fixed)**. `settle_pair_finalize_
-   success()` in `db.py` already verified the action's group/type/state,
+   the supplied pair (confirmed defect, fixed)**. `settle_pair_finalize_success()` in `db.py` already verified the action's group/type/state,
    the action's own pair/mo/inat ids, creation-attempt ownership, and the
    stable-identity source/destination ids — but never selected or checked
    `sync_created_observations.pair_id` itself, a column that exists
@@ -124,8 +123,7 @@ fixed below; the rest were verified already handled safely and are noted as
 such, not re-fixed. Proven by three new disposable, offline (no network,
 no live writes) smoke harnesses: `tools/gate_2a_review_fixes_harness.py`
 (22 checks), `tools/gate_2a_duplicate_search_harness.py` (12 checks),
-`tools/gate_2a_thumbnail_ui_harness.py` (9 offscreen Qt checks, `QT_QPA_
-PLATFORM=offscreen`) — 43/43 passing.
+`tools/gate_2a_thumbnail_ui_harness.py` (9 offscreen Qt checks, `QT_QPA_PLATFORM=offscreen`) — 43/43 passing.
 
 1. **Duplicate discovery is now account-complete, not date/taxon-filtered
    (confirmed defect, fixed)**. `_live_search_inat_destination` previously
@@ -158,8 +156,7 @@ PLATFORM=offscreen`) — 43/43 passing.
 2. **An existing ambiguous/succeeded photo action can no longer be
    rewritten as failed by a pair-drift preflight check (confirmed
    defect, fixed)**. `_execute_population_items`'s "pair could not be
-   re-verified" loop picked the first item whose LOCAL `sync_creation_
-   items.state` was not `succeeded`/`failed` and unconditionally routed it
+   re-verified" loop picked the first item whose LOCAL `sync_creation_items.state` was not `succeeded`/`failed` and unconditionally routed it
    through `_fail_item_durably`, which called `finish_action(...,
    "failed")` on whatever action id was already linked — but that local
    state column stays `'pending'` while the item's actual linked action is
@@ -175,8 +172,7 @@ PLATFORM=offscreen`) — 43/43 passing.
    a `pending` action with no `write_started_at`) — cases where no remote
    write could possibly have started — is safe for the existing durable
    pre-mint failure path to close out. `mint_creation_photo_item_action`'s
-   own existing-transfer-row block (round-3 finding) and `mint_creation_
-   item_action`'s existing-action short-circuit were already correct; the
+   own existing-transfer-row block (round-3 finding) and `mint_creation_item_action`'s existing-action short-circuit were already correct; the
    defect was entirely in the CALLER not checking action state before
    invoking the failure helper.
    - Durable pre-mint failures continue to reuse `inat_photo_attach`/

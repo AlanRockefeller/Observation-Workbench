@@ -55,10 +55,14 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     print(f"[{PASS if condition else FAIL}] {name}" + (f" — {detail}" if detail and not condition else ""))
 
 
+_temp_db_paths: list[Path] = []
+
+
 def _fresh_db() -> tuple[ReconciliationDB, Path]:
     fd, tmp_name = tempfile.mkstemp(suffix=".gate2a-review.sqlite3")
     os.close(fd)
     path = Path(tmp_name)
+    _temp_db_paths.append(path)
     return ReconciliationDB(str(path)), path
 
 
@@ -627,13 +631,17 @@ def test_finalize_pair_id_provenance_mismatch() -> None:
 
 
 def main() -> int:
-    test_finalize_success()
-    test_finalize_negatives()
-    test_ambiguous_action_preservation()
-    test_preflight_atomicity_positive_cases()
-    test_preflight_atomicity_race_never_downgrades()
-    test_population_loop_cancellation_before_download()
-    test_finalize_pair_id_provenance_mismatch()
+    try:
+        test_finalize_success()
+        test_finalize_negatives()
+        test_ambiguous_action_preservation()
+        test_preflight_atomicity_positive_cases()
+        test_preflight_atomicity_race_never_downgrades()
+        test_population_loop_cancellation_before_download()
+        test_finalize_pair_id_provenance_mismatch()
+    finally:
+        for path in _temp_db_paths:
+            path.unlink(missing_ok=True)
     failed = [r for r in _results if r[1] == FAIL]
     print(f"\n{len(_results) - len(failed)}/{len(_results)} checks passed.")
     if failed:

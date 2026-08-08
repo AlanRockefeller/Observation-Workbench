@@ -73,7 +73,7 @@ MO_LICENSE_NAMES = {
     7: "Creative Commons Attribution Non-commercial NoDerivs v.4.0",
     8: "Creative Commons Attribution Non-commercial ShareAlike v4.0",
 }
-MO_LICENSE_CC_BY_NC_3 = 2
+MO_LICENSE_CC_BY_NC_SA_3 = 2
 
 PHOTO_FIELDS = "(id:!t,uuid:!t,license_code:!t,attribution:!t,attribution_name:!t,original_filename:!t)"
 OBS_PHOTO_FIELDS = f"(id:!t,uuid:!t,position:!t,photo:{PHOTO_FIELDS})"
@@ -853,7 +853,7 @@ def run_mo_write_checks(
     copyright_holder: str,
     ledger: Ledger,
     *,
-    license_id: int = MO_LICENSE_CC_BY_NC_3,
+    license_id: int = MO_LICENSE_CC_BY_NC_SA_3,
 ) -> list[Result]:
     results: list[Result] = []
 
@@ -862,8 +862,20 @@ def run_mo_write_checks(
         _print_result(res)
         return res
 
-    before = {row.get("id") for row in _mo_results(mo.images_for_observation(observation_id)[1])}
-    digest = hashlib.md5(image.read_bytes()).hexdigest()
+    digest = hashlib.md5(image.read_bytes(), usedforsecurity=False).hexdigest()  # noqa: S324 — MO's md5sum contract requires MD5, not a security use
+
+    try:
+        before = {row.get("id") for row in _mo_results(mo.images_for_observation(observation_id)[1])}
+    except Ambiguous as exc:
+        record(
+            Result(
+                "mo.create_attach",
+                "POST /api2/images creates AND attaches in one operation",
+                UNKNOWN,
+                f"{exc} — could not enumerate before create, aborting to avoid an unsafe write",
+            )
+        )
+        return results
 
     try:
         status, payload = mo.create_image(
@@ -888,7 +900,25 @@ def run_mo_write_checks(
     returned_id = _int_or_none(rows[0].get("id")) if rows else None
     error_text = _mo_error_text(payload)
 
-    after_rows = _mo_results(mo.images_for_observation(observation_id)[1])
+    # Record whatever id the create response carried immediately, before doing
+    # anything that can raise — otherwise a created-but-unenumerated image
+    # would be untracked and could not be cleaned up.
+    if returned_id:
+        ledger.mo_image_ids.append(returned_id)
+
+    try:
+        after_rows = _mo_results(mo.images_for_observation(observation_id)[1])
+    except Ambiguous as exc:
+        record(
+            Result(
+                "mo.create_attach",
+                "POST /api2/images creates AND attaches in one operation",
+                UNKNOWN,
+                f"HTTP {status}; create response carried image id={returned_id}; "
+                f"{exc} — could not enumerate after create to confirm attachment",
+            )
+        )
+        return results
     after = {row.get("id") for row in after_rows}
     landed = after - before
 
@@ -897,7 +927,9 @@ def run_mo_write_checks(
     # otherwise the image cannot be cleaned up.
     landed_ids = sorted(v for v in (_int_or_none(x) for x in landed) if v is not None)
     new_id = returned_id or (landed_ids[0] if landed_ids else None)
-    if new_id:
+    # returned_id was already recorded above, right after creation; only the
+    # diff-recovered fallback id needs adding here.
+    if new_id and new_id != returned_id:
         ledger.mo_image_ids.append(new_id)
     record(
         Result(
@@ -1301,6 +1333,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                     print(
                         "  [SKIP] mo.create_attach — --copyright-holder is required for MO writes",
                         file=sys.stderr,
+                    )
+                    results.append(
+                        Result(
+                            "mo.create_attach",
+                            "MO create/attach write proof",
+                            status=SKIP,
+                            detail="--copyright-holder is required for MO writes",
+                            blocking=False,
+                        )
                     )
                 else:
                     results += run_mo_write_checks(mo, args.mo_obs_id, args.image, holder, ledger)

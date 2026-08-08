@@ -34,7 +34,7 @@ see §12).
 
 | Direction | Upload possible | Attach possible | License-preservable | Verdict |
 |---|---|---|---|---|
-| **MO photo → iNat observation** | yes (POST /photos) | yes (POST /observation_photos) | n/a — account default accepted (§13.4) | **first direction**, gated only on the §12 attach proofs |
+| **MO photo → iNat observation** | yes (POST /photos) | yes (POST /observation_photos) | n/a — account default accepted (§13.4) | **CLEARED** — backend built (§16) |
 | **iNat photo → MO observation** | yes (POST /api2/images, live-proven) | yes — attach-at-create via `observations`, one atomic op | yes — license + copyright_holder round-trip exactly | proven (§12.2), **not implemented** |
 
 Both directions were live-proven on 2026-07-23 (§12). The two constraints
@@ -236,7 +236,7 @@ must be a reviewed constant, not inferred at runtime.
 | Class | iNat | MO |
 |---|---|---|
 | Cleanly recoverable | attach fails, photo id known → journaled, resumable (two-call path) | create fails → nothing created, retryable |
-| **Irrecoverable via API** | **orphaned bare photo** (no `DELETE /photos/{id}`) | mis-created image if `DELETE /api2/images` absent [NEEDS PROOF] |
+| **Irrecoverable via API** | **orphaned bare photo** (no `DELETE /photos/{id}`) | mis-created image if `DELETE /api2/images` absent [VERIFIED live, §12.2] |
 | Ambiguous | timeout around either call → `outcome_unknown`, re-read before retry | timeout around create → enumerate before retry |
 
 The irrecoverable iNat orphan is the single most important design driver: it is
@@ -250,7 +250,7 @@ Mirrors the gate's step list, retained only if we ever need per-step upload IDs:
 1. Refresh source + destination photo state (fresh reads).
 2. Download selected source bytes (memory / short-lived temp only).
 3. `POST /photos` with client `uuid` → record returned numeric photo id.
-4. (If preserving license) `PUT /photos/{id}` license_code [NEEDS PROOF].
+4. (If preserving license) `PUT /photos/{id}` license_code [VERIFIED live, §12.1b; unused — see decision §13.4].
 5. `POST /observation_photos` (photo_id + obs uuid).
 6. Verify by destination re-read (uuid / id + fingerprint).
 7. On attach failure: **cannot delete** the orphan → mark and surface (no silent
@@ -437,8 +437,8 @@ reported "HTTP 200" for a create that had entirely failed.
 
 | id | MO name | Expected | `photo_license.py` gives |
 |---|---|---|---|
-| 1 | Creative Commons Non-commercial v2.5 | `cc-by-nc` | **`None`, ineligible** |
-| 2 | Creative Commons Non-commercial v3.0 | `cc-by-nc` | **`None`, ineligible** |
+| 1 | Creative Commons Non-commercial v2.5 | `cc-by-nc-sa` | **`None`, ineligible** |
+| 2 | Creative Commons Non-commercial v3.0 | `cc-by-nc-sa` | **`None`, ineligible** |
 | 3 | Creative Commons Wikipedia Compatible v3.0 | `cc-by-sa` | **`None`, ineligible** |
 | 4–8 | (the rest) | — | correct |
 
@@ -519,9 +519,13 @@ provides the reliable server-side dedup signal without a new credential.
    License preservation on the iNat side still depends on the `PUT /photos/{id}`
    live proof (§12); until that passes, MO→iNat can only *attach* (photo lands
    with the account default license) — the preview must disclose this.
+   **Update:** the `PUT /photos/{id}` proof has since passed (§12.1b), and the
+   coordinator/UI write paths are now wired end-to-end (§16).
 3. **Live proof** (§12): user will run it later against disposable owned records.
    Until then, **no network write code is wired**; only deterministic, proof-
    independent foundation is built (license map §5, byte fingerprint §6).
+   **Update:** the live proof has since run in full and passed (§12), and the
+   coordinator/UI write paths are now wired end-to-end (§16).
 4. **Destination license**: the iNaturalist **account default license is
    acceptable** for transferred photos. `POST /photos` takes no license
    parameter (§2.4), and we will not require a follow-up `PUT /photos/{id}`.
