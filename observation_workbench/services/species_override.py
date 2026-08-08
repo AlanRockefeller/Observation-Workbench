@@ -1,4 +1,5 @@
 """Helpers for updating species-name observation field values."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -333,7 +334,9 @@ def update_species_overrides(
                 f"({plan.target_field_name} already matches)."
             )
             if progress:
-                progress(index, total, result.changed, result.skipped, result.failed, message)
+                progress(
+                    index, total, result.changed, result.skipped, result.failed, message
+                )
             continue
 
         try:
@@ -383,7 +386,9 @@ def update_species_overrides(
             result.errors.append(message)
 
         if progress:
-            progress(index, total, result.changed, result.skipped, result.failed, message)
+            progress(
+                index, total, result.changed, result.skipped, result.failed, message
+            )
 
     return result
 
@@ -506,10 +511,7 @@ def _extract_field_value(
             continue
         obs_field = item.get("observation_field") or item.get("field") or {}
         item_field_name = (
-            item.get("name")
-            or item.get("field_name")
-            or obs_field.get("name")
-            or ""
+            item.get("name") or item.get("field_name") or obs_field.get("name") or ""
         )
         if item_field_name.casefold() != wanted_field:
             continue

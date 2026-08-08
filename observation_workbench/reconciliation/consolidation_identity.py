@@ -1,4 +1,5 @@
 """Stable identity and mutable-snapshot fingerprints for Phase 2B."""
+
 from __future__ import annotations
 
 from .normalization import public_fingerprint

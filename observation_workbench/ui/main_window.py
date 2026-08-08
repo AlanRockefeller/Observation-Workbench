@@ -16,6 +16,7 @@ Keyboard shortcuts use QShortcut with WindowShortcut context,
 plus an application-level event filter to intercept navigation
 keys even when autocomplete or list widgets have focus.
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,23 +27,50 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from PySide6.QtCore import (
-    QObject, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot, QEvent,
+    QObject,
+    QRunnable,
+    QThreadPool,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
+    QEvent,
 )
 from PySide6.QtGui import (
-    QAction, QFont, QFontMetrics, QKeySequence, QPixmap, QScreen,
+    QAction,
+    QFont,
+    QFontMetrics,
+    QKeySequence,
+    QPixmap,
+    QScreen,
 )
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QProgressBar, QPushButton, QSizePolicy, QSplitter,
-    QStatusBar, QVBoxLayout, QWidget,
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.api.auth import AuthService, AuthState, normalise_token
 from observation_workbench.api.client import INatAPIError
 from observation_workbench.api.client import INatClient
 from observation_workbench.api.parsers import parse_observation
-from observation_workbench.api.observation_url import ObservationURLParseError, parse_observations_url
+from observation_workbench.api.observation_url import (
+    ObservationURLParseError,
+    parse_observations_url,
+)
 from observation_workbench.models import StudyObservation
 from observation_workbench.services.bulk_identification import (
     BulkAgreeCandidate,
@@ -107,15 +135,16 @@ from observation_workbench.ui.viewer_panel import ViewerPanel
 
 log = logging.getLogger(__name__)
 
-FIRST_PAGE_SIZE = 30    # small first batch → results appear quickly
+FIRST_PAGE_SIZE = 30  # small first batch → results appear quickly
 SUBSEQUENT_PAGE_SIZE = 100  # larger for "load more" batches
-AUTO_LOAD_MARGIN = 15   # auto-fetch next page when within this many obs of the end
+AUTO_LOAD_MARGIN = 15  # auto-fetch next page when within this many obs of the end
 ARROW_REPEAT_INITIAL_DELAY_SECONDS = 0.5
 
 
 # ---------------------------------------------------------------------------
 # Background loader worker
 # ---------------------------------------------------------------------------
+
 
 class _LoadSignals(QObject):
     page_loaded = Signal(list, int)  # (observations, total_results)
@@ -161,7 +190,9 @@ class _ConfirmedRefreshRequest:
 class _ConfirmedRefreshWorker(QRunnable):
     """One v1 detail GET after a durable action is confirmed."""
 
-    def __init__(self, client: INatClient, request: _ConfirmedRefreshRequest, token: str) -> None:
+    def __init__(
+        self, client: INatClient, request: _ConfirmedRefreshRequest, token: str
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self._client = client
@@ -172,7 +203,9 @@ class _ConfirmedRefreshWorker(QRunnable):
     def run(self) -> None:
         try:
             self.signals.loaded.emit(
-                self._client.get_observation_by_id(self._request.observation_id, self._token)
+                self._client.get_observation_by_id(
+                    self._request.observation_id, self._token
+                )
             )
         except Exception as exc:
             self.signals.failed.emit(exc)
@@ -252,7 +285,9 @@ class _BulkPlanWorker(QRunnable):
                 self.login,
                 api_token=self.api_token,
                 max_observations=self.options.get("max_observations"),
-                require_dna_barcode_its=self.options.get("require_dna_barcode_its", True),
+                require_dna_barcode_its=self.options.get(
+                    "require_dna_barcode_its", True
+                ),
                 only_if_needed=self.options.get("only_if_needed", True),
                 # The URL results are re-scanned on every run, so a cached page
                 # could hide a provisional ID added since the last load.
@@ -306,7 +341,9 @@ class _BulkPostWorker(QRunnable):
             if fresh is None:
                 self.signals.finished.emit(
                     self.candidate,
-                    AgreeResult("skipped", "Could not refresh observation before posting."),
+                    AgreeResult(
+                        "skipped", "Could not refresh observation before posting."
+                    ),
                 )
                 return
             ident = most_recent_non_self_current_identification(
@@ -353,7 +390,9 @@ class _BulkPostWorker(QRunnable):
                     ),
                 )
                 return
-            if self.only_if_needed and observation_finished_at_target(fresh, target.taxon_id):
+            if self.only_if_needed and observation_finished_at_target(
+                fresh, target.taxon_id
+            ):
                 self.signals.finished.emit(
                     self.candidate,
                     AgreeResult(
@@ -389,7 +428,9 @@ class _BulkPostWorker(QRunnable):
                     ),
                 )
                 return
-            result = post_agreement(self.client, self.token, self.login, fresh, target, self.body)
+            result = post_agreement(
+                self.client, self.token, self.login, fresh, target, self.body
+            )
             self.signals.finished.emit(self.candidate, result)
         except Exception as exc:
             self.signals.error.emit(self.candidate, _format_api_error(exc))
@@ -678,7 +719,9 @@ class _SpeciesOverridePlanWorker(QRunnable):
                     target_field_name=self.target_field_name,
                     genus_filter=self.genus_filter,
                     is_cancelled=lambda: self.get_gen() != self.generation,
-                    progress=lambda seen, total: self.signals.progress.emit(seen, total),
+                    progress=lambda seen, total: self.signals.progress.emit(
+                        seen, total
+                    ),
                 )
             else:
                 plan = plan_species_override_update(
@@ -688,7 +731,9 @@ class _SpeciesOverridePlanWorker(QRunnable):
                     target_field_name=self.target_field_name,
                     genus_filter=self.genus_filter,
                     is_cancelled=lambda: self.get_gen() != self.generation,
-                    progress=lambda seen, total: self.signals.progress.emit(seen, total),
+                    progress=lambda seen, total: self.signals.progress.emit(
+                        seen, total
+                    ),
                 )
             if self.get_gen() == self.generation:
                 self.signals.planned.emit(plan)
@@ -786,6 +831,7 @@ class _ObservationRefreshWorker(QRunnable):
 
 class _RateLimitSignals(QObject):
     """Emits cross-thread status messages when the API client is rate-limited."""
+
     status = Signal(str)
 
 
@@ -831,6 +877,7 @@ class _LoadWorker(QRunnable):
 # Navigation key interceptor (application event filter)
 # ---------------------------------------------------------------------------
 
+
 def _has_command_modifier(modifiers) -> bool:
     """True when Ctrl, Alt or Meta is held (Shift alone does not count)."""
     try:
@@ -852,16 +899,32 @@ class _NavFilter(QObject):
     Passes them to the main window's handle_nav_key() method.
     Does NOT intercept when focus is in a text-entry widget.
     """
-    INPUT_TYPES = ("QLineEdit", "QTextEdit", "QPlainTextEdit", "QSpinBox",
-                   "QDoubleSpinBox", "QDateEdit", "QTimeEdit", "QDateTimeEdit")
+
+    INPUT_TYPES = (
+        "QLineEdit",
+        "QTextEdit",
+        "QPlainTextEdit",
+        "QSpinBox",
+        "QDoubleSpinBox",
+        "QDateEdit",
+        "QTimeEdit",
+        "QDateTimeEdit",
+    )
 
     NAV_KEYS = {
-        Qt.Key.Key_Left, Qt.Key.Key_Right,
-        Qt.Key.Key_Up, Qt.Key.Key_Down,
+        Qt.Key.Key_Left,
+        Qt.Key.Key_Right,
+        Qt.Key.Key_Up,
+        Qt.Key.Key_Down,
         Qt.Key.Key_Space,
-        Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight,
-        Qt.Key.Key_G, Qt.Key.Key_O, Qt.Key.Key_I,
-        Qt.Key.Key_L, Qt.Key.Key_R, Qt.Key.Key_F,
+        Qt.Key.Key_BracketLeft,
+        Qt.Key.Key_BracketRight,
+        Qt.Key.Key_G,
+        Qt.Key.Key_O,
+        Qt.Key.Key_I,
+        Qt.Key.Key_L,
+        Qt.Key.Key_R,
+        Qt.Key.Key_F,
         Qt.Key.Key_A,
     }
 
@@ -884,6 +947,7 @@ class _NavFilter(QObject):
         if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return False
         from PySide6.QtGui import QKeyEvent
+
         ke: QKeyEvent = event  # type: ignore[assignment]
         key = ke.key()
         if key not in self.NAV_KEYS:
@@ -1018,6 +1082,7 @@ class _ElidedStatusLabel(QLabel):
 # ---------------------------------------------------------------------------
 # Main Window
 # ---------------------------------------------------------------------------
+
 
 class MainWindow(QMainWindow):
     def __init__(self, *, skip_agree_confirmation: bool = False) -> None:
@@ -1195,8 +1260,12 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._wire_rate_limit_feedback()
         self._build_menu()
-        self._identify_actions.summary_changed.connect(self._identify_actions_summary_changed)
-        self._identify_actions.running_changed.connect(self._identify_actions_running_changed)
+        self._identify_actions.summary_changed.connect(
+            self._identify_actions_summary_changed
+        )
+        self._identify_actions.running_changed.connect(
+            self._identify_actions_running_changed
+        )
         self._identify_actions.paused.connect(self._identify_actions_paused)
         self._identify_actions.action_changed.connect(self._identify_actions_changed)
         self._identify_actions.authentication_context_changed.connect(
@@ -1301,7 +1370,7 @@ class MainWindow(QMainWindow):
     def _init_image_cache(self) -> ImageCache:
         cache_dir = self._settings.cache_dir / "images"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        max_bytes = int(self._settings.cache_max_gb * 1024 ** 3)
+        max_bytes = int(self._settings.cache_max_gb * 1024**3)
         return ImageCache(cache_dir, self._db, max_bytes)
 
     def _build_ui(self) -> None:
@@ -1315,11 +1384,15 @@ class MainWindow(QMainWindow):
         self._filter_bar = FilterBar(self._client)
         self._filter_bar.load_requested.connect(self._on_load_requested)
         self._filter_bar.cancel_requested.connect(self._cancel_load)
-        self._filter_bar.provisional_filter_changed.connect(self._on_provisional_filter_changed)
+        self._filter_bar.provisional_filter_changed.connect(
+            self._on_provisional_filter_changed
+        )
         self._filter_bar.navigation_repeat_rate_changed.connect(
             self._set_navigation_repeat_rate
         )
-        root.addWidget(self._filter_bar, 0)  # no vertical stretch — stays at sizeHint height
+        root.addWidget(
+            self._filter_bar, 0
+        )  # no vertical stretch — stays at sizeHint height
 
         # Main splitter: list | viewer | right panel
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1375,13 +1448,17 @@ class MainWindow(QMainWindow):
         self._status_bar.addPermanentWidget(self._progress)
         self._auth_label = QLabel("")
         self._status_bar.addPermanentWidget(self._auth_label)
-        self._identify_actions_status_label = QLabel("Identify actions: no pending work")
+        self._identify_actions_status_label = QLabel(
+            "Identify actions: no pending work"
+        )
         self._identify_actions_status_label.setToolTip(
             "Application-wide durable Identify action status"
         )
         self._status_bar.addPermanentWidget(self._identify_actions_status_label)
         self._api_call_label = QLabel("API calls: 0")
-        self._api_call_label.setToolTip("Total iNaturalist API requests made this session")
+        self._api_call_label.setToolTip(
+            "Total iNaturalist API requests made this session"
+        )
         self._status_bar.addPermanentWidget(self._api_call_label)
 
         # Load More button in status bar
@@ -1440,14 +1517,18 @@ class MainWindow(QMainWindow):
         self._act_pending_identify_actions.setToolTip(
             "Review durable local Identify actions; opening this never resumes them"
         )
-        self._act_pending_identify_actions.triggered.connect(self._open_pending_identify_actions)
+        self._act_pending_identify_actions.triggered.connect(
+            self._open_pending_identify_actions
+        )
         action_menu.addAction(self._act_pending_identify_actions)
         self._act_retry_identify_refresh = QAction("Retry safe Identify refresh", self)
         self._act_retry_identify_refresh.setToolTip(
             "Retry a failed read of a confirmed observation; this never resends its write"
         )
         self._act_retry_identify_refresh.setEnabled(False)
-        self._act_retry_identify_refresh.triggered.connect(self._retry_confirmed_refresh_warning)
+        self._act_retry_identify_refresh.triggered.connect(
+            self._retry_confirmed_refresh_warning
+        )
         action_menu.addAction(self._act_retry_identify_refresh)
         act_reconcile = QAction("Reconcile Mushroom Observer ↔ iNaturalist…", self)
         act_reconcile.setToolTip(
@@ -1476,12 +1557,16 @@ class MainWindow(QMainWindow):
         action_menu.addAction(act_bulk_provisional)
 
         act_bulk_disagree = QAction("Bulk disagree to taxon from URL…", self)
-        act_bulk_disagree.setToolTip("Preview and supervise coarser corrective identifications from an observations URL")
+        act_bulk_disagree.setToolTip(
+            "Preview and supervise coarser corrective identifications from an observations URL"
+        )
         act_bulk_disagree.triggered.connect(self._start_bulk_disagree_setup)
         action_menu.addAction(act_bulk_disagree)
 
         act_propose_name = QAction("Propose a name to observation numbers…", self)
-        act_propose_name.setToolTip("Propose an identification on a typed list of observation numbers")
+        act_propose_name.setToolTip(
+            "Propose an identification on a typed list of observation numbers"
+        )
         act_propose_name.triggered.connect(self._start_propose_name_setup)
         action_menu.addAction(act_propose_name)
 
@@ -1544,6 +1629,7 @@ class MainWindow(QMainWindow):
     def _open_identify_setup(self) -> None:
         """Open planning separately so this window remains the study browser."""
         from observation_workbench.ui.identify_setup_dialog import IdentifySetupDialog
+
         dialog = IdentifySetupDialog(
             self._settings,
             self._client,
@@ -1556,6 +1642,7 @@ class MainWindow(QMainWindow):
 
     def _open_identify_window(self, session) -> None:
         from observation_workbench.ui.identify_window import IdentifyWindow
+
         window = IdentifyWindow(
             session,
             self._settings,
@@ -1565,7 +1652,9 @@ class MainWindow(QMainWindow):
             action_manager=self._identify_actions,
         )
         self._identify_windows.add(window)
-        window.destroyed.connect(lambda *_args, w=window: self._identify_windows.discard(w))
+        window.destroyed.connect(
+            lambda *_args, w=window: self._identify_windows.discard(w)
+        )
         window.pending_actions_requested.connect(self._open_pending_identify_actions)
         if window.should_open_maximized:
             window.showMaximized()
@@ -1586,11 +1675,15 @@ class MainWindow(QMainWindow):
             self._pending_identify_actions_dialog = None
             dialog = None
         if dialog is None:
-            from observation_workbench.ui.identify_pending_actions import PendingIdentifyActionsDialog
+            from observation_workbench.ui.identify_pending_actions import (
+                PendingIdentifyActionsDialog,
+            )
 
             dialog = PendingIdentifyActionsDialog(self._identify_actions, self)
             dialog.destroyed.connect(
-                lambda _object=None, tracked=dialog: self._pending_identify_actions_destroyed(tracked)
+                lambda _object=None, tracked=dialog: self._pending_identify_actions_destroyed(
+                    tracked
+                )
             )
             self._pending_identify_actions_dialog = dialog
         dialog.show()
@@ -1615,7 +1708,12 @@ class MainWindow(QMainWindow):
             "failed_retryable": summary.failed_retryable,
             "failed_terminal": summary.failed_terminal,
         }
-        if not queue.eligible_for_current_account and not queue.queued_for_other_accounts and not any(relevant.values()) and not migrated:
+        if (
+            not queue.eligible_for_current_account
+            and not queue.queued_for_other_accounts
+            and not any(relevant.values())
+            and not migrated
+        ):
             return
         lines = [
             "Pending or attention-required local Identify actions were found. They are paused.",
@@ -1629,24 +1727,34 @@ class MainWindow(QMainWindow):
         if queue.queued_for_other_accounts:
             owners = ", ".join(queue.other_account_logins)
             suffix = f" ({owners})" if owners else ""
-            lines.append(f"Queued for other account(s){suffix}: {queue.queued_for_other_accounts}")
+            lines.append(
+                f"Queued for other account(s){suffix}: {queue.queued_for_other_accounts}"
+            )
         labels = {
             "submitted_unverified": "Submitted; awaiting verification",
             "ambiguous": "Ambiguous",
             "failed_retryable": "Retryable failures",
             "failed_terminal": "Terminal failures — correction required",
         }
-        lines.extend(f"{labels[key]}: {value}" for key, value in relevant.items() if value)
+        lines.extend(
+            f"{labels[key]}: {value}" for key, value in relevant.items() if value
+        )
         if migrated:
-            lines.append(f"Legacy manual retries migrated to linked queued actions: {migrated}")
+            lines.append(
+                f"Legacy manual retries migrated to linked queued actions: {migrated}"
+            )
         box = QMessageBox(
             QMessageBox.Icon.Warning,
             "Recover pending Identify actions",
             "\n".join(lines),
             parent=self,
         )
-        review = box.addButton("Review pending actions", QMessageBox.ButtonRole.ActionRole)
-        resume = box.addButton("Resume queued actions", QMessageBox.ButtonRole.AcceptRole)
+        review = box.addButton(
+            "Review pending actions", QMessageBox.ButtonRole.ActionRole
+        )
+        resume = box.addButton(
+            "Resume queued actions", QMessageBox.ButtonRole.AcceptRole
+        )
         leave = box.addButton("Leave paused", QMessageBox.ButtonRole.RejectRole)
         resume.setEnabled(bool(queue.eligible_for_current_account))
         box.setDefaultButton(leave)
@@ -1712,18 +1820,30 @@ class MainWindow(QMainWindow):
             if summary.failed_retryable:
                 details.append(f"{summary.failed_retryable} retryable")
             if summary.failed_terminal:
-                details.append(f"{summary.failed_terminal} terminal — correction required")
+                details.append(
+                    f"{summary.failed_terminal} terminal — correction required"
+                )
             status = "Identify actions: attention required · " + ", ".join(details)
         elif self._identify_actions.is_running:
             action_id = self._identify_actions.active_action_id
-            status = f"Identify actions: submitting #{action_id}" if action_id else "Identify actions: working"
+            status = (
+                f"Identify actions: submitting #{action_id}"
+                if action_id
+                else "Identify actions: working"
+            )
         elif pending_count:
             if self._identify_actions.is_paused:
                 details = []
                 if queue.eligible_for_current_account:
-                    details.append(f"{queue.eligible_for_current_account} queued for {queue.current_login}")
+                    details.append(
+                        f"{queue.eligible_for_current_account} queued for {queue.current_login}"
+                    )
                 if queue.queued_for_other_accounts:
-                    required = queue.other_account_logins[0] if queue.other_account_logins else "another account"
+                    required = (
+                        queue.other_account_logins[0]
+                        if queue.other_account_logins
+                        else "another account"
+                    )
                     details.append(
                         f"{queue.queued_for_other_accounts} queued · sign in as {required}"
                     )
@@ -1734,17 +1854,25 @@ class MainWindow(QMainWindow):
                 status = "Identify actions: authorized dispatch"
         elif self._identify_refresh_warnings:
             observation_id = next(iter(self._identify_refresh_warnings))
-            status = f"Identify actions: refresh warning for observation #{observation_id}"
+            status = (
+                f"Identify actions: refresh warning for observation #{observation_id}"
+            )
         else:
             status = "Identify actions: no pending work"
         self._identify_actions_status_label.setText(status)
         if hasattr(self, "_act_pending_identify_actions"):
             suffix = f" ({pending_count})" if pending_count else ""
-            self._act_pending_identify_actions.setText(f"Pending Identify actions…{suffix}")
+            self._act_pending_identify_actions.setText(
+                f"Pending Identify actions…{suffix}"
+            )
         if hasattr(self, "_act_retry_identify_refresh"):
-            self._act_retry_identify_refresh.setEnabled(bool(self._identify_refresh_warnings))
+            self._act_retry_identify_refresh.setEnabled(
+                bool(self._identify_refresh_warnings)
+            )
 
-    def _request_confirmed_observation_refresh(self, observation_id: int, observation_uuid: str) -> None:
+    def _request_confirmed_observation_refresh(
+        self, observation_id: int, observation_uuid: str
+    ) -> None:
         """Start or coalesce a safe detail GET after a confirmed action."""
         if self._closing:
             return
@@ -1760,14 +1888,18 @@ class MainWindow(QMainWindow):
             return
         self._start_confirmed_observation_refresh(request)
 
-    def _start_confirmed_observation_refresh(self, request: _ConfirmedRefreshRequest) -> None:
+    def _start_confirmed_observation_refresh(
+        self, request: _ConfirmedRefreshRequest
+    ) -> None:
         if (
             self._closing
             or request.auth_generation != self._identify_refresh_auth_generation
             or request.observation_id in self._identify_refresh_in_flight
         ):
             return
-        worker = _ConfirmedRefreshWorker(self._client, request, self._auth_state.api_token)
+        worker = _ConfirmedRefreshWorker(
+            self._client, request, self._auth_state.api_token
+        )
         signals = worker.signals
         self._identify_refresh_live_signals.add(signals)
         self._identify_refresh_in_flight[request.observation_id] = request
@@ -1788,7 +1920,9 @@ class MainWindow(QMainWindow):
         request: _ConfirmedRefreshRequest,
         raw: object,
     ) -> None:
-        current, trailing = self._complete_confirmed_observation_refresh(signals, request)
+        current, trailing = self._complete_confirmed_observation_refresh(
+            signals, request
+        )
         if (
             not current
             or self._closing
@@ -1799,9 +1933,18 @@ class MainWindow(QMainWindow):
         record = records[0] if isinstance(records, list) and records else raw
         observation = parse_observation(record) if isinstance(record, dict) else None
         if observation is None or observation.obs_id != request.observation_id:
-            self._record_confirmed_refresh_warning(request, "The detail response did not match the confirmed observation.")
-        elif request.observation_uuid and observation.uuid and observation.uuid != request.observation_uuid:
-            self._record_confirmed_refresh_warning(request, "The detail response UUID did not match the confirmed observation.")
+            self._record_confirmed_refresh_warning(
+                request, "The detail response did not match the confirmed observation."
+            )
+        elif (
+            request.observation_uuid
+            and observation.uuid
+            and observation.uuid != request.observation_uuid
+        ):
+            self._record_confirmed_refresh_warning(
+                request,
+                "The detail response UUID did not match the confirmed observation.",
+            )
         else:
             self._identify_refresh_warnings.pop(request.observation_id, None)
             # The original study window is updated only if it already contains this
@@ -1822,7 +1965,9 @@ class MainWindow(QMainWindow):
         request: _ConfirmedRefreshRequest,
         exc: object,
     ) -> None:
-        current, trailing = self._complete_confirmed_observation_refresh(signals, request)
+        current, trailing = self._complete_confirmed_observation_refresh(
+            signals, request
+        )
         if (
             not current
             or self._closing
@@ -1844,7 +1989,10 @@ class MainWindow(QMainWindow):
         if self._identify_refresh_in_flight.get(request.observation_id) != request:
             return False, None
         self._identify_refresh_in_flight.pop(request.observation_id, None)
-        if self._closing or request.auth_generation != self._identify_refresh_auth_generation:
+        if (
+            self._closing
+            or request.auth_generation != self._identify_refresh_auth_generation
+        ):
             return True, None
         pending = self._identify_refresh_pending.pop(request.observation_id, None)
         if pending is None or pending.auth_generation != request.auth_generation:
@@ -1901,7 +2049,7 @@ class MainWindow(QMainWindow):
         logging.getLogger().setLevel(level)
         # Also set the log handler level
         for h in logging.getLogger().handlers:
-            if hasattr(h, 'signals'):  # our QtLogHandler
+            if hasattr(h, "signals"):  # our QtLogHandler
                 h.setLevel(level)
         log.info("Log level set to %s", "DEBUG" if checked else "INFO")
 
@@ -1920,7 +2068,9 @@ class MainWindow(QMainWindow):
             return
         token = normalise_token(dlg.token)
         if not token:
-            QMessageBox.warning(self, "Authentication", "Paste an iNaturalist API token first.")
+            QMessageBox.warning(
+                self, "Authentication", "Paste an iNaturalist API token first."
+            )
             if on_failure is not None:
                 on_failure("No iNaturalist API token was provided.")
             return
@@ -2004,6 +2154,7 @@ class MainWindow(QMainWindow):
     def setup_log_panel(self, handler) -> None:
         """Called from main.py after creating the window to attach the log handler."""
         from observation_workbench.ui.log_panel import LogPanel
+
         self._log_panel = LogPanel(handler, parent=self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_panel)
         self._log_panel.hide()  # hidden by default; show via Debug menu or --debug flag
@@ -2046,9 +2197,7 @@ class MainWindow(QMainWindow):
         if app is None:
             return
         dialogs = [
-            w
-            for w in app.topLevelWidgets()
-            if isinstance(w, QDialog) and w.isVisible()
+            w for w in app.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible()
         ]
         if not dialogs:
             return
@@ -2096,7 +2245,9 @@ class MainWindow(QMainWindow):
         self.stop_arrow_navigation("new load requested")
         source_text = filters_dict.get("username", "").strip()
         if not source_text:
-            self._status_label.setText("Please enter an identifier username or observations URL.")
+            self._status_label.setText(
+                "Please enter an identifier username or observations URL."
+            )
             return
         try:
             observation_query = parse_observations_url(source_text)
@@ -2104,7 +2255,10 @@ class MainWindow(QMainWindow):
             self._status_label.setText(str(exc))
             QMessageBox.warning(self, "Unsupported URL", str(exc))
             return
-        if observation_query is not None and observation_query.source_kind == "identify":
+        if (
+            observation_query is not None
+            and observation_query.source_kind == "identify"
+        ):
             message = (
                 "iNaturalist /observations/identify URLs are account-specific. "
                 "Open this URL through the authenticated Identify workflow instead."
@@ -2142,7 +2296,9 @@ class MainWindow(QMainWindow):
         self._total_results = 0
         self._is_loading = True
         self._last_scroll_load_count = 0
-        self._provisional_name_only = bool(filters_dict.get("provisional_name_only", False))
+        self._provisional_name_only = bool(
+            filters_dict.get("provisional_name_only", False)
+        )
         self._detail_refreshed_obs_ids.clear()
         self._detail_refresh_in_flight.clear()
 
@@ -2162,13 +2318,21 @@ class MainWindow(QMainWindow):
                 filters_dict.get("taxon_id"),
             )
             self._status_label.setText(
-                "Loading first observations from URL" + (f"  [{ctx}]" if ctx else "") + "…"
+                "Loading first observations from URL"
+                + (f"  [{ctx}]" if ctx else "")
+                + "…"
             )
         else:
-            log.debug("Loading: user=%s place_id=%s taxon_id=%s",
-                     source_text, filters_dict.get("place_id"), filters_dict.get("taxon_id"))
+            log.debug(
+                "Loading: user=%s place_id=%s taxon_id=%s",
+                source_text,
+                filters_dict.get("place_id"),
+                filters_dict.get("taxon_id"),
+            )
             self._status_label.setText(
-                f"Loading first results: {source_text}" + (f"  [{ctx}]" if ctx else "") + "…"
+                f"Loading first results: {source_text}"
+                + (f"  [{ctx}]" if ctx else "")
+                + "…"
             )
 
         # Save filter state
@@ -2217,7 +2381,9 @@ class MainWindow(QMainWindow):
         # First page is small so results appear fast; subsequent pages are larger.
         self._fetch_page(filters, page=1, per_page=FIRST_PAGE_SIZE, generation=gen)
 
-    def _fetch_page(self, filters: LoadFilters, page: int, per_page: int, generation: int) -> None:
+    def _fetch_page(
+        self, filters: LoadFilters, page: int, per_page: int, generation: int
+    ) -> None:
         self._page_size = per_page
         self._rows_requested = max(self._rows_requested, page * per_page)
         worker = _LoadWorker(
@@ -2232,7 +2398,9 @@ class MainWindow(QMainWindow):
         # Keep signals alive until the callback fires (prevents Python GC bug)
         self._live_load_signals.add(sigs)
         sigs.page_loaded.connect(
-            lambda obs, total, s=sigs, g=generation: self._on_page_loaded(s, obs, total, g)
+            lambda obs, total, s=sigs, g=generation: self._on_page_loaded(
+                s, obs, total, g
+            )
         )
         sigs.error.connect(
             lambda msg, s=sigs, g=generation: self._on_load_error(s, msg, g)
@@ -2261,12 +2429,20 @@ class MainWindow(QMainWindow):
         return fresh
 
     def _on_page_loaded(
-        self, sigs: object, observations: List[StudyObservation], total: int, generation: int
+        self,
+        sigs: object,
+        observations: List[StudyObservation],
+        total: int,
+        generation: int,
     ) -> None:
         self._live_load_signals.discard(sigs)  # release GC hold
 
         if generation != self._generation:
-            log.debug("Discarding stale page result (gen %d vs %d)", generation, self._generation)
+            log.debug(
+                "Discarding stale page result (gen %d vs %d)",
+                generation,
+                self._generation,
+            )
             return
 
         self._total_results = total
@@ -2279,7 +2455,12 @@ class MainWindow(QMainWindow):
         observations = self._drop_already_loaded(observations)
 
         loaded_count = len(observations)
-        log.debug("Page loaded: %d observations (total=%d, page=%d)", loaded_count, total, self._current_page)
+        log.debug(
+            "Page loaded: %d observations (total=%d, page=%d)",
+            loaded_count,
+            total,
+            self._current_page,
+        )
 
         per_page = self._page_size
         has_more_api_pages = self._has_more_api_rows()
@@ -2291,11 +2472,15 @@ class MainWindow(QMainWindow):
             self._is_loading = True
             self._progress.setVisible(True)
             self._filter_bar.set_loading(True)
-            self._fetch_page(self._current_filters, self._current_page, per_page, generation)
+            self._fetch_page(
+                self._current_filters, self._current_page, per_page, generation
+            )
             return
 
         if loaded_count == 0 and self._loaded_observations:
-            self._status_label.setText("No more matching rows after client-side filters.")
+            self._status_label.setText(
+                "No more matching rows after client-side filters."
+            )
             self._current_page += 1
             self._load_more_btn.setVisible(False)
             return
@@ -2354,7 +2539,8 @@ class MainWindow(QMainWindow):
         visible = len(self._observations)
         taxon_name = (
             self._observations[self._current_obs_idx].display_taxon.display_name
-            if self._current_obs_idx >= 0 and self._observations else ""
+            if self._current_obs_idx >= 0 and self._observations
+            else ""
         )
         loaded = len(self._loaded_observations)
         # Client-side filters drop rows, so `loaded < total` stays true even
@@ -2399,7 +2585,9 @@ class MainWindow(QMainWindow):
         log.error("Load error: %s", msg)
         kind = (
             "observations"
-            if getattr(getattr(self, "_current_filters", None), "observation_query", None)
+            if getattr(
+                getattr(self, "_current_filters", None), "observation_query", None
+            )
             else "identifications"
         )
         QMessageBox.warning(self, "Load Error", f"Failed to load {kind}:\n\n{msg}")
@@ -2426,22 +2614,27 @@ class MainWindow(QMainWindow):
         ):
             self._load_next_page()
 
-    def _apply_observation_view_filter(self, preferred_obs_id: Optional[int] = None) -> None:
+    def _apply_observation_view_filter(
+        self, preferred_obs_id: Optional[int] = None
+    ) -> None:
         if self._provisional_name_only:
             self._observations = [
-                obs for obs in self._loaded_observations if _is_provisional_observation(obs)
+                obs
+                for obs in self._loaded_observations
+                if _is_provisional_observation(obs)
             ]
             workflow_obs = self._workflow_observation_to_pin()
-            if (
-                workflow_obs is not None
-                and all(obs.obs_id != workflow_obs.obs_id for obs in self._observations)
+            if workflow_obs is not None and all(
+                obs.obs_id != workflow_obs.obs_id for obs in self._observations
             ):
                 self._observations.append(workflow_obs)
         else:
             self._observations = list(self._loaded_observations)
 
         self._last_scroll_load_count = 0
-        self._prefetcher.set_observations(self._observations, radius=self._settings.prefetch_radius)
+        self._prefetcher.set_observations(
+            self._observations, radius=self._settings.prefetch_radius
+        )
         self._result_list.set_observations(self._observations)
 
         if not self._observations:
@@ -2487,7 +2680,8 @@ class MainWindow(QMainWindow):
         bulk_active = (
             getattr(self, "_bulk_dialog", None) is not None
             and not getattr(self, "_bulk_cancelled", False)
-            and getattr(self, "_bulk_index", 0) < len(getattr(self, "_bulk_candidates", []))
+            and getattr(self, "_bulk_index", 0)
+            < len(getattr(self, "_bulk_candidates", []))
         )
         disagree_active = (
             getattr(self, "_disagree_dialog", None) is not None
@@ -2522,14 +2716,17 @@ class MainWindow(QMainWindow):
             return
         if current_count == 0 or not self._has_more_api_rows():
             return
-        
+
         # Prevent chaining: only auto-load once per list-length boundary
         if current_count <= getattr(self, "_last_scroll_load_count", 0):
             return
-            
+
         self._last_scroll_load_count = current_count
-        log.debug("Auto-loading next page from scroll position (visible rows: %d, total: %d)",
-                  current_count, self._total_results)
+        log.debug(
+            "Auto-loading next page from scroll position (visible rows: %d, total: %d)",
+            current_count,
+            self._total_results,
+        )
         self._load_next_page()
 
     def _load_next_page(self) -> None:
@@ -2552,8 +2749,10 @@ class MainWindow(QMainWindow):
         self._load_more_btn.setVisible(False)
         self._filter_bar.set_loading(True)
         self._fetch_page(
-            self._current_filters, self._current_page,
-            per_page=SUBSEQUENT_PAGE_SIZE, generation=self._generation,
+            self._current_filters,
+            self._current_page,
+            per_page=SUBSEQUENT_PAGE_SIZE,
+            generation=self._generation,
         )
 
     def _cancel_load(self) -> None:
@@ -2644,7 +2843,9 @@ class MainWindow(QMainWindow):
                 (finished - prefetch_ready) * 1000.0,
             )
 
-    def _refresh_observation_details_if_needed(self, obs: StudyObservation, idx: int) -> None:
+    def _refresh_observation_details_if_needed(
+        self, obs: StudyObservation, idx: int
+    ) -> None:
         if self._is_active_workflow_observation(obs.obs_id):
             return
         if obs.obs_id in self._detail_refreshed_obs_ids:
@@ -2673,20 +2874,27 @@ class MainWindow(QMainWindow):
             lambda _row, _msg, obs_id=obs.obs_id, s=sigs: (
                 self._live_refresh_signals.discard(s),
                 self._detail_refresh_in_flight.discard(obs_id),
-                log.error("Observation detail refresh failed for obs=%s: %s", obs_id, _msg),
+                log.error(
+                    "Observation detail refresh failed for obs=%s: %s", obs_id, _msg
+                ),
             )
         )
         self._pool.start(worker)
 
     @Slot(int, object)
-    def _on_observation_details_refreshed(self, idx: int, obs: StudyObservation) -> None:
+    def _on_observation_details_refreshed(
+        self, idx: int, obs: StudyObservation
+    ) -> None:
         self._detail_refresh_in_flight.discard(obs.obs_id)
         if not (0 <= idx < len(self._observations)):
             return
         if self._observations[idx].obs_id != obs.obs_id:
             return
         self._detail_refreshed_obs_ids.add(obs.obs_id)
-        if self._observations[idx].target_identification and not obs.target_identification:
+        if (
+            self._observations[idx].target_identification
+            and not obs.target_identification
+        ):
             obs.target_identification = self._observations[idx].target_identification
         self._replace_observation(obs)
 
@@ -2876,8 +3084,12 @@ class MainWindow(QMainWindow):
         if n == 0:
             return
         idx, ok = QInputDialog.getInt(
-            self, "Go to result", f"Enter result number (1–{n}):",
-            self._current_obs_idx + 1, 1, n,
+            self,
+            "Go to result",
+            f"Enter result number (1–{n}):",
+            self._current_obs_idx + 1,
+            1,
+            n,
         )
         if ok:
             self._show_observation(idx - 1)
@@ -2919,9 +3131,7 @@ class MainWindow(QMainWindow):
         moved = self._step_arrow_navigation(key)
         if moved:
             self._navigation_repeat_steps += 1
-            self._navigation_repeat_deadline = (
-                now + ARROW_REPEAT_INITIAL_DELAY_SECONDS
-            )
+            self._navigation_repeat_deadline = now + ARROW_REPEAT_INITIAL_DELAY_SECONDS
             self._schedule_arrow_repeat()
         return True
 
@@ -2947,12 +3157,9 @@ class MainWindow(QMainWindow):
         """Cancel held-arrow navigation and finish deferred current-item work."""
         if self._active_arrow_key is None and not self._held_arrow_keys:
             return
-        if (
-            log.isEnabledFor(logging.DEBUG)
-            and (
-                self._navigation_repeat_steps > 1
-                or self._navigation_repeat_missed_beats > 0
-            )
+        if log.isEnabledFor(logging.DEBUG) and (
+            self._navigation_repeat_steps > 1
+            or self._navigation_repeat_missed_beats > 0
         ):
             elapsed = max(
                 0.0,
@@ -2991,10 +3198,7 @@ class MainWindow(QMainWindow):
         if key is None or key not in self._held_arrow_keys:
             return
         started = time.monotonic()
-        if (
-            self._navigation_repeat_steps == 1
-            and log.isEnabledFor(logging.DEBUG)
-        ):
+        if self._navigation_repeat_steps == 1 and log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "Arrow navigation repeat activated direction=%s "
                 "initial_delay=%.0fms rate=%.2f/sec interval=%.1fms",
@@ -3119,7 +3323,9 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             self._status_label.setText("Identification cancelled before posting.")
             return
-        self._status_label.setText(f"Refreshing observation before agreeing with {label}…")
+        self._status_label.setText(
+            f"Refreshing observation before agreeing with {label}…"
+        )
         worker = _AgreeWorker(
             self._client,
             self._auth_state.api_token,
@@ -3218,7 +3424,9 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
-            self._status_label.setText("Provisional agreement workflow cancelled before planning.")
+            self._status_label.setText(
+                "Provisional agreement workflow cancelled before planning."
+            )
             return
 
         self._save_bulk_agree_setup_defaults(dlg)
@@ -3262,10 +3470,14 @@ class MainWindow(QMainWindow):
 
     def _save_bulk_agree_setup_defaults(self, dlg) -> None:
         query = dlg.observation_query
-        self._settings.bulk_agree_source_mode = "url" if query is not None else "current"
+        self._settings.bulk_agree_source_mode = (
+            "url" if query is not None else "current"
+        )
         if query is not None:
             self._settings.bulk_agree_url = query.display_url
-        self._settings.bulk_agree_require_dna_barcode_its = dlg.require_dna_barcode_its()
+        self._settings.bulk_agree_require_dna_barcode_its = (
+            dlg.require_dna_barcode_its()
+        )
         self._settings.bulk_agree_only_if_needed = dlg.only_if_needed()
         self._settings.bulk_agree_max_observations = dlg.max_observations()
         self._settings.bulk_agree_delay_min_seconds = dlg.delay_min_seconds()
@@ -3321,7 +3533,9 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def _on_bulk_plan_progress(self, seen: int, total: int) -> None:
-        self._status_label.setText(f"Planning provisional agreements: fetched {seen} of {total}…")
+        self._status_label.setText(
+            f"Planning provisional agreements: fetched {seen} of {total}…"
+        )
 
     def _on_bulk_plan_finished(self, result: BulkAgreePlanResult) -> None:
         from observation_workbench.ui.bulk_agree_dialogs import (
@@ -3337,7 +3551,9 @@ class MainWindow(QMainWindow):
                 f"{stats.skipped_no_dna_barcode_its} skipped — no DNA Barcode ITS field"
             )
         if stats.skipped_already_agreed:
-            skip_notes.append(f"{stats.skipped_already_agreed} skipped — already agreed")
+            skip_notes.append(
+                f"{stats.skipped_already_agreed} skipped — already agreed"
+            )
         if stats.skipped_already_research_grade:
             skip_notes.append(
                 f"{stats.skipped_already_research_grade} skipped — already Research Grade for proposed taxon"
@@ -3349,7 +3565,9 @@ class MainWindow(QMainWindow):
         status_note = f"  ({', '.join(skip_notes)})" if skip_notes else ""
 
         if not candidates:
-            self._status_label.setText(f"No provisional non-self IDs need agreement.{status_note}")
+            self._status_label.setText(
+                f"No provisional non-self IDs need agreement.{status_note}"
+            )
             QMessageBox.information(
                 self,
                 "Agree to Provisional IDs",
@@ -3358,7 +3576,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._status_label.setText(f"Found {len(candidates)} provisional IDs to preview.{status_note}")
+        self._status_label.setText(
+            f"Found {len(candidates)} provisional IDs to preview.{status_note}"
+        )
         if self._skip_agree_confirmation:
             self._status_label.setText(
                 f"Found {len(candidates)} provisional IDs; starting without preview.{status_note}"
@@ -3387,7 +3607,9 @@ class MainWindow(QMainWindow):
                 self._status_label.setText("Returned to provisional agreement setup.")
                 QTimer.singleShot(0, self._start_bulk_agree_setup)
                 return
-            self._status_label.setText("Bulk provisional agreement cancelled before posting.")
+            self._status_label.setText(
+                "Bulk provisional agreement cancelled before posting."
+            )
             return
         candidates = dlg.candidates()
         if not candidates:
@@ -3405,7 +3627,9 @@ class MainWindow(QMainWindow):
     def _add_bulk_agree_skip_for_candidate(self, candidate: BulkAgreeCandidate) -> None:
         self._db.add_bulk_agree_skip(candidate.observation.obs_id)
 
-    def _remove_bulk_agree_skip_for_candidate(self, candidate: BulkAgreeCandidate) -> None:
+    def _remove_bulk_agree_skip_for_candidate(
+        self, candidate: BulkAgreeCandidate
+    ) -> None:
         self._db.remove_bulk_agree_skip(candidate.observation.obs_id)
 
     def _on_bulk_plan_error(self, msg: str) -> None:
@@ -3524,7 +3748,9 @@ class MainWindow(QMainWindow):
             if existing.obs_id == obs.obs_id:
                 self._show_observation(idx)
                 return
-        if not any(existing.obs_id == obs.obs_id for existing in self._loaded_observations):
+        if not any(
+            existing.obs_id == obs.obs_id for existing in self._loaded_observations
+        ):
             self._loaded_observations.append(obs)
             # Registered so a later page cannot append a second copy of it.
             self._loaded_obs_ids.add(obs.obs_id)
@@ -3553,7 +3779,9 @@ class MainWindow(QMainWindow):
         if self._bulk_dialog:
             self._bulk_dialog.set_waiting()
             self._bulk_dialog.set_countdown(self._bulk_delay_remaining)
-            self._bulk_dialog.set_status("Review the observation above, then wait for auto-post or act.")
+            self._bulk_dialog.set_status(
+                "Review the observation above, then wait for auto-post or act."
+            )
         if self._bulk_delay_remaining <= 0:
             QTimer.singleShot(0, self._bulk_post_current)
             return
@@ -3576,7 +3804,9 @@ class MainWindow(QMainWindow):
             self._bulk_delay_remaining = 0
             if self._bulk_dialog:
                 self._bulk_dialog.set_countdown(0)
-                self._bulk_dialog.set_status("Delay set to 0; posting as soon as the API allows.")
+                self._bulk_dialog.set_status(
+                    "Delay set to 0; posting as soon as the API allows."
+                )
             QTimer.singleShot(0, self._bulk_post_current)
             return
         self._bulk_delay_remaining = max(
@@ -3621,7 +3851,9 @@ class MainWindow(QMainWindow):
             self._bulk_index += 1
             self._bulk_show_current()
         elif self._bulk_dialog:
-            self._bulk_dialog.set_status("Cannot skip while a write request is in flight.")
+            self._bulk_dialog.set_status(
+                "Cannot skip while a write request is in flight."
+            )
 
     def _bulk_skip_forever(self) -> None:
         timer_active = self._bulk_delay_timer and self._bulk_delay_timer.isActive()
@@ -3641,7 +3873,9 @@ class MainWindow(QMainWindow):
             self._bulk_index += 1
             self._bulk_show_current()
         elif self._bulk_dialog:
-            self._bulk_dialog.set_status("Cannot skip while a write request is in flight.")
+            self._bulk_dialog.set_status(
+                "Cannot skip while a write request is in flight."
+            )
 
     def _bulk_pause(self) -> None:
         self._bulk_paused = True
@@ -3663,7 +3897,8 @@ class MainWindow(QMainWindow):
         if not self._bulk_dialog or not self._bulk_paused:
             return
         review_indices = [
-            i for i in range(self._bulk_index, len(self._bulk_candidates))
+            i
+            for i in range(self._bulk_index, len(self._bulk_candidates))
             if self._bulk_review_reason(self._bulk_candidates[i])
         ]
         if not review_indices:
@@ -3717,7 +3952,9 @@ class MainWindow(QMainWindow):
         body = self._bulk_dialog.get_comment() if self._bulk_dialog else ""
         if self._bulk_dialog:
             self._bulk_dialog.set_posting()
-            self._bulk_dialog.set_status("Refreshing observation and posting if still valid…")
+            self._bulk_dialog.set_status(
+                "Refreshing observation and posting if still valid…"
+            )
         worker = _BulkPostWorker(
             self._client,
             self._auth_state.api_token,
@@ -3726,7 +3963,9 @@ class MainWindow(QMainWindow):
             body=body,
             allow_changed_target=allow_changed_target,
             dry_run=getattr(self, "_bulk_agree_options", {}).get("dry_run", False),
-            only_if_needed=getattr(self, "_bulk_agree_options", {}).get("only_if_needed", True),
+            only_if_needed=getattr(self, "_bulk_agree_options", {}).get(
+                "only_if_needed", True
+            ),
         )
         sigs = worker.signals
         self._live_bulk_signals.add(sigs)
@@ -3745,7 +3984,9 @@ class MainWindow(QMainWindow):
         self._pool.start(worker)
 
     @Slot(object, object)
-    def _on_bulk_post_finished(self, candidate: BulkAgreeCandidate, result: AgreeResult) -> None:
+    def _on_bulk_post_finished(
+        self, candidate: BulkAgreeCandidate, result: AgreeResult
+    ) -> None:
         if getattr(self, "_bulk_cancelled", False):
             return
         if result.refreshed_observation:
@@ -3758,7 +3999,11 @@ class MainWindow(QMainWindow):
             log.debug(
                 "Bulk provisional agreement posted obs=%s taxon=%s",
                 candidate.observation.obs_id,
-                result.target.taxon_name if result.target else candidate.target.taxon_name,
+                (
+                    result.target.taxon_name
+                    if result.target
+                    else candidate.target.taxon_name
+                ),
             )
         else:
             self._bulk_skipped += 1
@@ -3780,9 +4025,19 @@ class MainWindow(QMainWindow):
         preview_target = candidate.target
         current_target = result.target
         preview_source = preview_target.source_login or "unknown"
-        current_source = (current_target.source_login or "unknown") if current_target else "unknown"
-        preview_ident_id = preview_target.source_ident_id if preview_target.source_ident_id is not None else "unknown"
-        current_ident_id = current_target.source_ident_id if current_target and current_target.source_ident_id is not None else "unknown"
+        current_source = (
+            (current_target.source_login or "unknown") if current_target else "unknown"
+        )
+        preview_ident_id = (
+            preview_target.source_ident_id
+            if preview_target.source_ident_id is not None
+            else "unknown"
+        )
+        current_ident_id = (
+            current_target.source_ident_id
+            if current_target and current_target.source_ident_id is not None
+            else "unknown"
+        )
         preview_taxon_name = preview_target.taxon_name or "unknown"
         preview_taxon_id = preview_target.taxon_id
         current_taxon_name = current_target.taxon_name if current_target else "unknown"
@@ -3895,7 +4150,9 @@ class MainWindow(QMainWindow):
         )
         box.setDetailedText(msg)
         auth_btn = box.addButton("Authenticate Now", QMessageBox.ButtonRole.AcceptRole)
-        cancel_btn = box.addButton("Cancel Automatic ID", QMessageBox.ButtonRole.RejectRole)
+        cancel_btn = box.addButton(
+            "Cancel Automatic ID", QMessageBox.ButtonRole.RejectRole
+        )
         box.setDefaultButton(auth_btn)
         box.exec()
         clicked = box.clickedButton()
@@ -3941,10 +4198,13 @@ class MainWindow(QMainWindow):
                 skipped_no_dna=skipped_no_dna,
                 skipped_previously_withdrew=skipped_previously_withdrew,
             )
-        dna_note = f", {skipped_no_dna} skipped (no DNA barcode)" if skipped_no_dna else ""
+        dna_note = (
+            f", {skipped_no_dna} skipped (no DNA barcode)" if skipped_no_dna else ""
+        )
         withdrew_note = (
             f", {skipped_previously_withdrew} skipped (previously withdrew provisional ID)"
-            if skipped_previously_withdrew else ""
+            if skipped_previously_withdrew
+            else ""
         )
         dry_run_note = (
             " (dry run — nothing was posted)"
@@ -4042,7 +4302,9 @@ class MainWindow(QMainWindow):
         )
         destination_name = destination_name.strip()
         if not ok or not destination_name:
-            self._status_label.setText("Provisional name swap cancelled before writing.")
+            self._status_label.setText(
+                "Provisional name swap cancelled before writing."
+            )
             return
         if destination_name == plan.source_name:
             QMessageBox.information(
@@ -4073,7 +4335,9 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
-            self._status_label.setText("Provisional name swap cancelled before writing.")
+            self._status_label.setText(
+                "Provisional name swap cancelled before writing."
+            )
             return
         self._start_provisional_swap_post(plan, destination_name)
 
@@ -4102,7 +4366,9 @@ class MainWindow(QMainWindow):
         self._live_bulk_signals.add(sigs)
         sigs.progress.connect(
             lambda current, total, updated, skipped, failed, message, g=gen: (
-                self._on_provisional_swap_post_progress(current, total, updated, skipped, failed, message)
+                self._on_provisional_swap_post_progress(
+                    current, total, updated, skipped, failed, message
+                )
                 if g == self._provisional_swap_generation
                 else None
             )
@@ -4206,7 +4472,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         if not self._require_auth():
             return
-        from observation_workbench.ui.species_override_dialogs import SpeciesOverrideSetupDialog
+        from observation_workbench.ui.species_override_dialogs import (
+            SpeciesOverrideSetupDialog,
+        )
 
         prefill = ""
         if 0 <= self._current_obs_idx < len(self._observations):
@@ -4281,7 +4549,9 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _on_species_override_plan_finished(self, plan: SpeciesOverridePlan) -> None:
-        from observation_workbench.ui.species_override_dialogs import SpeciesOverridePlanDialog
+        from observation_workbench.ui.species_override_dialogs import (
+            SpeciesOverridePlanDialog,
+        )
 
         count = plan.total_observations
         self._status_label.setText(
@@ -4499,7 +4769,9 @@ class MainWindow(QMainWindow):
     def _start_bulk_disagree_setup(self) -> None:
         if not self._require_auth():
             return
-        from observation_workbench.ui.bulk_disagree_dialogs import BulkDisagreeSetupDialog
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            BulkDisagreeSetupDialog,
+        )
 
         prefill_url = self._bulk_disagree_current_url_prefill()
         dlg = BulkDisagreeSetupDialog(
@@ -4509,7 +4781,9 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
-            self._status_label.setText("Bulk disagree workflow cancelled before planning.")
+            self._status_label.setText(
+                "Bulk disagree workflow cancelled before planning."
+            )
             return
 
         self._save_bulk_disagree_setup_defaults(dlg)
@@ -4519,7 +4793,9 @@ class MainWindow(QMainWindow):
         if source_taxon is not None:
             source_taxon_id = source_taxon.taxon_id
             source_taxon_name = source_taxon.name
-            explicit_disagreement = taxon_is_strict_ancestor(source_taxon, dlg.target_taxon_id)
+            explicit_disagreement = taxon_is_strict_ancestor(
+                source_taxon, dlg.target_taxon_id
+            )
             require_source_taxon_match = dlg.require_source_taxon_match()
         elif source_provisional_name:
             # URL had no taxon_id but filters by a Provisional Species Name field
@@ -4561,7 +4837,9 @@ class MainWindow(QMainWindow):
     def _start_propose_name_setup(self) -> None:
         if not self._require_auth():
             return
-        from observation_workbench.ui.bulk_disagree_dialogs import ProposeNameSetupDialog
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            ProposeNameSetupDialog,
+        )
 
         dlg = ProposeNameSetupDialog(
             self._client,
@@ -4569,7 +4847,9 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
-            self._status_label.setText("Propose-name workflow cancelled before planning.")
+            self._status_label.setText(
+                "Propose-name workflow cancelled before planning."
+            )
             return
 
         self._save_propose_name_setup_defaults(dlg)
@@ -4659,7 +4939,9 @@ class MainWindow(QMainWindow):
         )
 
     def _on_propose_name_plan_finished(self, result: BulkDisagreePlanResult) -> None:
-        from observation_workbench.ui.bulk_disagree_dialogs import BulkDisagreePreviewDialog
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            BulkDisagreePreviewDialog,
+        )
 
         self._disagree_plan_stats = result.stats
         stats_text = _format_propose_name_stats(result.stats)
@@ -4668,7 +4950,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Propose a Name",
-                "None of the entered observations need this identification.\n\n" + stats_text,
+                "None of the entered observations need this identification.\n\n"
+                + stats_text,
             )
             return
 
@@ -4697,11 +4980,15 @@ class MainWindow(QMainWindow):
                 self._status_label.setText("Returned to propose-name setup.")
                 QTimer.singleShot(0, self._start_propose_name_setup)
                 return
-            self._status_label.setText("Propose-name workflow cancelled before posting.")
+            self._status_label.setText(
+                "Propose-name workflow cancelled before posting."
+            )
             return
         candidates = dlg.candidates()
         if not candidates:
-            self._status_label.setText("Propose-name workflow cancelled: no candidates remain.")
+            self._status_label.setText(
+                "Propose-name workflow cancelled: no candidates remain."
+            )
             return
         self._start_bulk_disagree_execution(candidates)
 
@@ -4728,10 +5015,16 @@ class MainWindow(QMainWindow):
         self._settings.bulk_disagree_target_taxon_name = dlg.target_taxon_name
         self._settings.bulk_disagree_target_taxon_rank = dlg.target_taxon_rank
         self._settings.bulk_disagree_comment = dlg.comment()
-        self._settings.bulk_disagree_skip_dna_barcode_its = dlg.skip_with_dna_barcode_its()
-        self._settings.bulk_disagree_only_dna_barcode_its = dlg.only_with_dna_barcode_its()
+        self._settings.bulk_disagree_skip_dna_barcode_its = (
+            dlg.skip_with_dna_barcode_its()
+        )
+        self._settings.bulk_disagree_only_dna_barcode_its = (
+            dlg.only_with_dna_barcode_its()
+        )
         self._settings.bulk_disagree_dqa_vote_requested = dlg.dqa_vote_requested()
-        self._settings.bulk_disagree_require_source_taxon_match = dlg.require_source_taxon_match()
+        self._settings.bulk_disagree_require_source_taxon_match = (
+            dlg.require_source_taxon_match()
+        )
         self._settings.bulk_disagree_max_observations = dlg.max_observations()
         self._settings.bulk_disagree_delay_min_seconds = dlg.delay_min_seconds()
         self._settings.bulk_disagree_delay_max_seconds = dlg.delay_max_seconds()
@@ -4787,7 +5080,9 @@ class MainWindow(QMainWindow):
         )
 
     def _on_bulk_disagree_plan_finished(self, result: BulkDisagreePlanResult) -> None:
-        from observation_workbench.ui.bulk_disagree_dialogs import BulkDisagreePreviewDialog
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            BulkDisagreePreviewDialog,
+        )
 
         self._disagree_plan_stats = result.stats
         stats_text = _format_disagree_stats(result.stats)
@@ -4810,7 +5105,9 @@ class MainWindow(QMainWindow):
             disk_cache=self._disk_cache,
             api_token=self._auth_state.api_token,
             login=self._auth_state.login,
-            require_source_taxon_match=self._disagree_options.get("require_source_taxon_match", True),
+            require_source_taxon_match=self._disagree_options.get(
+                "require_source_taxon_match", True
+            ),
             default_comment=self._disagree_default_comment,
             on_skip_forever=self._add_bulk_disagree_skip_for_candidate,
             on_unskip_forever=self._remove_bulk_disagree_skip_for_candidate,
@@ -4823,11 +5120,15 @@ class MainWindow(QMainWindow):
                 self._status_label.setText("Returned to bulk disagree setup.")
                 QTimer.singleShot(0, self._start_bulk_disagree_setup)
                 return
-            self._status_label.setText("Bulk disagree workflow cancelled before posting.")
+            self._status_label.setText(
+                "Bulk disagree workflow cancelled before posting."
+            )
             return
         candidates = dlg.candidates()
         if not candidates:
-            self._status_label.setText("Bulk disagree workflow cancelled: no candidates remain.")
+            self._status_label.setText(
+                "Bulk disagree workflow cancelled: no candidates remain."
+            )
             QMessageBox.information(
                 self,
                 "Bulk Disagree to Taxon",
@@ -4866,7 +5167,8 @@ class MainWindow(QMainWindow):
                 self,
                 "Authentication Expired",
                 "iNaturalist rejected the saved API token while planning. "
-                "Authenticate again, then restart the bulk disagree workflow.\n\n" + msg,
+                "Authenticate again, then restart the bulk disagree workflow.\n\n"
+                + msg,
             )
             return
         QMessageBox.warning(self, "Planning Failed", msg)
@@ -4875,7 +5177,9 @@ class MainWindow(QMainWindow):
         self,
         candidates: List[BulkDisagreeCandidate],
     ) -> None:
-        from observation_workbench.ui.bulk_disagree_dialogs import BulkDisagreeProgressDialog
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            BulkDisagreeProgressDialog,
+        )
 
         self._disagree_candidates = candidates
         self._disagree_index = 0
@@ -4903,8 +5207,12 @@ class MainWindow(QMainWindow):
         )
         self._disagree_dialog.cancel_requested.connect(self._disagree_cancel)
         self._disagree_dialog.skip_requested.connect(self._disagree_skip_current)
-        self._disagree_dialog.skip_forever_requested.connect(self._disagree_skip_forever)
-        self._disagree_dialog.skip_delay_requested.connect(self._disagree_skip_current_delay)
+        self._disagree_dialog.skip_forever_requested.connect(
+            self._disagree_skip_forever
+        )
+        self._disagree_dialog.skip_delay_requested.connect(
+            self._disagree_skip_current_delay
+        )
         self._disagree_dialog.pause_requested.connect(self._disagree_pause)
         self._disagree_dialog.resume_requested.connect(self._disagree_resume)
         self._disagree_dialog.delay_changed.connect(self._disagree_delay_range_changed)
@@ -4970,7 +5278,9 @@ class MainWindow(QMainWindow):
         )
 
     def _disagree_delay_range_changed(self, min_delay: int, max_delay: int) -> None:
-        timer_active = self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        timer_active = (
+            self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        )
         if not timer_active:
             return
         if max_delay <= 0:
@@ -4978,7 +5288,9 @@ class MainWindow(QMainWindow):
             self._disagree_delay_remaining = 0
             if self._disagree_dialog:
                 self._disagree_dialog.set_countdown(0)
-                self._disagree_dialog.set_status("Delay set to 0; posting as soon as the API allows.")
+                self._disagree_dialog.set_status(
+                    "Delay set to 0; posting as soon as the API allows."
+                )
             QTimer.singleShot(0, self._disagree_post_current)
             return
         self._disagree_delay_remaining = max(
@@ -5009,7 +5321,9 @@ class MainWindow(QMainWindow):
             self._disagree_post_current()
 
     def _disagree_skip_current(self) -> None:
-        timer_active = self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        timer_active = (
+            self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        )
         if self._disagree_paused or timer_active:
             if self._disagree_delay_timer:
                 self._disagree_delay_timer.stop()
@@ -5024,10 +5338,14 @@ class MainWindow(QMainWindow):
             self._disagree_index += 1
             self._disagree_show_current()
         elif self._disagree_dialog:
-            self._disagree_dialog.set_status("Cannot skip while a write request is in flight.")
+            self._disagree_dialog.set_status(
+                "Cannot skip while a write request is in flight."
+            )
 
     def _disagree_skip_forever(self) -> None:
-        timer_active = self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        timer_active = (
+            self._disagree_delay_timer and self._disagree_delay_timer.isActive()
+        )
         if self._disagree_paused or timer_active:
             if self._disagree_delay_timer:
                 self._disagree_delay_timer.stop()
@@ -5049,7 +5367,9 @@ class MainWindow(QMainWindow):
             self._disagree_index += 1
             self._disagree_show_current()
         elif self._disagree_dialog:
-            self._disagree_dialog.set_status("Cannot skip while a write request is in flight.")
+            self._disagree_dialog.set_status(
+                "Cannot skip while a write request is in flight."
+            )
 
     def _disagree_pause(self) -> None:
         self._disagree_paused = True
@@ -5065,14 +5385,18 @@ class MainWindow(QMainWindow):
             # The current item is still posting; it will advance on its own once
             # it finishes. Just clear the pause so the next item proceeds.
             if self._disagree_dialog:
-                self._disagree_dialog.set_status("Resumed — finishing the current identification…")
+                self._disagree_dialog.set_status(
+                    "Resumed — finishing the current identification…"
+                )
             return
         if self._disagree_delay_remaining > 0:
             if self._disagree_delay_timer is None:
                 self._disagree_delay_timer = QTimer(self)
                 self._disagree_delay_timer.timeout.connect(self._disagree_tick_delay)
             if self._disagree_dialog:
-                self._disagree_dialog.set_status("Resumed — review the observation above.")
+                self._disagree_dialog.set_status(
+                    "Resumed — review the observation above."
+                )
                 self._disagree_dialog.set_countdown(self._disagree_delay_remaining)
             self._disagree_delay_timer.start(1000)
         else:
@@ -5086,7 +5410,9 @@ class MainWindow(QMainWindow):
         self._disagree_finish(cancelled=True)
 
     def _disagree_post_current(self) -> None:
-        if self._disagree_cancelled or self._disagree_index >= len(self._disagree_candidates):
+        if self._disagree_cancelled or self._disagree_index >= len(
+            self._disagree_candidates
+        ):
             self._disagree_finish(cancelled=self._disagree_cancelled)
             return
         if getattr(self, "_disagree_posting", False):
@@ -5101,7 +5427,9 @@ class MainWindow(QMainWindow):
                 body = f"{body}\n\n{tag_line}" if body else tag_line
         if self._disagree_dialog:
             self._disagree_dialog.set_posting()
-            self._disagree_dialog.set_status("Refreshing observation and posting if still valid…")
+            self._disagree_dialog.set_status(
+                "Refreshing observation and posting if still valid…"
+            )
         worker = _BulkDisagreePostWorker(
             self._client,
             self._auth_state.api_token,
@@ -5347,7 +5675,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _current_observation(self) -> Optional[StudyObservation]:
-        if self._current_obs_idx < 0 or self._current_obs_idx >= len(self._observations):
+        if self._current_obs_idx < 0 or self._current_obs_idx >= len(
+            self._observations
+        ):
             return None
         return self._observations[self._current_obs_idx]
 
@@ -5393,7 +5723,9 @@ class MainWindow(QMainWindow):
         self._filter_bar._taxon_edit.setText(taxon_name)
         self._filter_bar._taxon_id = taxon_id
         self._filter_bar._taxon_name = taxon_name
-        self._status_label.setText(f"Taxon filter set to: {taxon_name}. Press Load to apply.")
+        self._status_label.setText(
+            f"Taxon filter set to: {taxon_name}. Press Load to apply."
+        )
 
     # ------------------------------------------------------------------
     # Settings dialog
@@ -5401,17 +5733,20 @@ class MainWindow(QMainWindow):
 
     def _show_settings(self) -> None:
         from observation_workbench.ui.settings_dialog import SettingsDialog
+
         dlg = SettingsDialog(self._settings, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             # Apply new settings
-            new_max_bytes = int(self._settings.cache_max_gb * 1024 ** 3)
+            new_max_bytes = int(self._settings.cache_max_gb * 1024**3)
             self._disk_cache._max_bytes = new_max_bytes
             mem_bytes = self._settings.memory_cache_max_mb * 1024 * 1024
             self._prefetcher.set_max_memory(mem_bytes)
             # Apply display settings immediately
             self._apply_font_scale(self._settings.ui_font_scale)
             self._result_list.set_font_scale(self._settings.result_list_font_scale)
-            self._scroll_speed_filter.set_multiplier(self._settings.scroll_speed_multiplier)
+            self._scroll_speed_filter.set_multiplier(
+                self._settings.scroll_speed_multiplier
+            )
             StudyTaxon.show_common_names = self._settings.show_common_names
             if self._observations:
                 self._result_list.refresh_display()
@@ -5426,7 +5761,7 @@ class MainWindow(QMainWindow):
 
     def _show_cache_info(self) -> None:
         total_bytes = self._disk_cache.total_size_bytes()
-        total_mb = total_bytes / (1024 ** 2)
+        total_mb = total_bytes / (1024**2)
         limit_gb = self._settings.cache_max_gb
         cache_dir = str(self._settings.cache_dir)
         QMessageBox.information(
@@ -5464,26 +5799,26 @@ class MainWindow(QMainWindow):
         # (key_text, description) — None description = section header, both None = spacer
         entries = [
             ("Navigation", None),
-            ("Right / Space",       "Next observation (hold Right to repeat)"),
-            ("Left / Shift+Space",  "Previous observation (hold Left to repeat)"),
-            ("Down / ]",            "Next photo in observation"),
-            ("Up / [",              "Previous photo in observation"),
-            ("G",                   "Go to result number"),
+            ("Right / Space", "Next observation (hold Right to repeat)"),
+            ("Left / Shift+Space", "Previous observation (hold Left to repeat)"),
+            ("Down / ]", "Next photo in observation"),
+            ("Up / [", "Previous photo in observation"),
+            ("G", "Go to result number"),
             (None, None),
             ("Actions", None),
-            ("a",  "Agree with most recent non-self ID"),
-            ("A",  "Agree with consensus/community ID"),
-            ("O",  "Open observation in browser"),
-            ("I",  "Open image in browser"),
-            ("L",  "Toggle fit / 1:1 zoom"),
-            ("R",  "Reload current filters"),
-            ("F",  "Focus filter bar"),
+            ("a", "Agree with most recent non-self ID"),
+            ("A", "Agree with consensus/community ID"),
+            ("O", "Open observation in browser"),
+            ("I", "Open image in browser"),
+            ("L", "Toggle fit / 1:1 zoom"),
+            ("R", "Reload current filters"),
+            ("F", "Focus filter bar"),
         ]
 
         for r, (key, desc) in enumerate(entries):
-            if key is None:                         # blank spacer row
+            if key is None:  # blank spacer row
                 grid.setRowMinimumHeight(r, 6)
-            elif desc is None:                      # section header
+            elif desc is None:  # section header
                 lbl = QLabel(f"<b>{key}</b>")
                 grid.addWidget(lbl, r, 0, 1, 2)
             else:
@@ -5492,7 +5827,7 @@ class MainWindow(QMainWindow):
                 grid.addWidget(key_lbl, r, 0)
                 grid.addWidget(QLabel(desc), r, 1)
 
-        grid.setColumnStretch(1, 1)                 # description column expands
+        grid.setColumnStretch(1, 1)  # description column expands
         outer.addLayout(grid)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -5537,7 +5872,9 @@ class MainWindow(QMainWindow):
         if window is not None:
             self._reconciliation_windows.add(window)
             window.destroyed.connect(
-                lambda _obj=None, target=window: self._reconciliation_windows.discard(target)
+                lambda _obj=None, target=window: self._reconciliation_windows.discard(
+                    target
+                )
             )
 
     # ------------------------------------------------------------------
@@ -5612,7 +5949,11 @@ def _format_api_error(exc: Exception) -> str:
 def _safe_confirmed_refresh_diagnostic(exc: object) -> str:
     """Describe a safe-read failure without exposing response content."""
     if isinstance(exc, INatAPIError):
-        return f"HTTP {exc.status_code}" if exc.status_code is not None else "iNaturalist read failed"
+        return (
+            f"HTTP {exc.status_code}"
+            if exc.status_code is not None
+            else "iNaturalist read failed"
+        )
     if isinstance(exc, BaseException):
         return type(exc).__name__
     return "Unknown detail refresh failure"
@@ -5668,7 +6009,9 @@ def _is_provisional_observation(obs: StudyObservation) -> bool:
         for ident in obs.all_identifications
     ):
         return True
-    if obs.target_identification and _taxon_has_provisional_name(obs.target_identification.taxon):
+    if obs.target_identification and _taxon_has_provisional_name(
+        obs.target_identification.taxon
+    ):
         return True
     return (
         _taxon_has_provisional_name(obs.community_taxon)

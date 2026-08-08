@@ -4,6 +4,7 @@ Qt widgets use this module rather than repeating journal-state checks or
 decoding payload JSON.  It keeps identification and comment body text out of
 ordinary list rows; that text is exposed only in a deliberate Details view.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,11 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
-
 _ACTIVE_STATES = frozenset(
     {"queued", "submitting", "submitted_unverified", "failed_retryable", "ambiguous"}
 )
-_ATTENTION_STATES = frozenset({"submitted_unverified", "failed_retryable", "ambiguous", "failed_terminal"})
+_ATTENTION_STATES = frozenset(
+    {"submitted_unverified", "failed_retryable", "ambiguous", "failed_terminal"}
+)
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,10 @@ class IdentifyActionPresentation:
 
     @property
     def state_text(self) -> str:
-        if self.state == "submitted_unverified" and self.verification_status == "mismatched":
+        if (
+            self.state == "submitted_unverified"
+            and self.verification_status == "mismatched"
+        ):
             # The write went through but the server state now disagrees with
             # intent (e.g. a later identification superseded this one). That
             # is a louder, attention-worthy condition than "not yet verified"
@@ -105,7 +110,11 @@ class IdentifyActionPresentation:
 
     @property
     def is_recently_confirmed(self) -> bool:
-        return self.state == "confirmed" and self.confirmed_at is not None and time.time() - self.confirmed_at < 600
+        return (
+            self.state == "confirmed"
+            and self.confirmed_at is not None
+            and time.time() - self.confirmed_at < 600
+        )
 
 
 def present_identify_action(action: Mapping[str, Any]) -> IdentifyActionPresentation:
@@ -134,20 +143,27 @@ def present_identify_action(action: Mapping[str, Any]) -> IdentifyActionPresenta
         updated_at=_timestamp(action.get("updated_at")),
         confirmed_at=_timestamp(action.get("confirmed_at")),
         attempt_count=_non_negative_int(action.get("attempt_count")),
-        verification_attempt_count=_non_negative_int(action.get("verification_attempt_count")),
+        verification_attempt_count=_non_negative_int(
+            action.get("verification_attempt_count")
+        ),
         parent_action_id=_positive_int(action.get("parent_action_id")),
         manual_retry_count=_non_negative_int(action.get("manual_retry_count")),
         outcome_unknown=outcome_unknown,
         last_operation_phase=_text(action.get("last_operation_phase")),
-        server_object_id=_text(action.get("server_object_id") or action.get("write_response_id")),
+        server_object_id=_text(
+            action.get("server_object_id") or action.get("write_response_id")
+        ),
         server_object_uuid=_text(action.get("write_response_uuid")),
         verification_status=_text(action.get("verification_status")),
         verification_diagnostic=verification_diagnostic,
         error_summary=error_summary,
-        intended_summary=_intended_summary(action_type, desired_state, taxon_id, payload),
+        intended_summary=_intended_summary(
+            action_type, desired_state, taxon_id, payload
+        ),
         payload_body=body,
         taxon_id=taxon_id,
-        can_cancel=state in {"queued", "failed_retryable", "ambiguous", "submitted_unverified"},
+        can_cancel=state
+        in {"queued", "failed_retryable", "ambiguous", "submitted_unverified"},
         can_resume_or_submit=state == "queued",
         can_verify=state in {"submitted_unverified", "ambiguous"},
         can_retry_definite_failure=state == "failed_retryable" and not outcome_unknown,
@@ -162,7 +178,11 @@ def compact_observation_action_text(actions: list[IdentifyActionPresentation]) -
     """Produce a compact, multi-action status line for one Identify window."""
     labels: list[str] = []
     for action in actions:
-        if not action.is_active and not action.requires_attention and not action.is_recently_confirmed:
+        if (
+            not action.is_active
+            and not action.requires_attention
+            and not action.is_recently_confirmed
+        ):
             continue
         prefix = {
             "identification": "Identification",
@@ -174,7 +194,11 @@ def compact_observation_action_text(actions: list[IdentifyActionPresentation]) -
         if action.state == "confirmed":
             labels.append(f"{prefix} confirmed")
         elif action.parent_action_id is not None:
-            labels.append(f"{prefix} retry queued from #{action.parent_action_id}" if action.state == "queued" else f"{prefix} ({action.state_text.lower()})")
+            labels.append(
+                f"{prefix} retry queued from #{action.parent_action_id}"
+                if action.state == "queued"
+                else f"{prefix} ({action.state_text.lower()})"
+            )
         else:
             labels.append(f"{prefix} {action.state_text.lower()}")
     return " · ".join(labels)
@@ -222,7 +246,9 @@ def format_journal_time(value: float | None) -> str:
     if value is None:
         return "—"
     try:
-        return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        return (
+            datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        )
     except (OverflowError, OSError, ValueError):
         return "—"
 
@@ -291,7 +317,11 @@ def _diagnostic_summary(raw: Any) -> str:
 
 def _short_text(value: str, limit: int = 96) -> str:
     normalized = " ".join(value.split())
-    return normalized if len(normalized) <= limit else f"{normalized[: max(1, limit - 1)]}…"
+    return (
+        normalized
+        if len(normalized) <= limit
+        else f"{normalized[: max(1, limit - 1)]}…"
+    )
 
 
 def _text(value: Any) -> str:

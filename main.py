@@ -7,6 +7,7 @@ Usage:
     python main.py -v           # same as --debug
     python main.py --skipagree  # skip bulk provisional-ID preview confirmation
 """
+
 import argparse
 import logging
 import os
@@ -32,7 +33,9 @@ def main() -> None:
     global _INSTANCE_LOCK
     parser = argparse.ArgumentParser(description="Observation Workbench")
     parser.add_argument(
-        "--debug", "-v", action="store_true",
+        "--debug",
+        "-v",
+        action="store_true",
         help="Enable verbose (DEBUG) logging and show the log panel on startup",
     )
     parser.add_argument(
@@ -89,10 +92,12 @@ def main() -> None:
         # Filter non-categorized qWarning() messages that can't be silenced
         # via QT_LOGGING_RULES.  Unmatched messages are forwarded to stderr
         # to preserve normal Qt error reporting.
-        _SUPPRESSED = frozenset([
-            "This plugin supports grabbing the mouse only for popup windows",
-            "Opening in existing browser session.",
-        ])
+        _SUPPRESSED = frozenset(
+            [
+                "This plugin supports grabbing the mouse only for popup windows",
+                "Opening in existing browser session.",
+            ]
+        )
 
         def _qt_message_filter(msg_type, _context, message):
             if message in _SUPPRESSED:
@@ -174,6 +179,7 @@ def main() -> None:
 
 def _apply_dark_palette(app: QApplication) -> None:
     from PySide6.QtGui import QColor, QPalette
+
     palette = QPalette()
     dark = QColor(45, 45, 45)
     darker = QColor(30, 30, 30)
@@ -195,7 +201,9 @@ def _apply_dark_palette(app: QApplication) -> None:
     palette.setColor(QPalette.ColorRole.Highlight, highlight)
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("white"))
     palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled)
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled)
+    palette.setColor(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled
+    )
     app.setPalette(palette)
 
     # Fusion style on Linux falls back to the platform theme for input widgets
@@ -258,5 +266,6 @@ if __name__ == "__main__":
         # Dispatch immediately, before argparse/instance-lock/main() run, so
         # this never recurses into a second full app launch.
         from observation_workbench.ui.hidpi import _run_probe
+
         sys.exit(_run_probe())
     main()

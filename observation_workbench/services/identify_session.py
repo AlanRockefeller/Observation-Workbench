@@ -1,4 +1,5 @@
 """Read-only, fixed-order sessions for the local Identify workflow."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,7 +8,6 @@ from typing import Callable, Iterable
 from observation_workbench.api.client import INatClient
 from observation_workbench.api.parsers import parse_observation
 from observation_workbench.models import StudyObservation
-
 
 _USER_SPECIFIC_PARAM_KEYS = frozenset({"reviewed", "viewer_id"})
 _REVIEWED_PARAM_KEY = "reviewed"
@@ -65,7 +65,10 @@ def resolve_viewer_scoped_params(
         raise ValueError(
             "Filtering by reviewed requires authentication so the viewer can be identified"
         )
-    return (*resolved, (_VIEWER_ID_PARAM_KEY, str(_resolve_viewer_id(client, api_token))))
+    return (
+        *resolved,
+        (_VIEWER_ID_PARAM_KEY, str(_resolve_viewer_id(client, api_token))),
+    )
 
 
 def _resolve_viewer_id(client: INatClient, api_token: str) -> int:
@@ -75,7 +78,11 @@ def _resolve_viewer_id(client: INatClient, api_token: str) -> int:
         return cached[1]
     raw = client.get_current_user_v2(api_token)
     user = raw.get("results") if isinstance(raw, dict) else None
-    record = user[0] if isinstance(user, list) and user and isinstance(user[0], dict) else raw
+    record = (
+        user[0]
+        if isinstance(user, list) and user and isinstance(user[0], dict)
+        else raw
+    )
     viewer_id = 0
     if isinstance(record, dict):
         try:
@@ -114,7 +121,9 @@ class IdentifyQueryPlan:
         object.__setattr__(self, "session_limit", max(1, int(self.session_limit)))
         object.__setattr__(self, "prefetch_radius", max(0, int(self.prefetch_radius)))
         if len(params) != len(sources):
-            raise ValueError("Identify query parameters and sources must remain aligned")
+            raise ValueError(
+                "Identify query parameters and sources must remain aligned"
+            )
 
     @property
     def requires_authentication(self) -> bool:
@@ -191,7 +200,9 @@ def load_identify_session(
         new_ids = 0
         for record in results:
             _raise_if_cancelled(is_cancelled)
-            observation = parse_observation(record) if isinstance(record, dict) else None
+            observation = (
+                parse_observation(record) if isinstance(record, dict) else None
+            )
             if observation is None or observation.obs_id in seen_ids:
                 continue
             seen_ids.add(observation.obs_id)

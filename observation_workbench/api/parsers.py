@@ -4,6 +4,7 @@ Parsers: raw iNaturalist API JSON → typed dataclasses.
 All parsers are defensive — they use .get() throughout and
 tolerate missing or None fields gracefully.
 """
+
 from __future__ import annotations
 
 import logging
@@ -66,7 +67,9 @@ def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
         return StudyTaxon(
             taxon_id=taxon_id,
             name=name,
-            common_name=raw.get("preferred_common_name") or raw.get("english_common_name") or "",
+            common_name=raw.get("preferred_common_name")
+            or raw.get("english_common_name")
+            or "",
             rank=raw.get("rank") or "",
             iconic_taxon_name=raw.get("iconic_taxon_name") or "",
             ancestry=raw.get("ancestry") or "",
@@ -96,11 +99,7 @@ def parse_photo(raw: Optional[Dict]) -> Optional[StudyPhoto]:
             return None
 
         # Try to find a usable square URL for size derivation
-        url_square = (
-            raw.get("url")
-            or raw.get("square_url")
-            or ""
-        )
+        url_square = raw.get("url") or raw.get("square_url") or ""
         if not url_square:
             return None
 
@@ -115,7 +114,9 @@ def parse_photo(raw: Optional[Dict]) -> Optional[StudyPhoto]:
         return None
 
 
-def parse_identification(raw: Optional[Dict], target_user_login: str = "") -> Optional[StudyIdentification]:
+def parse_identification(
+    raw: Optional[Dict], target_user_login: str = ""
+) -> Optional[StudyIdentification]:
     """
     Parse an identification object from API JSON.
 
@@ -153,7 +154,9 @@ def parse_identification(raw: Optional[Dict], target_user_login: str = "") -> Op
             created_at=raw.get("created_at", "") or "",
             current=bool(raw.get("current", True)),
             own_observation=(
-                None if raw.get("own_observation") is None else bool(raw.get("own_observation"))
+                None
+                if raw.get("own_observation") is None
+                else bool(raw.get("own_observation"))
             ),
         )
     except Exception as exc:
@@ -210,12 +213,7 @@ def _observation_field_value(raw_obs: Dict, field_name: str) -> str:
         if not isinstance(item, dict):
             continue
         field = item.get("observation_field") or item.get("field") or {}
-        name = (
-            item.get("name")
-            or item.get("field_name")
-            or field.get("name")
-            or ""
-        )
+        name = item.get("name") or item.get("field_name") or field.get("name") or ""
         if name.casefold() != wanted:
             continue
         value = (
@@ -250,7 +248,7 @@ def _enrich_ident_taxon(
     taxon_id = ident.taxon.taxon_id
 
     # 1. Look for the same identification inside the observation's nested list.
-    for ri in (raw_obs.get("identifications") or []):
+    for ri in raw_obs.get("identifications") or []:
         if int(ri.get("id") or 0) == ident_id:
             enriched = parse_taxon(ri.get("taxon"))
             if enriched and enriched.name != "Unknown":
@@ -268,12 +266,15 @@ def _enrich_ident_taxon(
 
     log.debug(
         "ident %d: taxon still Unknown after enrichment attempt (taxon_id=%s)",
-        ident_id, taxon_id,
+        ident_id,
+        taxon_id,
     )
     return ident
 
 
-def parse_observation(raw_obs: Dict, target_identification: Optional[StudyIdentification] = None) -> Optional[StudyObservation]:
+def parse_observation(
+    raw_obs: Dict, target_identification: Optional[StudyIdentification] = None
+) -> Optional[StudyObservation]:
     """
     Parse a StudyObservation from a raw /observations result.
 
@@ -329,7 +330,7 @@ def parse_observation(raw_obs: Dict, target_identification: Optional[StudyIdenti
                 comments.append(comment)
 
         votes = []
-        for raw_vote in (raw_obs.get("votes") or []):
+        for raw_vote in raw_obs.get("votes") or []:
             vote = parse_vote(raw_vote)
             if vote:
                 votes.append(vote)
@@ -340,7 +341,9 @@ def parse_observation(raw_obs: Dict, target_identification: Optional[StudyIdenti
             obs_id=obs_id,
             observer_login=observer_login,
             uuid=raw_obs.get("uuid", "") or "",
-            observed_on=raw_obs.get("observed_on", "") or raw_obs.get("observed_on_string", "") or "",
+            observed_on=raw_obs.get("observed_on", "")
+            or raw_obs.get("observed_on_string", "")
+            or "",
             place_guess=raw_obs.get("place_guess", "") or "",
             taxon=obs_taxon,
             community_taxon=community_taxon,
@@ -363,8 +366,12 @@ def parse_observation(raw_obs: Dict, target_identification: Optional[StudyIdenti
             ),
             quality_grade=raw_obs.get("quality_grade", "") or "",
             obscured=bool(raw_obs.get("obscured", False)),
-            num_identification_agreements=int(raw_obs.get("num_identification_agreements", 0) or 0),
-            num_identification_disagreements=int(raw_obs.get("num_identification_disagreements", 0) or 0),
+            num_identification_agreements=int(
+                raw_obs.get("num_identification_agreements", 0) or 0
+            ),
+            num_identification_disagreements=int(
+                raw_obs.get("num_identification_disagreements", 0) or 0
+            ),
             created_at=raw_obs.get("created_at", "") or "",
             latitude=latitude,
             longitude=longitude,
@@ -385,10 +392,15 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
-def _parse_public_coordinates(raw_obs: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
+def _parse_public_coordinates(
+    raw_obs: Dict[str, Any],
+) -> tuple[Optional[float], Optional[float]]:
     """Return validated public ``(latitude, longitude)`` from a v1 record."""
     geojson = raw_obs.get("geojson")
-    if isinstance(geojson, dict) and str(geojson.get("type") or "").casefold() == "point":
+    if (
+        isinstance(geojson, dict)
+        and str(geojson.get("type") or "").casefold() == "point"
+    ):
         coordinates = geojson.get("coordinates")
         if isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
             validated = _validated_coordinates(coordinates[0], coordinates[1])
@@ -438,7 +450,9 @@ def _parse_user_ids(value: Any) -> List[int]:
     return ids
 
 
-def parse_observation_from_ident(raw_ident: Dict, target_user_login: str) -> Optional[StudyObservation]:
+def parse_observation_from_ident(
+    raw_ident: Dict, target_user_login: str
+) -> Optional[StudyObservation]:
     """
     Parse a StudyObservation from an identification API result.
 

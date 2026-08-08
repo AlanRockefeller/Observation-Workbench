@@ -1,4 +1,5 @@
 """Profile-scoped SQLite persistence for read-only remote reconciliation."""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,23 @@ from typing import Any, Iterable, Iterator, Optional, Sequence
 from PySide6.QtCore import QStandardPaths
 
 from .types import (
-    AuthoritativeLinkRow, CoordinateActionOption, CoordinateComparisonPreview,
-    ConsolidationEvidenceEdge, ConsolidationPreview,
-    InventoryObservation, ITSActionOption, ITSActionType,
-    ITSComparisonPreview, LinkRepairOption, LinkRepairPreview, ObservationPair,
-    PhotoActionOption, PhotoComparisonPreview, ReconciliationPlan,
-    ReconciliationProfile, RemoteSite,
+    AuthoritativeLinkRow,
+    CoordinateActionOption,
+    CoordinateComparisonPreview,
+    ConsolidationEvidenceEdge,
+    ConsolidationPreview,
+    InventoryObservation,
+    ITSActionOption,
+    ITSActionType,
+    ITSComparisonPreview,
+    LinkRepairOption,
+    LinkRepairPreview,
+    ObservationPair,
+    PhotoActionOption,
+    PhotoComparisonPreview,
+    ReconciliationPlan,
+    ReconciliationProfile,
+    RemoteSite,
 )
 from .consolidation_graph import (
     canonical_strong_anchor_signatures,
@@ -45,7 +57,11 @@ class ReconciliationDB:
 
     def __init__(self, path: Optional[Path] = None) -> None:
         if path is None:
-            root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+            root = Path(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppDataLocation
+                )
+            )
             path = root / "reconciliation.db"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +108,9 @@ class ReconciliationDB:
             conn = self.connection()
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             if version > SCHEMA_VERSION:
-                raise RuntimeError(f"Reconciliation database version {version} is newer than supported")
+                raise RuntimeError(
+                    f"Reconciliation database version {version} is newer than supported"
+                )
             if version == 0:
                 with self.transaction() as tx:
                     _migration_v1(tx)
@@ -184,14 +202,20 @@ class ReconciliationDB:
                     tx.execute("PRAGMA user_version=18")
                 version = 18
             if version != SCHEMA_VERSION:
-                raise RuntimeError(f"Incomplete reconciliation database migration: {version}")
+                raise RuntimeError(
+                    f"Incomplete reconciliation database migration: {version}"
+                )
 
     # Profiles ---------------------------------------------------------
 
     def profiles(self) -> list[ReconciliationProfile]:
-        rows = self.connection().execute(
-            "SELECT * FROM sync_profiles ORDER BY last_used_at DESC, profile_id DESC"
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_profiles ORDER BY last_used_at DESC, profile_id DESC"
+            )
+            .fetchall()
+        )
         return [ReconciliationProfile(**dict(row)) for row in rows]
 
     def save_profile(
@@ -213,29 +237,48 @@ class ReconciliationDB:
                 cursor = conn.execute(
                     "INSERT INTO sync_profiles(inat_user_id,inat_login,mo_user_id,mo_login,created_at,last_used_at) "
                     "VALUES(?,?,?,?,?,?)",
-                    (int(inat_user_id), inat_login.strip(), int(mo_user_id), mo_login.strip(), now, now),
+                    (
+                        int(inat_user_id),
+                        inat_login.strip(),
+                        int(mo_user_id),
+                        mo_login.strip(),
+                        now,
+                        now,
+                    ),
                 )
                 profile_id = int(cursor.lastrowid)
         return self.profile(profile_id)
 
     def profile(self, profile_id: int) -> ReconciliationProfile:
-        row = self.connection().execute(
-            "SELECT * FROM sync_profiles WHERE profile_id=?", (int(profile_id),)
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_profiles WHERE profile_id=?", (int(profile_id),)
+            )
+            .fetchone()
+        )
         if not row:
             raise KeyError(f"Unknown reconciliation profile {profile_id}")
         return ReconciliationProfile(**dict(row))
 
     def touch_profile(self, profile_id: int) -> None:
         self.connection().execute(
-            "UPDATE sync_profiles SET last_used_at=? WHERE profile_id=?", (_utc_now(), int(profile_id))
+            "UPDATE sync_profiles SET last_used_at=? WHERE profile_id=?",
+            (_utc_now(), int(profile_id)),
         )
 
     # Bindings / cursors / runs ---------------------------------------
 
     def save_field_binding(
-        self, profile_id: int, purpose: str, field_id: int, name: str,
-        datatype: str, verification_state: str, *, is_override: bool = False,
+        self,
+        profile_id: int,
+        purpose: str,
+        field_id: int,
+        name: str,
+        datatype: str,
+        verification_state: str,
+        *,
+        is_override: bool = False,
     ) -> None:
         self.connection().execute(
             "INSERT INTO sync_profile_field_bindings(profile_id,purpose,field_id,exact_name,datatype,"
@@ -244,14 +287,27 @@ class ReconciliationDB:
             "exact_name=excluded.exact_name,datatype=excluded.datatype,"
             "verification_state=excluded.verification_state,is_override=excluded.is_override,"
             "verified_at=excluded.verified_at",
-            (profile_id, purpose, field_id, name, datatype, verification_state, int(is_override), _utc_now()),
+            (
+                profile_id,
+                purpose,
+                field_id,
+                name,
+                datatype,
+                verification_state,
+                int(is_override),
+                _utc_now(),
+            ),
         )
 
     def field_binding(self, profile_id: int, purpose: str) -> Optional[sqlite3.Row]:
-        return self.connection().execute(
-            "SELECT * FROM sync_profile_field_bindings WHERE profile_id=? AND purpose=?",
-            (profile_id, purpose),
-        ).fetchone()
+        return (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_profile_field_bindings WHERE profile_id=? AND purpose=?",
+                (profile_id, purpose),
+            )
+            .fetchone()
+        )
 
     def mark_field_binding_invalid(self, profile_id: int, purpose: str) -> None:
         self.connection().execute(
@@ -268,7 +324,12 @@ class ReconciliationDB:
         return int(cur.lastrowid)
 
     def finish_run(
-        self, run_id: int, outcome: str, *, error: str = "", capabilities: str = "",
+        self,
+        run_id: int,
+        outcome: str,
+        *,
+        error: str = "",
+        capabilities: str = "",
     ) -> None:
         self.connection().execute(
             "UPDATE sync_runs SET outcome=?,finished_at=?,error_summary=?,capabilities=? WHERE run_id=?",
@@ -276,30 +337,44 @@ class ReconciliationDB:
         )
 
     def latest_run(self, profile_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT run_id,mode,outcome,started_at,finished_at,error_summary "
-            "FROM sync_runs WHERE profile_id=? ORDER BY run_id DESC LIMIT 1",
-            (profile_id,),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT run_id,mode,outcome,started_at,finished_at,error_summary "
+                "FROM sync_runs WHERE profile_id=? ORDER BY run_id DESC LIMIT 1",
+                (profile_id,),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def latest_successful_run(self, profile_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT run_id,mode,outcome,started_at,finished_at,error_summary "
-            "FROM sync_runs WHERE profile_id=? AND outcome='success' "
-            "ORDER BY run_id DESC LIMIT 1",
-            (profile_id,),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT run_id,mode,outcome,started_at,finished_at,error_summary "
+                "FROM sync_runs WHERE profile_id=? AND outcome='success' "
+                "ORDER BY run_id DESC LIMIT 1",
+                (profile_id,),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def cursor(self, profile_id: int, stream: str) -> str:
-        row = self.connection().execute(
-            "SELECT successful_scan_started_at FROM sync_cursors WHERE profile_id=? AND stream=?",
-            (profile_id, stream),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT successful_scan_started_at FROM sync_cursors WHERE profile_id=? AND stream=?",
+                (profile_id, stream),
+            )
+            .fetchone()
+        )
         return str(row[0]) if row else ""
 
-    def advance_cursor(self, profile_id: int, stream: str, scan_started_at: str) -> None:
+    def advance_cursor(
+        self, profile_id: int, stream: str, scan_started_at: str
+    ) -> None:
         self.connection().execute(
             "INSERT INTO sync_cursors(profile_id,stream,successful_scan_started_at,updated_at) VALUES(?,?,?,?) "
             "ON CONFLICT(profile_id,stream) DO UPDATE SET successful_scan_started_at=excluded.successful_scan_started_at,"
@@ -308,8 +383,12 @@ class ReconciliationDB:
         )
 
     def complete_successful_scan(
-        self, profile_id: int, run_id: int, scan_started_at: str,
-        streams: Iterable[str], capabilities: str,
+        self,
+        profile_id: int,
+        run_id: int,
+        scan_started_at: str,
+        streams: Iterable[str],
+        capabilities: str,
     ) -> None:
         """Atomically advance every successful cursor and close the run."""
         now = _utc_now()
@@ -333,12 +412,16 @@ class ReconciliationDB:
 
     # Inventory --------------------------------------------------------
 
-    def upsert_records(self, profile_id: int, observations: Iterable[InventoryObservation]) -> None:
+    def upsert_records(
+        self, profile_id: int, observations: Iterable[InventoryObservation]
+    ) -> None:
         with self.transaction() as conn:
             self._upsert_records_tx(conn, profile_id, observations)
 
     def _upsert_records_tx(
-        self, conn: sqlite3.Connection, profile_id: int,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
         observations: Iterable[InventoryObservation],
     ) -> None:
         now = _utc_now()
@@ -350,7 +433,9 @@ class ReconciliationDB:
                 "AND remote_observation_id=?",
                 (profile_id, site, observation_id),
             ).fetchone()
-            changed_at = now if not existing or existing[0] != item.content_fingerprint else None
+            changed_at = (
+                now if not existing or existing[0] != item.content_fingerprint else None
+            )
             conn.execute(
                 "INSERT INTO sync_records(profile_id,site,remote_observation_id,account_id,owner_id,owner_login,"
                 "observed_on,taxon_id,taxon_name,taxon_rank,public_locality,fungi_status,remote_updated_at,"
@@ -368,12 +453,26 @@ class ReconciliationDB:
                 "link_malformed=excluded.link_malformed,"
                 "changed_at=COALESCE(excluded.changed_at,sync_records.changed_at)",
                 (
-                    profile_id, site, observation_id, item.account_id, item.owner_id,
-                    item.owner_login, item.observed_on.isoformat() if item.observed_on else None,
-                    item.taxon_id, item.taxon_name, item.taxon_rank, item.public_locality,
-                    item.fungi_status, item.updated_at.isoformat() if item.updated_at else None,
-                    item.content_fingerprint, int(item.deleted), item.scope_state,
-                    "unpaired_no_candidate", now, int(item.link_malformed), changed_at,
+                    profile_id,
+                    site,
+                    observation_id,
+                    item.account_id,
+                    item.owner_id,
+                    item.owner_login,
+                    item.observed_on.isoformat() if item.observed_on else None,
+                    item.taxon_id,
+                    item.taxon_name,
+                    item.taxon_rank,
+                    item.public_locality,
+                    item.fungi_status,
+                    item.updated_at.isoformat() if item.updated_at else None,
+                    item.content_fingerprint,
+                    int(item.deleted),
+                    item.scope_state,
+                    "unpaired_no_candidate",
+                    now,
+                    int(item.link_malformed),
+                    changed_at,
                     item.availability_state,
                 ),
             )
@@ -383,9 +482,12 @@ class ReconciliationDB:
             )
             links = item.authoritative_links or tuple(
                 AuthoritativeLinkRow(
-                    f"{site}:{observation_id}:{index}", None,
+                    f"{site}:{observation_id}:{index}",
+                    None,
                     RemoteSite.MO if site == "inat" else RemoteSite.INAT,
-                    target_id, "valid", item.content_fingerprint,
+                    target_id,
+                    "valid",
+                    item.content_fingerprint,
                 )
                 for index, target_id in enumerate(item.authoritative_targets)
             )
@@ -394,9 +496,19 @@ class ReconciliationDB:
                     "INSERT INTO sync_links(profile_id,link_row_id,source_site,source_observation_id,"
                     "target_site,target_observation_id,direction,link_state,external_site_id,parse_state,fingerprint) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (profile_id, link.row_id, site, observation_id, link.target_site.value,
-                     link.target_observation_id, f"{site}_to_{link.target_site.value}",
-                     link.parse_state, link.external_site_id, link.parse_state, link.fingerprint),
+                    (
+                        profile_id,
+                        link.row_id,
+                        site,
+                        observation_id,
+                        link.target_site.value,
+                        link.target_observation_id,
+                        f"{site}_to_{link.target_site.value}",
+                        link.parse_state,
+                        link.external_site_id,
+                        link.parse_state,
+                        link.fingerprint,
+                    ),
                 )
             if item.inventory_identifiers is not None:
                 conn.execute(
@@ -441,17 +553,33 @@ class ReconciliationDB:
                     "INSERT OR IGNORE INTO sync_media_hashes(profile_id,site,observation_id,photo_id,rendition,"
                     "source_fingerprint,exact_pixel_hash,perceptual_hash,source_site,source_photo_id) "
                     "VALUES(?,?,?,?,?,'','','',?,?)",
-                    (profile_id, site, observation_id, media.photo_id, media.rendition,
-                     media.source_site.value if media.source_site else None, media.source_photo_id),
+                    (
+                        profile_id,
+                        site,
+                        observation_id,
+                        media.photo_id,
+                        media.rendition,
+                        media.source_site.value if media.source_site else None,
+                        media.source_photo_id,
+                    ),
                 )
                 conn.execute(
                     "UPDATE sync_media_hashes SET source_site=?,source_photo_id=? WHERE profile_id=? AND site=? "
                     "AND observation_id=? AND photo_id=? AND rendition=?",
-                    (media.source_site.value if media.source_site else None, media.source_photo_id,
-                     profile_id, site, observation_id, media.photo_id, media.rendition),
+                    (
+                        media.source_site.value if media.source_site else None,
+                        media.source_photo_id,
+                        profile_id,
+                        site,
+                        observation_id,
+                        media.photo_id,
+                        media.rendition,
+                    ),
                 )
 
-    def mark_deleted(self, profile_id: int, site: str, observation_ids: Iterable[int]) -> None:
+    def mark_deleted(
+        self, profile_id: int, site: str, observation_ids: Iterable[int]
+    ) -> None:
         ids = [int(value) for value in observation_ids]
         with self.transaction() as conn:
             for observation_id in ids:
@@ -467,34 +595,41 @@ class ReconciliationDB:
         with self.transaction() as conn:
             self._invalidate_confirmations_tx(conn, profile_id)
 
-    def _invalidate_confirmations_tx(self, conn: sqlite3.Connection, profile_id: int) -> None:
+    def _invalidate_confirmations_tx(
+        self, conn: sqlite3.Connection, profile_id: int
+    ) -> None:
         self._invalidate_pairs_tx(conn, profile_id)
         conn.execute(
             "UPDATE sync_pairs SET review_state='candidate',confirmed_by='',updated_at=? "
             "WHERE profile_id=? AND review_state='confirmed' AND ("
-                "EXISTS (SELECT 1 FROM sync_records r WHERE r.profile_id=sync_pairs.profile_id AND r.site='mo' "
-                "AND r.remote_observation_id=sync_pairs.mo_observation_id AND r.owner_id IS NOT r.account_id) OR "
-                "EXISTS (SELECT 1 FROM sync_records r WHERE r.profile_id=sync_pairs.profile_id AND r.site='inat' "
-                "AND r.remote_observation_id=sync_pairs.inat_observation_id AND r.owner_id IS NOT r.account_id) OR "
-                "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='mo' "
-                "AND l.source_observation_id=sync_pairs.mo_observation_id AND (l.target_site!='inat' "
-                "OR l.target_observation_id!=sync_pairs.inat_observation_id)) OR "
-                "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='inat' "
-                "AND l.source_observation_id=sync_pairs.inat_observation_id AND (l.target_site!='mo' "
-                "OR l.target_observation_id!=sync_pairs.mo_observation_id)) OR "
-                "(confirmed_by='reciprocal_link' AND NOT ("
-                "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='mo' "
-                "AND l.source_observation_id=sync_pairs.mo_observation_id AND l.target_site='inat' "
-                "AND l.target_observation_id=sync_pairs.inat_observation_id) AND "
-                "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='inat' "
-                "AND l.source_observation_id=sync_pairs.inat_observation_id AND l.target_site='mo' "
-                "AND l.target_observation_id=sync_pairs.mo_observation_id))))",
+            "EXISTS (SELECT 1 FROM sync_records r WHERE r.profile_id=sync_pairs.profile_id AND r.site='mo' "
+            "AND r.remote_observation_id=sync_pairs.mo_observation_id AND r.owner_id IS NOT r.account_id) OR "
+            "EXISTS (SELECT 1 FROM sync_records r WHERE r.profile_id=sync_pairs.profile_id AND r.site='inat' "
+            "AND r.remote_observation_id=sync_pairs.inat_observation_id AND r.owner_id IS NOT r.account_id) OR "
+            "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='mo' "
+            "AND l.source_observation_id=sync_pairs.mo_observation_id AND (l.target_site!='inat' "
+            "OR l.target_observation_id!=sync_pairs.inat_observation_id)) OR "
+            "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='inat' "
+            "AND l.source_observation_id=sync_pairs.inat_observation_id AND (l.target_site!='mo' "
+            "OR l.target_observation_id!=sync_pairs.mo_observation_id)) OR "
+            "(confirmed_by='reciprocal_link' AND NOT ("
+            "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='mo' "
+            "AND l.source_observation_id=sync_pairs.mo_observation_id AND l.target_site='inat' "
+            "AND l.target_observation_id=sync_pairs.inat_observation_id) AND "
+            "EXISTS (SELECT 1 FROM sync_links l WHERE l.profile_id=sync_pairs.profile_id AND l.source_site='inat' "
+            "AND l.source_observation_id=sync_pairs.inat_observation_id AND l.target_site='mo' "
+            "AND l.target_observation_id=sync_pairs.mo_observation_id))))",
             (_utc_now(), profile_id),
         )
 
     def store_sequence_hashes(
-        self, profile_id: int, site: str, observation_id: int, hashes: Iterable[str],
-        *, evidence_tier: int = 2,
+        self,
+        profile_id: int,
+        site: str,
+        observation_id: int,
+        hashes: Iterable[str],
+        *,
+        evidence_tier: int = 2,
     ) -> None:
         with self.transaction() as conn:
             conn.execute(
@@ -511,8 +646,13 @@ class ReconciliationDB:
                     )
 
     def store_identifiers(
-        self, profile_id: int, site: str, observation_id: int,
-        identifiers: Iterable[tuple[str, str]], *, evidence_tier: int = 2,
+        self,
+        profile_id: int,
+        site: str,
+        observation_id: int,
+        identifiers: Iterable[tuple[str, str]],
+        *,
+        evidence_tier: int = 2,
     ) -> None:
         values = {(str(kind), str(value)) for kind, value in identifiers if value}
         with self.transaction() as conn:
@@ -529,9 +669,16 @@ class ReconciliationDB:
                 )
 
     def refresh_its_evidence(
-        self, profile_id: int, pair_id: int, *, mo_observation_id: int,
-        inat_observation_id: int, mo_hashes: Iterable[str], inat_hashes: Iterable[str],
-        mo_accessions: Iterable[tuple[str, str]], inat_accessions: Iterable[tuple[str, str]],
+        self,
+        profile_id: int,
+        pair_id: int,
+        *,
+        mo_observation_id: int,
+        inat_observation_id: int,
+        mo_hashes: Iterable[str],
+        inat_hashes: Iterable[str],
+        mo_accessions: Iterable[tuple[str, str]],
+        inat_accessions: Iterable[tuple[str, str]],
     ) -> None:
         """Persist only safe ITS derivatives and recalculate barcode support.
 
@@ -555,12 +702,14 @@ class ReconciliationDB:
             for site in ("mo", "inat"):
                 conn.execute(
                     "DELETE FROM sync_sequence_hashes WHERE profile_id=? AND site=? AND observation_id=? "
-                    "AND evidence_tier=3", (profile_id, site, ids[site]),
+                    "AND evidence_tier=3",
+                    (profile_id, site, ids[site]),
                 )
                 for digest in hashes[site]:
                     conn.execute(
                         "INSERT INTO sync_sequence_hashes(profile_id,site,observation_id,sequence_hash,evidence_tier) "
-                        "VALUES(?,?,?,?,3)", (profile_id, site, ids[site], digest),
+                        "VALUES(?,?,?,?,3)",
+                        (profile_id, site, ids[site], digest),
                     )
                 conn.execute(
                     "DELETE FROM sync_identifiers WHERE profile_id=? AND site=? AND observation_id=? "
@@ -582,30 +731,53 @@ class ReconciliationDB:
             )
             additions: list[MatchEvidence] = []
             if hashes["mo"].intersection(hashes["inat"]):
-                additions.append(MatchEvidence(
-                    "sequence_equivalence", EvidenceFamily.BARCODE, 35,
-                    "Normalized sequences are equal, including reverse-complement equivalence.",
-                    EvidenceTier.DEEP,
-                ))
+                additions.append(
+                    MatchEvidence(
+                        "sequence_equivalence",
+                        EvidenceFamily.BARCODE,
+                        35,
+                        "Normalized sequences are equal, including reverse-complement equivalence.",
+                        EvidenceTier.DEEP,
+                    )
+                )
             if accessions["mo"].intersection(accessions["inat"]):
-                additions.append(MatchEvidence(
-                    "exact_accession", EvidenceFamily.BARCODE, 35,
-                    "Exact normalized accession matches.", EvidenceTier.DEEP,
-                ))
+                additions.append(
+                    MatchEvidence(
+                        "exact_accession",
+                        EvidenceFamily.BARCODE,
+                        35,
+                        "Exact normalized accession matches.",
+                        EvidenceTier.DEEP,
+                    )
+                )
             for item in additions:
                 conn.execute(
                     "INSERT INTO sync_evidence(profile_id,pair_id,evidence_type,family,score,tier,explanation) "
                     "VALUES(?,?,?,?,?,?,?)",
-                    (profile_id, pair_id, item.evidence_type, item.family.value,
-                     item.score, int(item.tier), item.explanation),
+                    (
+                        profile_id,
+                        pair_id,
+                        item.evidence_type,
+                        item.family.value,
+                        item.score,
+                        int(item.tier),
+                        item.explanation,
+                    ),
                 )
-            current = [MatchEvidence(
-                str(row["evidence_type"]), EvidenceFamily(str(row["family"])),
-                int(row["score"]), str(row["explanation"]), EvidenceTier(int(row["tier"])),
-            ) for row in conn.execute(
-                "SELECT evidence_type,family,score,tier,explanation FROM sync_evidence "
-                "WHERE profile_id=? AND pair_id=?", (profile_id, pair_id),
-            ).fetchall()]
+            current = [
+                MatchEvidence(
+                    str(row["evidence_type"]),
+                    EvidenceFamily(str(row["family"])),
+                    int(row["score"]),
+                    str(row["explanation"]),
+                    EvidenceTier(int(row["tier"])),
+                )
+                for row in conn.execute(
+                    "SELECT evidence_type,family,score,tier,explanation FROM sync_evidence "
+                    "WHERE profile_id=? AND pair_id=?",
+                    (profile_id, pair_id),
+                ).fetchall()
+            ]
             score = score_evidence(current)
             conn.execute(
                 "UPDATE sync_pairs SET score=?,classification=?,updated_at=? "
@@ -614,39 +786,80 @@ class ReconciliationDB:
             )
 
     def store_media_hash(
-        self, profile_id: int, site: str, photo_id: str, rendition: str,
-        source_fingerprint: str, exact_pixel_hash: str, perceptual_hash: str,
+        self,
+        profile_id: int,
+        site: str,
+        photo_id: str,
+        rendition: str,
+        source_fingerprint: str,
+        exact_pixel_hash: str,
+        perceptual_hash: str,
     ) -> None:
         self.connection().execute(
             "UPDATE sync_media_hashes SET source_fingerprint=?,exact_pixel_hash=?,perceptual_hash=? "
             "WHERE profile_id=? AND site=? AND photo_id=? AND rendition=?",
-            (source_fingerprint, exact_pixel_hash, perceptual_hash,
-             profile_id, site, photo_id, rendition),
+            (
+                source_fingerprint,
+                exact_pixel_hash,
+                perceptual_hash,
+                profile_id,
+                site,
+                photo_id,
+                rendition,
+            ),
         )
 
     def media_hash_pairs(
-        self, profile_id: int, site: str, photo_id: str, rendition: str,
+        self,
+        profile_id: int,
+        site: str,
+        photo_id: str,
+        rendition: str,
     ) -> list[tuple[int, int, bool]]:
-        source_rows = self.connection().execute(
-            "SELECT observation_id,exact_pixel_hash,perceptual_hash FROM sync_media_hashes "
-            "WHERE profile_id=? AND site=? AND photo_id=? AND rendition=?",
-            (profile_id, site, photo_id, rendition),
-        ).fetchall()
+        source_rows = (
+            self.connection()
+            .execute(
+                "SELECT observation_id,exact_pixel_hash,perceptual_hash FROM sync_media_hashes "
+                "WHERE profile_id=? AND site=? AND photo_id=? AND rendition=?",
+                (profile_id, site, photo_id, rendition),
+            )
+            .fetchall()
+        )
         opposite = "mo" if site == "inat" else "inat"
         pairs: set[tuple[int, int, bool]] = set()
         for source in source_rows:
             if not source["exact_pixel_hash"] and not source["perceptual_hash"]:
                 continue
-            matches = self.connection().execute(
-                "SELECT observation_id,exact_pixel_hash,perceptual_hash FROM sync_media_hashes "
-                "WHERE profile_id=? AND site=? AND ((exact_pixel_hash!='' AND exact_pixel_hash=?) OR "
-                "(perceptual_hash!='' AND perceptual_hash=?))",
-                (profile_id, opposite, source["exact_pixel_hash"], source["perceptual_hash"]),
-            ).fetchall()
+            matches = (
+                self.connection()
+                .execute(
+                    "SELECT observation_id,exact_pixel_hash,perceptual_hash FROM sync_media_hashes "
+                    "WHERE profile_id=? AND site=? AND ((exact_pixel_hash!='' AND exact_pixel_hash=?) OR "
+                    "(perceptual_hash!='' AND perceptual_hash=?))",
+                    (
+                        profile_id,
+                        opposite,
+                        source["exact_pixel_hash"],
+                        source["perceptual_hash"],
+                    ),
+                )
+                .fetchall()
+            )
             for match in matches:
-                exact = bool(source["exact_pixel_hash"] and source["exact_pixel_hash"] == match["exact_pixel_hash"])
-                mo_id = int(source["observation_id"] if site == "mo" else match["observation_id"])
-                inat_id = int(source["observation_id"] if site == "inat" else match["observation_id"])
+                exact = bool(
+                    source["exact_pixel_hash"]
+                    and source["exact_pixel_hash"] == match["exact_pixel_hash"]
+                )
+                mo_id = int(
+                    source["observation_id"]
+                    if site == "mo"
+                    else match["observation_id"]
+                )
+                inat_id = int(
+                    source["observation_id"]
+                    if site == "inat"
+                    else match["observation_id"]
+                )
                 pairs.add((mo_id, inat_id, exact))
         return sorted(pairs)
 
@@ -657,7 +870,10 @@ class ReconciliationDB:
             return self._replace_candidate_tx(conn, profile_id, pair)
 
     def _replace_candidate_tx(
-        self, conn: sqlite3.Connection, profile_id: int, pair: ObservationPair,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        pair: ObservationPair,
     ) -> int:
         existing = conn.execute(
             "SELECT pair_id,review_state,confirmed_by FROM sync_pairs WHERE profile_id=? AND mo_observation_id=? "
@@ -668,45 +884,84 @@ class ReconciliationDB:
             pair_id = int(existing[0])
             review_state = str(existing[1])
             confirmed_by = str(existing[2])
-            if (review_state == "confirmed" and confirmed_by == "reciprocal_link"
-                    and pair.state != "link_confirmed"):
+            if (
+                review_state == "confirmed"
+                and confirmed_by == "reciprocal_link"
+                and pair.state != "link_confirmed"
+            ):
                 review_state = "candidate"
                 confirmed_by = ""
             conn.execute(
                 "UPDATE sync_pairs SET link_state=?,score=?,classification=?,review_state=?,"
                 "confirmed_by=?,updated_at=? WHERE pair_id=?",
-                (pair.state, pair.score, _classification(pair.score), review_state,
-                 confirmed_by, _utc_now(), pair_id),
+                (
+                    pair.state,
+                    pair.score,
+                    _classification(pair.score),
+                    review_state,
+                    confirmed_by,
+                    _utc_now(),
+                    pair_id,
+                ),
             )
         else:
             cur = conn.execute(
                 "INSERT INTO sync_pairs(profile_id,mo_observation_id,inat_observation_id,link_state,score,"
                 "classification,review_state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (profile_id, pair.mo_observation_id, pair.inat_observation_id, pair.state,
-                 pair.score, _classification(pair.score), "candidate", _utc_now(), _utc_now()),
+                (
+                    profile_id,
+                    pair.mo_observation_id,
+                    pair.inat_observation_id,
+                    pair.state,
+                    pair.score,
+                    _classification(pair.score),
+                    "candidate",
+                    _utc_now(),
+                    _utc_now(),
+                ),
             )
             pair_id = int(cur.lastrowid)
-        conn.execute("DELETE FROM sync_evidence WHERE profile_id=? AND pair_id=?", (profile_id, pair_id))
+        conn.execute(
+            "DELETE FROM sync_evidence WHERE profile_id=? AND pair_id=?",
+            (profile_id, pair_id),
+        )
         for evidence in pair.evidence:
             conn.execute(
                 "INSERT INTO sync_evidence(profile_id,pair_id,evidence_type,family,score,tier,explanation) "
                 "VALUES(?,?,?,?,?,?,?)",
-                (profile_id, pair_id, evidence.evidence_type, evidence.family.value, evidence.score,
-                 int(evidence.tier), evidence.explanation),
+                (
+                    profile_id,
+                    pair_id,
+                    evidence.evidence_type,
+                    evidence.family.value,
+                    evidence.score,
+                    int(evidence.tier),
+                    evidence.explanation,
+                ),
             )
         return pair_id
 
     def prune_candidates(
-        self, profile_id: int, active_pairs: Iterable[tuple[int, int]],
+        self,
+        profile_id: int,
+        active_pairs: Iterable[tuple[int, int]],
     ) -> None:
         active = set(active_pairs)
-        rows = self.connection().execute(
-            "SELECT pair_id,mo_observation_id,inat_observation_id FROM sync_pairs "
-            "WHERE profile_id=? AND review_state='candidate' AND ever_reviewed=0 AND ever_confirmed=0",
-            (profile_id,),
-        ).fetchall()
-        stale = [int(row["pair_id"]) for row in rows
-                 if (int(row["mo_observation_id"]), int(row["inat_observation_id"])) not in active]
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT pair_id,mo_observation_id,inat_observation_id FROM sync_pairs "
+                "WHERE profile_id=? AND review_state='candidate' AND ever_reviewed=0 AND ever_confirmed=0",
+                (profile_id,),
+            )
+            .fetchall()
+        )
+        stale = [
+            int(row["pair_id"])
+            for row in rows
+            if (int(row["mo_observation_id"]), int(row["inat_observation_id"]))
+            not in active
+        ]
         if not stale:
             return
         with self.transaction() as conn:
@@ -738,15 +993,31 @@ class ReconciliationDB:
                 "ever_confirmed=CASE WHEN ?='confirmed' THEN 1 ELSE ever_confirmed END,"
                 "historical_confirmed_by=CASE WHEN ?='confirmed' THEN 'user' ELSE historical_confirmed_by END,"
                 "updated_at=? WHERE profile_id=? AND pair_id=?",
-                (state, "user" if state == "confirmed" else "", state, state,
-                 _utc_now(), profile_id, pair_id),
+                (
+                    state,
+                    "user" if state == "confirmed" else "",
+                    state,
+                    state,
+                    _utc_now(),
+                    profile_id,
+                    pair_id,
+                ),
             )
             if state == "rejected":
-                fingerprint = self._pair_source_fingerprint_tx(conn, profile_id, row[0], row[1])
+                fingerprint = self._pair_source_fingerprint_tx(
+                    conn, profile_id, row[0], row[1]
+                )
                 conn.execute(
                     "INSERT OR REPLACE INTO sync_pair_exclusions(profile_id,mo_observation_id,"
                     "inat_observation_id,reason,created_at,source_fingerprint) VALUES(?,?,?,?,?,?)",
-                    (profile_id, row[0], row[1], "user_rejected", _utc_now(), fingerprint),
+                    (
+                        profile_id,
+                        row[0],
+                        row[1],
+                        "user_rejected",
+                        _utc_now(),
+                        fingerprint,
+                    ),
                 )
                 conn.execute(
                     "UPDATE sync_records SET unpaired_state='unpaired_with_rejected_candidates' "
@@ -756,7 +1027,11 @@ class ReconciliationDB:
                 )
 
     def _clear_rejected_unpaired_state_tx(
-        self, conn: sqlite3.Connection, profile_id: int, mo_id: int, inat_id: int,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        mo_id: int,
+        inat_id: int,
     ) -> None:
         """Undo the record-level half of a rejection once its exclusion is gone.
 
@@ -791,13 +1066,21 @@ class ReconciliationDB:
             return self._auto_confirm_pair_tx(conn, profile_id, pair_id)
 
     def _auto_confirm_pair_tx(
-        self, conn: sqlite3.Connection, profile_id: int, pair_id: int,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        pair_id: int,
     ) -> bool:
         row = conn.execute(
             "SELECT mo_observation_id,inat_observation_id,link_state,review_state,confirmed_by FROM sync_pairs "
-            "WHERE profile_id=? AND pair_id=?", (profile_id, pair_id),
+            "WHERE profile_id=? AND pair_id=?",
+            (profile_id, pair_id),
         ).fetchone()
-        if not row or row["link_state"] != "link_confirmed" or row["review_state"] == "rejected":
+        if (
+            not row
+            or row["link_state"] != "link_confirmed"
+            or row["review_state"] == "rejected"
+        ):
             return False
         if row["review_state"] == "confirmed":
             return True
@@ -865,7 +1148,9 @@ class ReconciliationDB:
                     "AND evidence_tier=3",
                     (profile_id, site, observation_id),
                 )
-                pair_column = "mo_observation_id" if site == "mo" else "inat_observation_id"
+                pair_column = (
+                    "mo_observation_id" if site == "mo" else "inat_observation_id"
+                )
                 conn.execute(
                     "DELETE FROM sync_evidence WHERE profile_id=? AND tier>=3 AND pair_id IN "
                     f"(SELECT pair_id FROM sync_pairs WHERE profile_id=? AND {pair_column}=?)",
@@ -919,7 +1204,15 @@ class ReconciliationDB:
                     "ON CONFLICT(profile_id,purpose) DO UPDATE SET field_id=excluded.field_id,"
                     "exact_name=excluded.exact_name,datatype=excluded.datatype,verification_state='verified',"
                     "is_override=excluded.is_override,verified_at=excluded.verified_at",
-                    (profile_id, purpose, field_id, exact_name, datatype, int(override), now),
+                    (
+                        profile_id,
+                        purpose,
+                        field_id,
+                        exact_name,
+                        datatype,
+                        int(override),
+                        now,
+                    ),
                 )
             for purpose in invalid_bindings:
                 conn.execute(
@@ -934,7 +1227,10 @@ class ReconciliationDB:
                 (profile_id,),
             ).fetchall()
             for row in stale:
-                if (int(row["mo_observation_id"]), int(row["inat_observation_id"])) not in active:
+                if (
+                    int(row["mo_observation_id"]),
+                    int(row["inat_observation_id"]),
+                ) not in active:
                     conn.execute(
                         "DELETE FROM sync_pairs WHERE profile_id=? AND pair_id=?",
                         (profile_id, int(row["pair_id"])),
@@ -945,10 +1241,15 @@ class ReconciliationDB:
                 pair_ids[key] = self._replace_candidate_tx(conn, profile_id, pair)
             auto_keys = set(plan.auto_confirm_pairs)
             for key, pair_id in pair_ids.items():
-                if key in auto_keys and not self._auto_confirm_pair_tx(conn, profile_id, pair_id):
+                if key in auto_keys and not self._auto_confirm_pair_tx(
+                    conn, profile_id, pair_id
+                ):
                     mo_id, inat_id = key
                     self._upsert_issue_tx(
-                        conn, profile_id, "link_one_to_one_conflict", "warning",
+                        conn,
+                        profile_id,
+                        "link_one_to_one_conflict",
+                        "warning",
                         f"One-to-one pair conflict: MO {mo_id} ↔ iNat {inat_id}",
                         "A local exclusion, rejection, or existing confirmed pair prevented automatic confirmation.",
                         _local_fingerprint(mo_id, inat_id, "link_confirmed"),
@@ -956,9 +1257,17 @@ class ReconciliationDB:
                     )
             for issue in plan.issues:
                 self._upsert_issue_tx(
-                    conn, profile_id, issue.issue_type, issue.severity, issue.title,
-                    issue.detail, issue.fingerprint,
-                    tuple((record.site.value, record.observation_id) for record in issue.records),
+                    conn,
+                    profile_id,
+                    issue.issue_type,
+                    issue.severity,
+                    issue.title,
+                    issue.detail,
+                    issue.fingerprint,
+                    tuple(
+                        (record.site.value, record.observation_id)
+                        for record in issue.records
+                    ),
                 )
             for stream in streams:
                 conn.execute(
@@ -978,12 +1287,25 @@ class ReconciliationDB:
             )
 
     def upsert_issue(
-        self, profile_id: int, issue_type: str, severity: str, title: str,
-        detail: str, fingerprint: str, records: Sequence[tuple[str, int]] = (),
+        self,
+        profile_id: int,
+        issue_type: str,
+        severity: str,
+        title: str,
+        detail: str,
+        fingerprint: str,
+        records: Sequence[tuple[str, int]] = (),
     ) -> int:
         with self.transaction() as conn:
             return self._upsert_issue_tx(
-                conn, profile_id, issue_type, severity, title, detail, fingerprint, records
+                conn,
+                profile_id,
+                issue_type,
+                severity,
+                title,
+                detail,
+                fingerprint,
+                records,
             )
 
     def set_pair_excluded(self, profile_id: int, pair_id: int, excluded: bool) -> None:
@@ -995,11 +1317,20 @@ class ReconciliationDB:
             if not row:
                 return
             if excluded:
-                fingerprint = self._pair_source_fingerprint_tx(conn, profile_id, row[0], row[1])
+                fingerprint = self._pair_source_fingerprint_tx(
+                    conn, profile_id, row[0], row[1]
+                )
                 conn.execute(
                     "INSERT OR REPLACE INTO sync_pair_exclusions(profile_id,mo_observation_id,inat_observation_id,"
                     "reason,created_at,source_fingerprint) VALUES(?,?,?,?,?,?)",
-                    (profile_id, row[0], row[1], "user_excluded", _utc_now(), fingerprint),
+                    (
+                        profile_id,
+                        row[0],
+                        row[1],
+                        "user_excluded",
+                        _utc_now(),
+                        fingerprint,
+                    ),
                 )
                 conn.execute(
                     "UPDATE sync_pairs SET review_state='candidate',confirmed_by='',ever_reviewed=1,updated_at=? "
@@ -1020,7 +1351,11 @@ class ReconciliationDB:
                 self._clear_rejected_unpaired_state_tx(conn, profile_id, row[0], row[1])
 
     def _pair_source_fingerprint_tx(
-        self, conn: sqlite3.Connection, profile_id: int, mo_id: int, inat_id: int,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        mo_id: int,
+        inat_id: int,
     ) -> str:
         rows = conn.execute(
             "SELECT site,content_fingerprint FROM sync_records WHERE profile_id=? AND "
@@ -1029,23 +1364,34 @@ class ReconciliationDB:
             (profile_id, mo_id, inat_id),
         ).fetchall()
         import hashlib
+
         return hashlib.sha256(
             "\x1f".join(str(row["content_fingerprint"]) for row in rows).encode("utf-8")
         ).hexdigest()
 
     def pair_is_excluded(self, profile_id: int, pair_id: int) -> bool:
-        row = self.connection().execute(
-            "SELECT 1 FROM sync_pair_exclusions e JOIN sync_pairs p ON p.profile_id=e.profile_id "
-            "AND p.mo_observation_id=e.mo_observation_id AND p.inat_observation_id=e.inat_observation_id "
-            "WHERE p.profile_id=? AND p.pair_id=?",
-            (profile_id, pair_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT 1 FROM sync_pair_exclusions e JOIN sync_pairs p ON p.profile_id=e.profile_id "
+                "AND p.mo_observation_id=e.mo_observation_id AND p.inat_observation_id=e.inat_observation_id "
+                "WHERE p.profile_id=? AND p.pair_id=?",
+                (profile_id, pair_id),
+            )
+            .fetchone()
+        )
         return row is not None
 
-    def set_confirmed_missing(self, profile_id: int, site: str, observation_id: int, missing: bool) -> None:
+    def set_confirmed_missing(
+        self, profile_id: int, site: str, observation_id: int, missing: bool
+    ) -> None:
         if site not in {"mo", "inat"}:
             raise ValueError("Invalid site")
-        state = ("confirmed_missing_on_inat" if site == "mo" else "confirmed_missing_on_mo") if missing else "unpaired_no_candidate"
+        state = (
+            ("confirmed_missing_on_inat" if site == "mo" else "confirmed_missing_on_mo")
+            if missing
+            else "unpaired_no_candidate"
+        )
         self.connection().execute(
             "UPDATE sync_records SET unpaired_state=? WHERE profile_id=? AND site=? AND remote_observation_id=?",
             (state, profile_id, site, observation_id),
@@ -1073,17 +1419,26 @@ class ReconciliationDB:
     # Gate 1B link-repair review and durable action journal ---------------
 
     def review_link_issue(
-        self, profile_id: int, issue_id: int, intent: str,
-        mo_observation_id: Optional[int], inat_observation_id: Optional[int],
+        self,
+        profile_id: int,
+        issue_id: int,
+        intent: str,
+        mo_observation_id: Optional[int],
+        inat_observation_id: Optional[int],
     ) -> None:
         if intent not in {"reciprocal", "remove_only"}:
             raise ValueError("Invalid link-repair review intent")
-        row = self.connection().execute(
-            "SELECT fingerprint,issue_type,state FROM sync_issues WHERE profile_id=? AND issue_id=?",
-            (profile_id, issue_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT fingerprint,issue_type,state FROM sync_issues WHERE profile_id=? AND issue_id=?",
+                (profile_id, issue_id),
+            )
+            .fetchone()
+        )
         if (
-            not row or str(row["state"]) != "open"
+            not row
+            or str(row["state"]) != "open"
             or str(row["issue_type"]) not in REPAIRABLE_LINK_ISSUE_TYPES
         ):
             raise ValueError("Only current link issues can be reviewed for repair")
@@ -1091,21 +1446,33 @@ class ReconciliationDB:
         inat_id = int(inat_observation_id or 0)
         if mo_id <= 0 or inat_id <= 0:
             raise ValueError("A link-issue review requires both exact observation IDs")
-        issue_records = self.connection().execute(
-            "SELECT site,observation_id FROM sync_issue_records WHERE profile_id=? AND issue_id=?",
-            (profile_id, issue_id),
-        ).fetchall()
+        issue_records = (
+            self.connection()
+            .execute(
+                "SELECT site,observation_id FROM sync_issue_records WHERE profile_id=? AND issue_id=?",
+                (profile_id, issue_id),
+            )
+            .fetchall()
+        )
         if not issue_records:
             raise ValueError("The issue is not tied to a remote observation")
         by_site: dict[str, set[int]] = {}
         for record in issue_records:
-            by_site.setdefault(str(record["site"]), set()).add(int(record["observation_id"]))
+            by_site.setdefault(str(record["site"]), set()).add(
+                int(record["observation_id"])
+            )
         if len(by_site.get("mo", set())) > 1 or len(by_site.get("inat", set())) > 1:
-            raise ValueError("The issue does not identify a unique record on each represented site")
+            raise ValueError(
+                "The issue does not identify a unique record on each represented site"
+            )
         if by_site.get("mo") and mo_id not in by_site["mo"]:
-            raise ValueError("The reviewed MO observation does not match the issue record")
+            raise ValueError(
+                "The reviewed MO observation does not match the issue record"
+            )
         if by_site.get("inat") and inat_id not in by_site["inat"]:
-            raise ValueError("The reviewed iNaturalist observation does not match the issue record")
+            raise ValueError(
+                "The reviewed iNaturalist observation does not match the issue record"
+            )
         reviewed_at = _utc_now()
         self.connection().execute(
             "INSERT INTO sync_link_issue_reviews(profile_id,issue_id,review_intent,"
@@ -1114,8 +1481,15 @@ class ReconciliationDB:
             "review_intent=excluded.review_intent,mo_observation_id=excluded.mo_observation_id,"
             "inat_observation_id=excluded.inat_observation_id,issue_fingerprint=excluded.issue_fingerprint,"
             "review_state='approved',reviewed_at=excluded.reviewed_at",
-            (profile_id, issue_id, intent, mo_id, inat_id,
-             str(row["fingerprint"]), reviewed_at),
+            (
+                profile_id,
+                issue_id,
+                intent,
+                mo_id,
+                inat_id,
+                str(row["fingerprint"]),
+                reviewed_at,
+            ),
         )
 
     def revoke_link_issue_review(self, profile_id: int, issue_id: int) -> None:
@@ -1124,19 +1498,27 @@ class ReconciliationDB:
             (profile_id, issue_id),
         )
 
-    def link_issue_review(self, profile_id: int, issue_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT r.* FROM sync_link_issue_reviews r JOIN sync_issues i "
-            "ON i.profile_id=r.profile_id AND i.issue_id=r.issue_id "
-            "WHERE r.profile_id=? AND r.issue_id=? AND r.review_state='approved' "
-            "AND r.issue_fingerprint=i.fingerprint AND i.state='open' "
-            "AND i.issue_type IN ('one_way_link','malformed_link')",
-            (profile_id, issue_id),
-        ).fetchone()
+    def link_issue_review(
+        self, profile_id: int, issue_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT r.* FROM sync_link_issue_reviews r JOIN sync_issues i "
+                "ON i.profile_id=r.profile_id AND i.issue_id=r.issue_id "
+                "WHERE r.profile_id=? AND r.issue_id=? AND r.review_state='approved' "
+                "AND r.issue_fingerprint=i.fingerprint AND i.state='open' "
+                "AND i.issue_type IN ('one_way_link','malformed_link')",
+                (profile_id, issue_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def journal_link_actions(
-        self, preview: LinkRepairPreview, options: Sequence[LinkRepairOption],
+        self,
+        preview: LinkRepairPreview,
+        options: Sequence[LinkRepairOption],
     ) -> tuple[int, tuple[int, ...]]:
         """Atomically persist an explicitly confirmed preview selection."""
         if not options:
@@ -1161,32 +1543,53 @@ class ReconciliationDB:
                     (preview.profile_id, preview.issue_id),
                 ).fetchone()
                 if not review:
-                    raise ValueError("The source link issue review is no longer current")
+                    raise ValueError(
+                        "The source link issue review is no longer current"
+                    )
                 if str(review["issue_type"]) not in REPAIRABLE_LINK_ISSUE_TYPES:
                     raise ValueError("This issue type cannot authorize remote writes")
                 if (
                     int(review["mo_observation_id"] or 0) != preview.mo_observation_id
-                    or int(review["inat_observation_id"] or 0) != preview.inat_observation_id
+                    or int(review["inat_observation_id"] or 0)
+                    != preview.inat_observation_id
                     or _review_fingerprint(review) != preview.source_fingerprint
                 ):
-                    raise ValueError("The exact issue review identity changed after preview")
+                    raise ValueError(
+                        "The exact issue review identity changed after preview"
+                    )
             cursor = conn.execute(
                 "INSERT INTO sync_action_groups(profile_id,source_kind,pair_id,issue_id,source_fingerprint,"
                 "mo_observation_id,inat_observation_id,previewed_at,confirmed_at,created_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (preview.profile_id, preview.source_kind, preview.pair_id, preview.issue_id,
-                 preview.source_fingerprint, preview.mo_observation_id, preview.inat_observation_id,
-                 now, now, now, now),
+                (
+                    preview.profile_id,
+                    preview.source_kind,
+                    preview.pair_id,
+                    preview.issue_id,
+                    preview.source_fingerprint,
+                    preview.mo_observation_id,
+                    preview.inat_observation_id,
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
             )
             group_id = int(cursor.lastrowid)
             action_ids: list[int] = []
             for ordinal, option in enumerate(options, 1):
                 deduplication_key = _local_fingerprint(
-                    preview.profile_id, option.action_type.value, option.site.value,
-                    option.mo_observation_id, option.inat_observation_id,
-                    option.remote_row_id, option.remote_row_uuid,
-                    option.current_target_id, option.desired_target_id,
-                    preview.inat_links_fingerprint, preview.mo_links_fingerprint,
+                    preview.profile_id,
+                    option.action_type.value,
+                    option.site.value,
+                    option.mo_observation_id,
+                    option.inat_observation_id,
+                    option.remote_row_id,
+                    option.remote_row_uuid,
+                    option.current_target_id,
+                    option.desired_target_id,
+                    preview.inat_links_fingerprint,
+                    preview.mo_links_fingerprint,
                 )
                 duplicate = conn.execute(
                     "SELECT action_id FROM sync_actions WHERE profile_id=? AND deduplication_key=? "
@@ -1194,7 +1597,9 @@ class ReconciliationDB:
                     (preview.profile_id, deduplication_key),
                 ).fetchone()
                 if duplicate:
-                    raise ValueError(f"Equivalent unresolved action {int(duplicate[0])} already exists")
+                    raise ValueError(
+                        f"Equivalent unresolved action {int(duplicate[0])} already exists"
+                    )
                 action_cursor = conn.execute(
                     "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
                     "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,"
@@ -1203,14 +1608,34 @@ class ReconciliationDB:
                     "preview_inat_links_fingerprint,preview_mo_links_fingerprint,deduplication_key,"
                     "created_at,confirmed_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (preview.profile_id, group_id, ordinal, option.action_type.value, option.site.value,
-                     "pending", "preview", preview.pair_id, preview.issue_id, option.mo_observation_id,
-                     option.inat_observation_id, preview.inat_observation_uuid,
-                     option.binding_id, option.remote_row_id, option.remote_row_uuid,
-                     option.current_target_id, option.desired_target_id, int(option.destructive),
-                     preview.inat_record_fingerprint, preview.mo_record_fingerprint,
-                     preview.inat_links_fingerprint, preview.mo_links_fingerprint,
-                     deduplication_key, now, now, now),
+                    (
+                        preview.profile_id,
+                        group_id,
+                        ordinal,
+                        option.action_type.value,
+                        option.site.value,
+                        "pending",
+                        "preview",
+                        preview.pair_id,
+                        preview.issue_id,
+                        option.mo_observation_id,
+                        option.inat_observation_id,
+                        preview.inat_observation_uuid,
+                        option.binding_id,
+                        option.remote_row_id,
+                        option.remote_row_uuid,
+                        option.current_target_id,
+                        option.desired_target_id,
+                        int(option.destructive),
+                        preview.inat_record_fingerprint,
+                        preview.mo_record_fingerprint,
+                        preview.inat_links_fingerprint,
+                        preview.mo_links_fingerprint,
+                        deduplication_key,
+                        now,
+                        now,
+                        now,
+                    ),
                 )
                 action_ids.append(int(action_cursor.lastrowid))
             for row in (*preview.inat_rows, *preview.mo_rows):
@@ -1218,20 +1643,33 @@ class ReconciliationDB:
                     "INSERT INTO sync_action_snapshot_rows(profile_id,action_group_id,site,observation_id,"
                     "remote_row_id,remote_row_uuid,binding_id,normalized_target_id,parse_state,row_fingerprint) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (preview.profile_id, group_id, row.site.value, row.observation_id,
-                     row.row_id, row.row_uuid, row.binding_id, row.target_observation_id,
-                     row.parse_state, row.row_fingerprint),
+                    (
+                        preview.profile_id,
+                        group_id,
+                        row.site.value,
+                        row.observation_id,
+                        row.row_id,
+                        row.row_uuid,
+                        row.binding_id,
+                        row.target_observation_id,
+                        row.parse_state,
+                        row.row_fingerprint,
+                    ),
                 )
         return group_id, tuple(action_ids)
 
     def journal_its_actions(
-        self, preview: ITSComparisonPreview, options: Sequence[ITSActionOption],
+        self,
+        preview: ITSComparisonPreview,
+        options: Sequence[ITSActionOption],
     ) -> tuple[int, tuple[int, ...]]:
         """Persist selected Gate 1C actions without persisting any sequence body."""
         if not options:
             raise ValueError("Select at least one ITS synchronization action")
         if len(options) != 1:
-            raise ValueError("Gate 1C requires one individually reviewed write per action group")
+            raise ValueError(
+                "Gate 1C requires one individually reviewed write per action group"
+            )
         if any(not option.enabled for option in options):
             raise ValueError("A disabled ITS action cannot be journaled")
         option = options[0]
@@ -1240,7 +1678,9 @@ class ReconciliationDB:
             and option.action_type is not ITSActionType.INAT_ITS_REMOVE
             and not option.destination_binding_id
         ):
-            raise ValueError("An exact verified iNaturalist destination field is required")
+            raise ValueError(
+                "An exact verified iNaturalist destination field is required"
+            )
         now = _utc_now()
         with self.transaction() as conn:
             pair = conn.execute(
@@ -1255,9 +1695,14 @@ class ReconciliationDB:
             # This avoids journaling a predictably-failed action, and — unlike the prior
             # ``_local_fingerprint`` recompute — does not diverge on NULL/zero fields.
             from .normalization import public_fingerprint as _public_fingerprint
+
             current_source = _public_fingerprint(
-                "pair", pair["pair_id"], pair["updated_at"], pair["review_state"],
-                pair["link_state"], pair["confirmed_by"],
+                "pair",
+                pair["pair_id"],
+                pair["updated_at"],
+                pair["review_state"],
+                pair["link_state"],
+                pair["confirmed_by"],
             )
             if current_source != preview.source_fingerprint:
                 raise ValueError("The confirmed pair changed after ITS preview")
@@ -1265,18 +1710,32 @@ class ReconciliationDB:
                 "INSERT INTO sync_action_groups(profile_id,source_kind,pair_id,issue_id,source_fingerprint,"
                 "mo_observation_id,inat_observation_id,previewed_at,confirmed_at,created_at,updated_at) "
                 "VALUES(?, 'pair', ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                (preview.profile_id, preview.pair_id, preview.source_fingerprint,
-                 preview.mo_observation_id, preview.inat_observation_id,
-                 now, now, now, now),
+                (
+                    preview.profile_id,
+                    preview.pair_id,
+                    preview.source_fingerprint,
+                    preview.mo_observation_id,
+                    preview.inat_observation_id,
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
             )
             group_id = int(cursor.lastrowid)
             action_ids: list[int] = []
             for ordinal, option in enumerate(options, 1):
                 deduplication_key = _local_fingerprint(
-                    preview.profile_id, preview.pair_id, option.action_type.value,
-                    option.destination_site.value, option.source_site.value,
-                    option.source_remote_id, option.destination_remote_id,
-                    option.sequence_fingerprint, option.archive, option.normalized_accession,
+                    preview.profile_id,
+                    preview.pair_id,
+                    option.action_type.value,
+                    option.destination_site.value,
+                    option.source_site.value,
+                    option.source_remote_id,
+                    option.destination_remote_id,
+                    option.sequence_fingerprint,
+                    option.archive,
+                    option.normalized_accession,
                     option.source_metadata_fingerprint,
                     option.destination_preflight_fingerprint,
                 )
@@ -1286,7 +1745,9 @@ class ReconciliationDB:
                     (preview.profile_id, deduplication_key),
                 ).fetchone()
                 if duplicate:
-                    raise ValueError(f"Equivalent unresolved action {int(duplicate[0])} already exists")
+                    raise ValueError(
+                        f"Equivalent unresolved action {int(duplicate[0])} already exists"
+                    )
                 action_cursor = conn.execute(
                     "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
                     "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,binding_id,"
@@ -1303,9 +1764,12 @@ class ReconciliationDB:
                     ":source_remote_id,:sequence_fingerprint,:normalized_accession,:normalized_archive,"
                     ":source_metadata_fingerprint,:destination_fingerprint,:evidence_type,:now,:now,:now)",
                     {
-                        "profile_id": preview.profile_id, "group_id": group_id,
-                        "ordinal": ordinal, "action_type": option.action_type.value,
-                        "site": option.destination_site.value, "pair_id": preview.pair_id,
+                        "profile_id": preview.profile_id,
+                        "group_id": group_id,
+                        "ordinal": ordinal,
+                        "action_type": option.action_type.value,
+                        "site": option.destination_site.value,
+                        "pair_id": preview.pair_id,
                         "mo_id": preview.mo_observation_id,
                         "inat_id": preview.inat_observation_id,
                         "inat_uuid": preview.inat_observation_uuid,
@@ -1317,11 +1781,13 @@ class ReconciliationDB:
                         "specimen_fp": preview.specimen_state_fingerprint,
                         "binding_id": (
                             option.destination_binding_id
-                            if option.destination_site is RemoteSite.INAT else None
+                            if option.destination_site is RemoteSite.INAT
+                            else None
                         ),
                         "remote_id": option.destination_remote_id,
                         "remote_uuid": option.destination_remote_uuid,
-                        "destructive": int(option.destructive), "dedupe": deduplication_key,
+                        "destructive": int(option.destructive),
+                        "dedupe": deduplication_key,
                         "source_site": option.source_site.value,
                         "source_record_id": option.source_record_id,
                         "source_remote_id": option.source_remote_id,
@@ -1333,7 +1799,11 @@ class ReconciliationDB:
                         "evidence_type": (
                             "invalid_value_removal"
                             if option.action_type.value.endswith("_remove")
-                            else "sequence" if option.sequence_fingerprint else "accession"
+                            else (
+                                "sequence"
+                                if option.sequence_fingerprint
+                                else "accession"
+                            )
                         ),
                         "now": now,
                     },
@@ -1342,7 +1812,9 @@ class ReconciliationDB:
         return group_id, tuple(action_ids)
 
     def journal_coordinate_actions(
-        self, preview: CoordinateComparisonPreview, options: Sequence[CoordinateActionOption],
+        self,
+        preview: CoordinateComparisonPreview,
+        options: Sequence[CoordinateActionOption],
     ) -> tuple[int, tuple[int, ...]]:
         """Persist one reviewed Gate 1D coordinate copy.
 
@@ -1356,7 +1828,9 @@ class ReconciliationDB:
         if not options:
             raise ValueError("Select one coordinate synchronization action")
         if len(options) != 1:
-            raise ValueError("Gate 1D requires one individually reviewed coordinate write per group")
+            raise ValueError(
+                "Gate 1D requires one individually reviewed coordinate write per group"
+            )
         option = options[0]
         if not option.enabled:
             raise ValueError("A disabled coordinate action cannot be journaled")
@@ -1372,9 +1846,14 @@ class ReconciliationDB:
             if not pair or str(pair["review_state"]) != "confirmed":
                 raise ValueError("The source pair is no longer confirmed")
             from .normalization import public_fingerprint as _public_fingerprint
+
             current_source = _public_fingerprint(
-                "pair", pair["pair_id"], pair["updated_at"], pair["review_state"],
-                pair["link_state"], pair["confirmed_by"],
+                "pair",
+                pair["pair_id"],
+                pair["updated_at"],
+                pair["review_state"],
+                pair["link_state"],
+                pair["confirmed_by"],
             )
             if current_source != preview.source_fingerprint:
                 raise ValueError("The confirmed pair changed after coordinate preview")
@@ -1382,9 +1861,17 @@ class ReconciliationDB:
                 "INSERT INTO sync_action_groups(profile_id,source_kind,pair_id,issue_id,source_fingerprint,"
                 "mo_observation_id,inat_observation_id,previewed_at,confirmed_at,created_at,updated_at) "
                 "VALUES(?, 'pair', ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                (preview.profile_id, preview.pair_id, preview.source_fingerprint,
-                 preview.mo_observation_id, preview.inat_observation_id,
-                 now, now, now, now),
+                (
+                    preview.profile_id,
+                    preview.pair_id,
+                    preview.source_fingerprint,
+                    preview.mo_observation_id,
+                    preview.inat_observation_id,
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
             )
             group_id = int(cursor.lastrowid)
             # Dedup on the pair, direction, and MO record version. If the source
@@ -1392,10 +1879,15 @@ class ReconciliationDB:
             # fresh copy is legitimately re-proposable; two identical actions
             # against the same source version collapse.
             deduplication_key = _local_fingerprint(
-                preview.profile_id, preview.pair_id, option.action_type.value,
-                option.source_site.value, option.source_record_id,
-                option.destination_record_id, option.proposed_privacy_state,
-                preview.mo_record_fingerprint, preview.inat_record_fingerprint,
+                preview.profile_id,
+                preview.pair_id,
+                option.action_type.value,
+                option.source_site.value,
+                option.source_record_id,
+                option.destination_record_id,
+                option.proposed_privacy_state,
+                preview.mo_record_fingerprint,
+                preview.inat_record_fingerprint,
             )
             duplicate = conn.execute(
                 "SELECT action_id FROM sync_actions WHERE profile_id=? AND deduplication_key=? "
@@ -1403,7 +1895,9 @@ class ReconciliationDB:
                 (preview.profile_id, deduplication_key),
             ).fetchone()
             if duplicate:
-                raise ValueError(f"Equivalent unresolved action {int(duplicate[0])} already exists")
+                raise ValueError(
+                    f"Equivalent unresolved action {int(duplicate[0])} already exists"
+                )
             action_cursor = conn.execute(
                 "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
                 "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,binding_id,"
@@ -1419,7 +1913,8 @@ class ReconciliationDB:
                 "'mo',:source_record_id,'coordinate',"
                 ":source_privacy,:proposed_privacy,:now,:now,:now)",
                 {
-                    "profile_id": preview.profile_id, "group_id": group_id,
+                    "profile_id": preview.profile_id,
+                    "group_id": group_id,
                     "action_type": option.action_type.value,
                     "pair_id": preview.pair_id,
                     "mo_id": preview.mo_observation_id,
@@ -1427,7 +1922,8 @@ class ReconciliationDB:
                     "inat_uuid": preview.inat_observation_uuid,
                     "inat_record_fp": preview.inat_record_fingerprint,
                     "mo_record_fp": preview.mo_record_fingerprint,
-                    "destructive": int(option.destructive), "dedupe": deduplication_key,
+                    "destructive": int(option.destructive),
+                    "dedupe": deduplication_key,
                     "source_record_id": option.source_record_id,
                     "source_privacy": option.source_privacy_state,
                     "proposed_privacy": option.proposed_privacy_state,
@@ -1440,8 +1936,11 @@ class ReconciliationDB:
     # Gate 1E photo transfer -------------------------------------------
 
     def journal_photo_actions(
-        self, preview: PhotoComparisonPreview, options: Sequence[PhotoActionOption],
-        *, planned_observation_photo_uuid: str,
+        self,
+        preview: PhotoComparisonPreview,
+        options: Sequence[PhotoActionOption],
+        *,
+        planned_observation_photo_uuid: str,
     ) -> tuple[int, tuple[int, ...]]:
         """Persist exactly one reviewed Gate 1E photo transfer.
 
@@ -1456,14 +1955,18 @@ class ReconciliationDB:
         if not options:
             raise ValueError("Select one photo transfer action")
         if len(options) != 1:
-            raise ValueError("Gate 1E requires one individually reviewed photo transfer per group")
+            raise ValueError(
+                "Gate 1E requires one individually reviewed photo transfer per group"
+            )
         option = options[0]
         if not option.enabled:
             raise ValueError("A disabled photo action cannot be journaled")
         if option.destination_site is not RemoteSite.INAT:
             raise ValueError("Gate 1E photo transfer targets only iNaturalist")
         if not planned_observation_photo_uuid.strip():
-            raise ValueError("A planned observation_photo uuid is required before any photo write")
+            raise ValueError(
+                "A planned observation_photo uuid is required before any photo write"
+            )
         now = _utc_now()
         with self.transaction() as conn:
             pair = conn.execute(
@@ -1474,9 +1977,14 @@ class ReconciliationDB:
             if not pair or str(pair["review_state"]) != "confirmed":
                 raise ValueError("The source pair is no longer confirmed")
             from .normalization import public_fingerprint as _public_fingerprint
+
             current_source = _public_fingerprint(
-                "pair", pair["pair_id"], pair["updated_at"], pair["review_state"],
-                pair["link_state"], pair["confirmed_by"],
+                "pair",
+                pair["pair_id"],
+                pair["updated_at"],
+                pair["review_state"],
+                pair["link_state"],
+                pair["confirmed_by"],
             )
             if current_source != preview.source_fingerprint:
                 raise ValueError("The confirmed pair changed after photo preview")
@@ -1488,8 +1996,12 @@ class ReconciliationDB:
             existing = conn.execute(
                 "SELECT transfer_id,state FROM sync_photo_transfers WHERE profile_id=? AND source_site=? "
                 "AND source_photo_id=? AND destination_site='inat' AND destination_observation_id=?",
-                (preview.profile_id, option.source_site.value, option.source_photo_id,
-                 preview.inat_observation_id),
+                (
+                    preview.profile_id,
+                    option.source_site.value,
+                    option.source_photo_id,
+                    preview.inat_observation_id,
+                ),
             ).fetchone()
             if existing and str(existing["state"]) != "failed":
                 raise ValueError(
@@ -1501,18 +2013,31 @@ class ReconciliationDB:
                 "INSERT INTO sync_action_groups(profile_id,source_kind,pair_id,issue_id,source_fingerprint,"
                 "mo_observation_id,inat_observation_id,previewed_at,confirmed_at,created_at,updated_at) "
                 "VALUES(?, 'pair', ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                (preview.profile_id, preview.pair_id, preview.source_fingerprint,
-                 preview.mo_observation_id, preview.inat_observation_id, now, now, now, now),
+                (
+                    preview.profile_id,
+                    preview.pair_id,
+                    preview.source_fingerprint,
+                    preview.mo_observation_id,
+                    preview.inat_observation_id,
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
             )
             group_id = int(cursor.lastrowid)
             # Keyed on the specific photo and both record versions, so a changed
             # source observation legitimately re-proposes while an identical
             # re-confirmation collapses.
             deduplication_key = _local_fingerprint(
-                preview.profile_id, preview.pair_id, option.action_type.value,
-                option.source_site.value, option.source_photo_id,
+                preview.profile_id,
+                preview.pair_id,
+                option.action_type.value,
+                option.source_site.value,
+                option.source_photo_id,
                 preview.inat_observation_id,
-                preview.mo_record_fingerprint, preview.inat_record_fingerprint,
+                preview.mo_record_fingerprint,
+                preview.inat_record_fingerprint,
             )
             duplicate = conn.execute(
                 "SELECT action_id FROM sync_actions WHERE profile_id=? AND deduplication_key=? "
@@ -1520,7 +2045,9 @@ class ReconciliationDB:
                 (preview.profile_id, deduplication_key),
             ).fetchone()
             if duplicate:
-                raise ValueError(f"Equivalent unresolved action {int(duplicate[0])} already exists")
+                raise ValueError(
+                    f"Equivalent unresolved action {int(duplicate[0])} already exists"
+                )
             action_cursor = conn.execute(
                 "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
                 "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,binding_id,"
@@ -1535,7 +2062,8 @@ class ReconciliationDB:
                 ":source_site,:source_record_id,'photo',:source_photo_id,"
                 ":planned_uuid,:reviewed_fp,:now,:now,:now)",
                 {
-                    "profile_id": preview.profile_id, "group_id": group_id,
+                    "profile_id": preview.profile_id,
+                    "group_id": group_id,
                     "action_type": option.action_type.value,
                     "pair_id": preview.pair_id,
                     "mo_id": preview.mo_observation_id,
@@ -1562,9 +2090,16 @@ class ReconciliationDB:
                     "byte_fingerprint=?,md5='',destination_license_code='',"
                     "source_license_label=?,source_copyright_holder=?,state='pending',updated_at=? "
                     "WHERE transfer_id=?",
-                    (preview.pair_id, action_id, planned_observation_photo_uuid,
-                     option.byte_fingerprint, option.source_license_label,
-                     option.source_copyright_holder, now, int(existing["transfer_id"])),
+                    (
+                        preview.pair_id,
+                        action_id,
+                        planned_observation_photo_uuid,
+                        option.byte_fingerprint,
+                        option.source_license_label,
+                        option.source_copyright_holder,
+                        now,
+                        int(existing["transfer_id"]),
+                    ),
                 )
             else:
                 conn.execute(
@@ -1572,16 +2107,30 @@ class ReconciliationDB:
                     "destination_site,destination_observation_id,destination_observation_photo_uuid,"
                     "byte_fingerprint,source_license_label,source_copyright_holder,state,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,'inat',?,?,?,?,?, 'pending',?,?)",
-                    (preview.profile_id, preview.pair_id, action_id, option.source_site.value,
-                     option.source_photo_id, preview.inat_observation_id,
-                     planned_observation_photo_uuid, option.byte_fingerprint,
-                     option.source_license_label, option.source_copyright_holder, now, now),
+                    (
+                        preview.profile_id,
+                        preview.pair_id,
+                        action_id,
+                        option.source_site.value,
+                        option.source_photo_id,
+                        preview.inat_observation_id,
+                        planned_observation_photo_uuid,
+                        option.byte_fingerprint,
+                        option.source_license_label,
+                        option.source_copyright_holder,
+                        now,
+                        now,
+                    ),
                 )
         return group_id, (action_id,)
 
     def transferred_source_photo_ids(
-        self, profile_id: int, source_site: RemoteSite, destination_observation_id: int,
-        *, destination_site: RemoteSite = RemoteSite.INAT,
+        self,
+        profile_id: int,
+        source_site: RemoteSite,
+        destination_observation_id: int,
+        *,
+        destination_site: RemoteSite = RemoteSite.INAT,
     ) -> set[str]:
         """Source photo IDs already sent to this destination observation.
 
@@ -1596,17 +2145,28 @@ class ReconciliationDB:
         — indistinguishable from "nothing has been sent yet", which is exactly
         the answer that re-uploads a duplicate photo.
         """
-        rows = self.connection().execute(
-            "SELECT source_photo_id FROM sync_photo_transfers WHERE profile_id=? AND source_site=? "
-            "AND destination_site=? AND destination_observation_id=? "
-            "AND state IN ('succeeded','pending','outcome_unknown')",
-            (profile_id, source_site.value, destination_site.value,
-             int(destination_observation_id)),
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT source_photo_id FROM sync_photo_transfers WHERE profile_id=? AND source_site=? "
+                "AND destination_site=? AND destination_observation_id=? "
+                "AND state IN ('succeeded','pending','outcome_unknown')",
+                (
+                    profile_id,
+                    source_site.value,
+                    destination_site.value,
+                    int(destination_observation_id),
+                ),
+            )
+            .fetchall()
+        )
         return {str(row[0]) for row in rows}
 
     def transferred_photo_digests(
-        self, profile_id: int, *, destination_observation_id: Optional[int] = None,
+        self,
+        profile_id: int,
+        *,
+        destination_observation_id: Optional[int] = None,
         destination_site: RemoteSite = RemoteSite.INAT,
         exclude_action_id: Optional[int] = None,
     ) -> dict[str, str]:
@@ -1653,7 +2213,11 @@ class ReconciliationDB:
         }
 
     def finish_photo_transfer(
-        self, profile_id: int, action_id: int, state: str, *,
+        self,
+        profile_id: int,
+        action_id: int,
+        state: str,
+        *,
         destination_photo_id: Optional[str] = None,
         byte_fingerprint: Optional[str] = None,
         md5: Optional[str] = None,
@@ -1705,10 +2269,17 @@ class ReconciliationDB:
     # the approved item set (saga-architecture-rules rule 5).
 
     def journal_observation_creation_actions(
-        self, profile_id: int, *,
-        source_site: str, source_observation_id: int, destination_site: str,
-        source_fingerprint: str, correlation_marker: str, marker_location: str,
-        approved_field_gaps: Sequence[str], item_specs: Sequence[dict[str, Any]],
+        self,
+        profile_id: int,
+        *,
+        source_site: str,
+        source_observation_id: int,
+        destination_site: str,
+        source_fingerprint: str,
+        correlation_marker: str,
+        marker_location: str,
+        approved_field_gaps: Sequence[str],
+        item_specs: Sequence[dict[str, Any]],
         reviewed_destination_taxon_id: Optional[int] = None,
         reviewed_destination_taxon_name: str = "",
         reviewed_source_taxon_name: str = "",
@@ -1758,7 +2329,9 @@ class ReconciliationDB:
                 (profile_id, source_site, source_observation_id),
             ).fetchone()
             expected_state = (
-                "confirmed_missing_on_mo" if destination_site == "mo" else "confirmed_missing_on_inat"
+                "confirmed_missing_on_mo"
+                if destination_site == "mo"
+                else "confirmed_missing_on_inat"
             )
             if not record or str(record["unpaired_state"]) != expected_state:
                 raise ValueError(
@@ -1766,8 +2339,13 @@ class ReconciliationDB:
                     "destination site — an unpaired record is not automatically a missing record"
                 )
             from .normalization import public_fingerprint as _public_fingerprint
+
             current_source = _public_fingerprint(
-                "record", source_site, source_observation_id, record["unpaired_state"], record["ts"],
+                "record",
+                source_site,
+                source_observation_id,
+                record["unpaired_state"],
+                record["ts"],
             )
             if current_source != source_fingerprint:
                 raise ValueError("The source record changed after the creation preview")
@@ -1776,7 +2354,10 @@ class ReconciliationDB:
                 "WHERE profile_id=? AND source_site=? AND source_observation_id=? AND destination_site=?",
                 (profile_id, source_site, source_observation_id, destination_site),
             ).fetchone()
-            if existing_identity and existing_identity["destination_observation_id"] is not None:
+            if (
+                existing_identity
+                and existing_identity["destination_observation_id"] is not None
+            ):
                 raise ValueError(
                     f"A destination observation already exists for this record "
                     f"(creation {int(existing_identity['creation_id'])})"
@@ -1788,18 +2369,32 @@ class ReconciliationDB:
                     "ORDER BY attempt_id DESC LIMIT 1",
                     (profile_id, int(existing_identity["creation_id"])),
                 ).fetchone()
-                if latest_attempt and str(latest_attempt["state"]) in ("pending", "outcome_unknown"):
+                if latest_attempt and str(latest_attempt["state"]) in (
+                    "pending",
+                    "outcome_unknown",
+                ):
                     raise ValueError(
                         f"Attempt {int(latest_attempt['attempt_id'])} for this record is still "
                         f"{latest_attempt['state']} — resolve it (verify, or wait for it to reach a "
                         f"terminal state) before starting a new attempt. An outcome_unknown attempt is "
                         f"never automatically superseded."
                     )
-                if latest_attempt and str(latest_attempt["state"]) in ("failed", "cancelled"):
+                if latest_attempt and str(latest_attempt["state"]) in (
+                    "failed",
+                    "cancelled",
+                ):
                     supersedes_attempt_id = int(latest_attempt["attempt_id"])
-            action_type = "mo_observation_create" if destination_site == "mo" else "inat_observation_create"
+            action_type = (
+                "mo_observation_create"
+                if destination_site == "mo"
+                else "inat_observation_create"
+            )
             deduplication_key = _local_fingerprint(
-                profile_id, action_type, source_site, source_observation_id, destination_site,
+                profile_id,
+                action_type,
+                source_site,
+                source_observation_id,
+                destination_site,
             )
             duplicate = conn.execute(
                 "SELECT action_id FROM sync_actions WHERE profile_id=? AND deduplication_key=? "
@@ -1807,7 +2402,9 @@ class ReconciliationDB:
                 (profile_id, deduplication_key),
             ).fetchone()
             if duplicate:
-                raise ValueError(f"Equivalent unresolved action {int(duplicate[0])} already exists")
+                raise ValueError(
+                    f"Equivalent unresolved action {int(duplicate[0])} already exists"
+                )
             cursor = conn.execute(
                 "INSERT INTO sync_action_groups(profile_id,source_kind,pair_id,issue_id,source_fingerprint,"
                 "mo_observation_id,inat_observation_id,previewed_at,confirmed_at,created_at,updated_at) "
@@ -1824,9 +2421,20 @@ class ReconciliationDB:
                 "preview_inat_links_fingerprint,preview_mo_links_fingerprint,deduplication_key,"
                 "source_site,source_record_id,created_at,confirmed_at,updated_at) "
                 "VALUES(?,?,0,?,?,'pending','preview',NULL,NULL,?,?,'',1,'','','','' ,?,?,?,?,?,?)",
-                (profile_id, group_id, action_type, destination_site,
-                 source_mo_id, source_inat_id, deduplication_key,
-                 source_site, source_observation_id, now, now, now),
+                (
+                    profile_id,
+                    group_id,
+                    action_type,
+                    destination_site,
+                    source_mo_id,
+                    source_inat_id,
+                    deduplication_key,
+                    source_site,
+                    source_observation_id,
+                    now,
+                    now,
+                    now,
+                ),
             )
             create_action_id = int(action_cursor.lastrowid)
             # The IDENTITY row is looked up but NEVER updated here (section
@@ -1841,7 +2449,14 @@ class ReconciliationDB:
                     "source_observation_id,destination_site,destination_observation_id,"
                     "destination_observation_uuid,created_at,updated_at) "
                     "VALUES(?,NULL,?,?,?,NULL,NULL,?,?)",
-                    (profile_id, source_site, source_observation_id, destination_site, now, now),
+                    (
+                        profile_id,
+                        source_site,
+                        source_observation_id,
+                        destination_site,
+                        now,
+                        now,
+                    ),
                 )
                 creation_id = int(identity_cursor.lastrowid)
             # A brand-new, immutable attempt row every time — never reused,
@@ -1855,12 +2470,26 @@ class ReconciliationDB:
                 "reviewed_source_taxon_name,reviewed_source_taxon_rank,resolution_mode,"
                 "taxon_resolution_fingerprint,state,supersedes_attempt_id,created_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)",
-                (creation_id, profile_id, group_id, destination_site, correlation_marker,
-                 marker_location, json.dumps(list(approved_field_gaps)), source_fingerprint,
-                 reviewed_payload_fingerprint,
-                 reviewed_destination_taxon_id, reviewed_destination_taxon_name,
-                 reviewed_source_taxon_name, reviewed_source_taxon_rank, resolution_mode,
-                 taxon_resolution_fingerprint, supersedes_attempt_id, now, now),
+                (
+                    creation_id,
+                    profile_id,
+                    group_id,
+                    destination_site,
+                    correlation_marker,
+                    marker_location,
+                    json.dumps(list(approved_field_gaps)),
+                    source_fingerprint,
+                    reviewed_payload_fingerprint,
+                    reviewed_destination_taxon_id,
+                    reviewed_destination_taxon_name,
+                    reviewed_source_taxon_name,
+                    reviewed_source_taxon_rank,
+                    resolution_mode,
+                    taxon_resolution_fingerprint,
+                    supersedes_attempt_id,
+                    now,
+                    now,
+                ),
             )
             attempt_id = int(attempt_cursor.lastrowid)
             for spec in item_specs:
@@ -1868,62 +2497,97 @@ class ReconciliationDB:
                     "INSERT INTO sync_creation_items(attempt_id,action_id,item_type,source_item_identity,"
                     "reviewed_metadata_fingerprint,reviewed_byte_fingerprint,state,created_at,updated_at) "
                     "VALUES(?,NULL,?,?,?,?,'pending',?,?)",
-                    (attempt_id, spec["item_type"], spec["source_identity"],
-                     spec.get("metadata_fingerprint", ""), spec.get("reviewed_byte_fingerprint", ""), now, now),
+                    (
+                        attempt_id,
+                        spec["item_type"],
+                        spec["source_identity"],
+                        spec.get("metadata_fingerprint", ""),
+                        spec.get("reviewed_byte_fingerprint", ""),
+                        now,
+                        now,
+                    ),
                 )
         return group_id, create_action_id, attempt_id
 
-    def creation_identity(self, profile_id: int, creation_id: int) -> Optional[dict[str, Any]]:
+    def creation_identity(
+        self, profile_id: int, creation_id: int
+    ) -> Optional[dict[str, Any]]:
         """The stable source->destination creation IDENTITY row only (no
         attempt data) — e.g. for checking the eventual real-world outcome
         (``destination_observation_id``) independent of any one attempt."""
-        row = self.connection().execute(
-            "SELECT * FROM sync_created_observations WHERE profile_id=? AND creation_id=?",
-            (profile_id, creation_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_created_observations WHERE profile_id=? AND creation_id=?",
+                (profile_id, creation_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def creation_attempts_for_identity(self, profile_id: int, creation_id: int) -> list[dict[str, Any]]:
+    def creation_attempts_for_identity(
+        self, profile_id: int, creation_id: int
+    ) -> list[dict[str, Any]]:
         """Every attempt ever made for this identity, oldest first — the full
         auditable history (section 7): none are ever deleted or overwritten."""
-        return [dict(row) for row in self.connection().execute(
-            "SELECT * FROM sync_creation_attempts WHERE profile_id=? AND creation_id=? ORDER BY attempt_id",
-            (profile_id, creation_id),
-        ).fetchall()]
+        return [
+            dict(row)
+            for row in self.connection()
+            .execute(
+                "SELECT * FROM sync_creation_attempts WHERE profile_id=? AND creation_id=? ORDER BY attempt_id",
+                (profile_id, creation_id),
+            )
+            .fetchall()
+        ]
 
-    def creation_ledger_for_group(self, profile_id: int, group_id: int) -> Optional[dict[str, Any]]:
+    def creation_ledger_for_group(
+        self, profile_id: int, group_id: int
+    ) -> Optional[dict[str, Any]]:
         """The merged identity+attempt view ``observation_creation.py`` reads
         as "the ledger" for a given action group — the identity's stable
         fields (source/destination, the eventual real-world destination id)
         joined with THIS action group's specific, immutable attempt (its
         correlation marker, approved gaps, and reviewed taxon pin)."""
-        row = self.connection().execute(
-            "SELECT co.creation_id AS creation_id, co.profile_id AS profile_id, co.pair_id AS pair_id, "
-            "co.source_site AS source_site, co.source_observation_id AS source_observation_id, "
-            "co.destination_site AS destination_site, "
-            "co.destination_observation_id AS destination_observation_id, "
-            "co.destination_observation_uuid AS destination_observation_uuid, "
-            "ca.attempt_id AS attempt_id, ca.action_group_id AS action_group_id, "
-            "ca.correlation_marker AS correlation_marker, ca.marker_location AS marker_location, "
-            "ca.approved_field_gaps AS approved_field_gaps, ca.source_fingerprint AS source_fingerprint, "
-            "ca.reviewed_payload_fingerprint AS reviewed_payload_fingerprint, "
-            "ca.reviewed_destination_taxon_id AS reviewed_destination_taxon_id, "
-            "ca.reviewed_destination_taxon_name AS reviewed_destination_taxon_name, "
-            "ca.reviewed_source_taxon_name AS reviewed_source_taxon_name, "
-            "ca.reviewed_source_taxon_rank AS reviewed_source_taxon_rank, "
-            "ca.resolution_mode AS resolution_mode, "
-            "ca.taxon_resolution_fingerprint AS taxon_resolution_fingerprint, "
-            "ca.state AS attempt_state, ca.supersedes_attempt_id AS supersedes_attempt_id, "
-            "ca.created_at AS created_at, ca.updated_at AS updated_at "
-            "FROM sync_creation_attempts ca "
-            "JOIN sync_created_observations co ON co.creation_id = ca.creation_id "
-            "WHERE ca.profile_id=? AND ca.action_group_id=?",
-            (profile_id, group_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT co.creation_id AS creation_id, co.profile_id AS profile_id, co.pair_id AS pair_id, "
+                "co.source_site AS source_site, co.source_observation_id AS source_observation_id, "
+                "co.destination_site AS destination_site, "
+                "co.destination_observation_id AS destination_observation_id, "
+                "co.destination_observation_uuid AS destination_observation_uuid, "
+                "ca.attempt_id AS attempt_id, ca.action_group_id AS action_group_id, "
+                "ca.correlation_marker AS correlation_marker, ca.marker_location AS marker_location, "
+                "ca.approved_field_gaps AS approved_field_gaps, ca.source_fingerprint AS source_fingerprint, "
+                "ca.reviewed_payload_fingerprint AS reviewed_payload_fingerprint, "
+                "ca.reviewed_destination_taxon_id AS reviewed_destination_taxon_id, "
+                "ca.reviewed_destination_taxon_name AS reviewed_destination_taxon_name, "
+                "ca.reviewed_source_taxon_name AS reviewed_source_taxon_name, "
+                "ca.reviewed_source_taxon_rank AS reviewed_source_taxon_rank, "
+                "ca.resolution_mode AS resolution_mode, "
+                "ca.taxon_resolution_fingerprint AS taxon_resolution_fingerprint, "
+                "ca.state AS attempt_state, ca.supersedes_attempt_id AS supersedes_attempt_id, "
+                "ca.created_at AS created_at, ca.updated_at AS updated_at "
+                "FROM sync_creation_attempts ca "
+                "JOIN sync_created_observations co ON co.creation_id = ca.creation_id "
+                "WHERE ca.profile_id=? AND ca.action_group_id=?",
+                (profile_id, group_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def finish_creation_attempt(self, profile_id: int, attempt_id: int, state: str) -> None:
-        if state not in {"pending", "succeeded", "failed", "cancelled", "outcome_unknown", "superseded"}:
+    def finish_creation_attempt(
+        self, profile_id: int, attempt_id: int, state: str
+    ) -> None:
+        if state not in {
+            "pending",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "outcome_unknown",
+            "superseded",
+        }:
             raise ValueError(f"Unsupported creation attempt state: {state}")
         self.connection().execute(
             "UPDATE sync_creation_attempts SET state=?,updated_at=? WHERE profile_id=? AND attempt_id=?",
@@ -1931,8 +2595,17 @@ class ReconciliationDB:
         )
 
     def settle_creation_write_success(
-        self, profile_id: int, action_id: int, attempt_id: int, creation_id: int, action_group_id: int,
-        *, destination_site: str, destination_id: int, destination_uuid: str, source_record_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
+        attempt_id: int,
+        creation_id: int,
+        action_group_id: int,
+        *,
+        destination_site: str,
+        destination_id: int,
+        destination_uuid: str,
+        source_record_id: int,
         verification_state: str = "",
     ) -> int:
         """Atomically settle a successful creation write: the create action,
@@ -1962,8 +2635,17 @@ class ReconciliationDB:
                 "verified_at=CASE WHEN ?!='' THEN ? ELSE verified_at END,"
                 "server_row_id=?,server_row_uuid=?,outcome_unknown=0,finished_at=?,updated_at=? "
                 "WHERE profile_id=? AND action_id=?",
-                (verification_state, verification_state, now, str(destination_id), destination_uuid,
-                 now, now, profile_id, action_id),
+                (
+                    verification_state,
+                    verification_state,
+                    now,
+                    str(destination_id),
+                    destination_uuid,
+                    now,
+                    now,
+                    profile_id,
+                    action_id,
+                ),
             )
             conn.execute(
                 "UPDATE sync_creation_attempts SET state='succeeded',updated_at=? "
@@ -1975,8 +2657,12 @@ class ReconciliationDB:
                 "WHERE profile_id=? AND creation_id=?",
                 (profile_id, creation_id),
             ).fetchone()
-            existing_destination_id = identity_row["destination_observation_id"] if identity_row else None
-            if existing_destination_id is not None and int(existing_destination_id) != int(destination_id):
+            existing_destination_id = (
+                identity_row["destination_observation_id"] if identity_row else None
+            )
+            if existing_destination_id is not None and int(
+                existing_destination_id
+            ) != int(destination_id):
                 # Round-3 smaller issue: an unconditional overwrite here would let
                 # a second, unrelated settlement silently repoint an identity's
                 # destination observation. The identity's destination id is set
@@ -2016,7 +2702,17 @@ class ReconciliationDB:
                 cursor = conn.execute(
                     "INSERT INTO sync_pairs(profile_id,mo_observation_id,inat_observation_id,link_state,"
                     "score,classification,review_state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                    (profile_id, mo_id, inat_id, "", 0, "gate_2a_creation", "provisional", now, now),
+                    (
+                        profile_id,
+                        mo_id,
+                        inat_id,
+                        "",
+                        0,
+                        "gate_2a_creation",
+                        "provisional",
+                        now,
+                        now,
+                    ),
                 )
                 pair_id = int(cursor.lastrowid)
             conn.execute(
@@ -2038,30 +2734,44 @@ class ReconciliationDB:
         wrong profile's attempt id would silently read another profile's
         reviewed item plan.
         """
-        return [dict(row) for row in self.connection().execute(
-            "SELECT ci.* FROM sync_creation_items ci "
-            "JOIN sync_creation_attempts ca ON ca.attempt_id = ci.attempt_id "
-            "WHERE ca.profile_id=? AND ci.attempt_id=? ORDER BY ci.creation_item_id",
-            (profile_id, attempt_id),
-        ).fetchall()]
+        return [
+            dict(row)
+            for row in self.connection()
+            .execute(
+                "SELECT ci.* FROM sync_creation_items ci "
+                "JOIN sync_creation_attempts ca ON ca.attempt_id = ci.attempt_id "
+                "WHERE ca.profile_id=? AND ci.attempt_id=? ORDER BY ci.creation_item_id",
+                (profile_id, attempt_id),
+            )
+            .fetchall()
+        ]
 
-    def creation_item_for_action(self, profile_id: int, action_id: int) -> Optional[dict[str, Any]]:
+    def creation_item_for_action(
+        self, profile_id: int, action_id: int
+    ) -> Optional[dict[str, Any]]:
         """Whether ``action_id`` is a population-item action (linked from
         ``sync_creation_items``) as opposed to a reciprocal-link bootstrap or
         ``pair_finalize`` row — used by the creation-saga link exemption
         (section 8) to require a CONFIRMED pair specifically for population,
         while the two bootstrap link-add rows may still run against a
         provisional one."""
-        row = self.connection().execute(
-            "SELECT ci.* FROM sync_creation_items ci "
-            "JOIN sync_creation_attempts ca ON ca.attempt_id = ci.attempt_id "
-            "WHERE ca.profile_id=? AND ci.action_id=?",
-            (profile_id, action_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT ci.* FROM sync_creation_items ci "
+                "JOIN sync_creation_attempts ca ON ca.attempt_id = ci.attempt_id "
+                "WHERE ca.profile_id=? AND ci.action_id=?",
+                (profile_id, action_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def finish_observation_creation(
-        self, profile_id: int, creation_id: int, *,
+        self,
+        profile_id: int,
+        creation_id: int,
+        *,
         destination_observation_id: Optional[int] = None,
         destination_observation_uuid: Optional[str] = None,
         pair_id: Optional[int] = None,
@@ -2087,7 +2797,11 @@ class ReconciliationDB:
             )
 
     def finish_creation_item(
-        self, profile_id: int, creation_item_id: int, state: str, *,
+        self,
+        profile_id: int,
+        creation_item_id: int,
+        state: str,
+        *,
         destination_remote_id: str = "",
     ) -> bool:
         """Settle one reviewed creation item, scoped to its owning profile.
@@ -2118,7 +2832,10 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def create_provisional_pair(
-        self, profile_id: int, mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
     ) -> int:
         """Gate 2A: a pair that exists only so pair-based services (reciprocal
         link add, final specimen verification) have something to operate
@@ -2138,8 +2855,17 @@ class ReconciliationDB:
             cursor = conn.execute(
                 "INSERT INTO sync_pairs(profile_id,mo_observation_id,inat_observation_id,link_state,score,"
                 "classification,review_state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (profile_id, mo_observation_id, inat_observation_id, "", 0,
-                 "gate_2a_creation", "provisional", now, now),
+                (
+                    profile_id,
+                    mo_observation_id,
+                    inat_observation_id,
+                    "",
+                    0,
+                    "gate_2a_creation",
+                    "provisional",
+                    now,
+                    now,
+                ),
             )
             return int(cursor.lastrowid)
 
@@ -2163,8 +2889,13 @@ class ReconciliationDB:
             return False
 
     def settle_pair_finalize_success(
-        self, profile_id: int, action_id: int, action_group_id: int, pair_id: int,
-        mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
+        action_group_id: int,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
     ) -> bool:
         """Round-4 finding 4: promote the provisional pair AND mark the
         ``pair_finalize`` action succeeded in ONE transaction, rechecking
@@ -2211,7 +2942,8 @@ class ReconciliationDB:
                 return False
             pair = conn.execute(
                 "SELECT pair_id,mo_observation_id,inat_observation_id,review_state FROM sync_pairs "
-                "WHERE profile_id=? AND pair_id=?", (profile_id, pair_id),
+                "WHERE profile_id=? AND pair_id=?",
+                (profile_id, pair_id),
             ).fetchone()
             if (
                 not pair
@@ -2226,8 +2958,13 @@ class ReconciliationDB:
                 "SELECT 1 FROM sync_pairs WHERE profile_id=? AND review_state='confirmed' AND "
                 "((mo_observation_id=? AND inat_observation_id!=?) OR "
                 "(inat_observation_id=? AND mo_observation_id!=?)) LIMIT 1",
-                (profile_id, mo_observation_id, inat_observation_id,
-                 inat_observation_id, mo_observation_id),
+                (
+                    profile_id,
+                    mo_observation_id,
+                    inat_observation_id,
+                    inat_observation_id,
+                    mo_observation_id,
+                ),
             ).fetchone()
             if conflict:
                 return False
@@ -2273,7 +3010,10 @@ class ReconciliationDB:
             # being merely implied -- refuse to promote (raise, rolling back
             # anything already written in this transaction) if it disagrees
             # with the pair actually being finalized.
-            if attempt["creation_pair_id"] is None or int(attempt["creation_pair_id"]) != pair_id:
+            if (
+                attempt["creation_pair_id"] is None
+                or int(attempt["creation_pair_id"]) != pair_id
+            ):
                 raise RuntimeError(
                     f"settle_pair_finalize_success: sync_created_observations.pair_id "
                     f"({attempt['creation_pair_id']!r}) for action group {action_group_id} does not "
@@ -2285,11 +3025,22 @@ class ReconciliationDB:
             destination_id = attempt["destination_observation_id"]
             if source_id is None or destination_id is None:
                 return False
-            expected_mo = source_id if source_site == "mo" else (destination_id if destination_site == "mo" else None)
-            expected_inat = destination_id if destination_site == "inat" else (source_id if source_site == "inat" else None)
+            expected_mo = (
+                source_id
+                if source_site == "mo"
+                else (destination_id if destination_site == "mo" else None)
+            )
+            expected_inat = (
+                destination_id
+                if destination_site == "inat"
+                else (source_id if source_site == "inat" else None)
+            )
             if expected_mo is None or expected_inat is None:
                 return False
-            if int(expected_mo) != mo_observation_id or int(expected_inat) != inat_observation_id:
+            if (
+                int(expected_mo) != mo_observation_id
+                or int(expected_inat) != inat_observation_id
+            ):
                 return False
             cursor = conn.execute(
                 "UPDATE sync_pairs SET review_state='confirmed',confirmed_by='observation_creation',"
@@ -2336,20 +3087,37 @@ class ReconciliationDB:
             return True
 
     def mint_creation_followup_action(
-        self, profile_id: int, group_id: int, ordinal: int, action_type: str, *,
-        pair_id: int, mo_observation_id: int, inat_observation_id: int,
-        inat_observation_uuid: str = "", site: str,
-        source_site: str = "", source_record_id: Optional[int] = None,
-        remote_row_id: str = "", remote_row_uuid: str = "",
+        self,
+        profile_id: int,
+        group_id: int,
+        ordinal: int,
+        action_type: str,
+        *,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
+        inat_observation_uuid: str = "",
+        site: str,
+        source_site: str = "",
+        source_record_id: Optional[int] = None,
+        remote_row_id: str = "",
+        remote_row_uuid: str = "",
         binding_id: Optional[int] = None,
-        current_target_id: Optional[int] = None, desired_target_id: Optional[int] = None,
-        source_photo_id: str = "", planned_observation_photo_uuid: str = "",
+        current_target_id: Optional[int] = None,
+        desired_target_id: Optional[int] = None,
+        source_photo_id: str = "",
+        planned_observation_photo_uuid: str = "",
         reviewed_byte_fingerprint: str = "",
-        sequence_fingerprint: str = "", normalized_accession: str = "", normalized_archive: str = "",
-        source_metadata_fingerprint: str = "", destination_preflight_fingerprint: str = "",
+        sequence_fingerprint: str = "",
+        normalized_accession: str = "",
+        normalized_archive: str = "",
+        source_metadata_fingerprint: str = "",
+        destination_preflight_fingerprint: str = "",
         evidence_type: str = "",
-        preview_inat_record_fingerprint: str = "", preview_mo_record_fingerprint: str = "",
-        preview_inat_links_fingerprint: str = "", preview_mo_links_fingerprint: str = "",
+        preview_inat_record_fingerprint: str = "",
+        preview_mo_record_fingerprint: str = "",
+        preview_inat_links_fingerprint: str = "",
+        preview_mo_links_fingerprint: str = "",
     ) -> int:
         """Mint one ordinal row AFTER the destination id is known.
 
@@ -2375,17 +3143,32 @@ class ReconciliationDB:
         """
         with self.transaction() as conn:
             return self._insert_creation_followup_action(
-                conn, profile_id, group_id, ordinal, action_type,
-                pair_id=pair_id, mo_observation_id=mo_observation_id, inat_observation_id=inat_observation_id,
-                inat_observation_uuid=inat_observation_uuid, site=site,
-                source_site=source_site, source_record_id=source_record_id,
-                remote_row_id=remote_row_id, remote_row_uuid=remote_row_uuid,
-                binding_id=binding_id, current_target_id=current_target_id, desired_target_id=desired_target_id,
-                source_photo_id=source_photo_id, planned_observation_photo_uuid=planned_observation_photo_uuid,
+                conn,
+                profile_id,
+                group_id,
+                ordinal,
+                action_type,
+                pair_id=pair_id,
+                mo_observation_id=mo_observation_id,
+                inat_observation_id=inat_observation_id,
+                inat_observation_uuid=inat_observation_uuid,
+                site=site,
+                source_site=source_site,
+                source_record_id=source_record_id,
+                remote_row_id=remote_row_id,
+                remote_row_uuid=remote_row_uuid,
+                binding_id=binding_id,
+                current_target_id=current_target_id,
+                desired_target_id=desired_target_id,
+                source_photo_id=source_photo_id,
+                planned_observation_photo_uuid=planned_observation_photo_uuid,
                 reviewed_byte_fingerprint=reviewed_byte_fingerprint,
-                sequence_fingerprint=sequence_fingerprint, normalized_accession=normalized_accession,
-                normalized_archive=normalized_archive, source_metadata_fingerprint=source_metadata_fingerprint,
-                destination_preflight_fingerprint=destination_preflight_fingerprint, evidence_type=evidence_type,
+                sequence_fingerprint=sequence_fingerprint,
+                normalized_accession=normalized_accession,
+                normalized_archive=normalized_archive,
+                source_metadata_fingerprint=source_metadata_fingerprint,
+                destination_preflight_fingerprint=destination_preflight_fingerprint,
+                evidence_type=evidence_type,
                 preview_inat_record_fingerprint=preview_inat_record_fingerprint,
                 preview_mo_record_fingerprint=preview_mo_record_fingerprint,
                 preview_inat_links_fingerprint=preview_inat_links_fingerprint,
@@ -2393,20 +3176,38 @@ class ReconciliationDB:
             )
 
     def _insert_creation_followup_action(
-        self, conn: sqlite3.Connection, profile_id: int, group_id: int, ordinal: int, action_type: str, *,
-        pair_id: int, mo_observation_id: int, inat_observation_id: int,
-        inat_observation_uuid: str = "", site: str,
-        source_site: str = "", source_record_id: Optional[int] = None,
-        remote_row_id: str = "", remote_row_uuid: str = "",
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        group_id: int,
+        ordinal: int,
+        action_type: str,
+        *,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
+        inat_observation_uuid: str = "",
+        site: str,
+        source_site: str = "",
+        source_record_id: Optional[int] = None,
+        remote_row_id: str = "",
+        remote_row_uuid: str = "",
         binding_id: Optional[int] = None,
-        current_target_id: Optional[int] = None, desired_target_id: Optional[int] = None,
-        source_photo_id: str = "", planned_observation_photo_uuid: str = "",
+        current_target_id: Optional[int] = None,
+        desired_target_id: Optional[int] = None,
+        source_photo_id: str = "",
+        planned_observation_photo_uuid: str = "",
         reviewed_byte_fingerprint: str = "",
-        sequence_fingerprint: str = "", normalized_accession: str = "", normalized_archive: str = "",
-        source_metadata_fingerprint: str = "", destination_preflight_fingerprint: str = "",
+        sequence_fingerprint: str = "",
+        normalized_accession: str = "",
+        normalized_archive: str = "",
+        source_metadata_fingerprint: str = "",
+        destination_preflight_fingerprint: str = "",
         evidence_type: str = "",
-        preview_inat_record_fingerprint: str = "", preview_mo_record_fingerprint: str = "",
-        preview_inat_links_fingerprint: str = "", preview_mo_links_fingerprint: str = "",
+        preview_inat_record_fingerprint: str = "",
+        preview_mo_record_fingerprint: str = "",
+        preview_inat_links_fingerprint: str = "",
+        preview_mo_links_fingerprint: str = "",
     ) -> int:
         """The raw INSERT shared by ``mint_creation_followup_action`` (its own
         transaction) and ``mint_creation_item_action`` (folded into that
@@ -2414,71 +3215,107 @@ class ReconciliationDB:
         — never opens its own transaction — so callers control atomicity."""
         now = _utc_now()
         deduplication_key = _local_fingerprint(
-            profile_id, group_id, ordinal, action_type, mo_observation_id, inat_observation_id,
-            source_photo_id, remote_row_id, sequence_fingerprint,
+            profile_id,
+            group_id,
+            ordinal,
+            action_type,
+            mo_observation_id,
+            inat_observation_id,
+            source_photo_id,
+            remote_row_id,
+            sequence_fingerprint,
         )
         cursor = conn.execute(
-                "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,"
-                "last_phase,pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,"
-                "binding_id,remote_row_id,remote_row_uuid,current_target_id,desired_target_id,destructive,"
-                "preview_inat_record_fingerprint,preview_mo_record_fingerprint,"
-                "preview_inat_links_fingerprint,preview_mo_links_fingerprint,deduplication_key,"
-                "source_site,source_record_id,source_photo_id,planned_observation_photo_uuid,"
-                "reviewed_byte_fingerprint,sequence_fingerprint,normalized_accession,normalized_archive,"
-                "source_metadata_fingerprint,destination_preflight_fingerprint,evidence_type,"
-                "created_at,confirmed_at,updated_at) "
-                "VALUES(:profile_id,:group_id,:ordinal,:action_type,:site,'pending','preview',"
-                ":pair_id,NULL,:mo_id,:inat_id,:inat_uuid,:binding_id,:remote_id,:remote_uuid,"
-                ":current_target,:desired_target,0,"
-                ":preview_inat_fp,:preview_mo_fp,:preview_inat_links_fp,:preview_mo_links_fp,:dedupe,"
-                ":source_site,:source_record_id,:source_photo_id,:planned_uuid,:reviewed_fp,"
-                ":sequence_fp,:normalized_accession,:normalized_archive,:source_metadata_fp,"
-                ":destination_fp,:evidence_type,:now,:now,:now)",
-                {
-                    "profile_id": profile_id, "group_id": group_id, "ordinal": ordinal,
-                    "action_type": action_type, "site": site, "pair_id": pair_id,
-                    "mo_id": mo_observation_id, "inat_id": inat_observation_id,
-                    "inat_uuid": inat_observation_uuid, "binding_id": binding_id,
-                    "preview_inat_fp": preview_inat_record_fingerprint,
-                    "preview_mo_fp": preview_mo_record_fingerprint,
-                    "preview_inat_links_fp": preview_inat_links_fingerprint,
-                    "preview_mo_links_fp": preview_mo_links_fingerprint,
-                    "remote_id": remote_row_id, "remote_uuid": remote_row_uuid,
-                    "current_target": current_target_id, "desired_target": desired_target_id,
-                    # source_site's CHECK only allows NULL or 'inat'/'mo' — an
-                    # empty string satisfies neither and violates the
-                    # constraint, which reciprocal-link/pair_finalize rows
-                    # (Gate 2A) hit because they legitimately have no
-                    # source_site to record. Bind NULL when unset.
-                    "dedupe": deduplication_key, "source_site": source_site or None,
-                    "source_record_id": source_record_id, "source_photo_id": source_photo_id,
-                    "planned_uuid": planned_observation_photo_uuid,
-                    "reviewed_fp": reviewed_byte_fingerprint,
-                    "sequence_fp": sequence_fingerprint,
-                    "normalized_accession": normalized_accession,
-                    "normalized_archive": normalized_archive,
-                    "source_metadata_fp": source_metadata_fingerprint,
-                    "destination_fp": destination_preflight_fingerprint,
-                    "evidence_type": evidence_type, "now": now,
-                },
+            "INSERT INTO sync_actions(profile_id,action_group_id,ordinal,action_type,site,state,"
+            "last_phase,pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,"
+            "binding_id,remote_row_id,remote_row_uuid,current_target_id,desired_target_id,destructive,"
+            "preview_inat_record_fingerprint,preview_mo_record_fingerprint,"
+            "preview_inat_links_fingerprint,preview_mo_links_fingerprint,deduplication_key,"
+            "source_site,source_record_id,source_photo_id,planned_observation_photo_uuid,"
+            "reviewed_byte_fingerprint,sequence_fingerprint,normalized_accession,normalized_archive,"
+            "source_metadata_fingerprint,destination_preflight_fingerprint,evidence_type,"
+            "created_at,confirmed_at,updated_at) "
+            "VALUES(:profile_id,:group_id,:ordinal,:action_type,:site,'pending','preview',"
+            ":pair_id,NULL,:mo_id,:inat_id,:inat_uuid,:binding_id,:remote_id,:remote_uuid,"
+            ":current_target,:desired_target,0,"
+            ":preview_inat_fp,:preview_mo_fp,:preview_inat_links_fp,:preview_mo_links_fp,:dedupe,"
+            ":source_site,:source_record_id,:source_photo_id,:planned_uuid,:reviewed_fp,"
+            ":sequence_fp,:normalized_accession,:normalized_archive,:source_metadata_fp,"
+            ":destination_fp,:evidence_type,:now,:now,:now)",
+            {
+                "profile_id": profile_id,
+                "group_id": group_id,
+                "ordinal": ordinal,
+                "action_type": action_type,
+                "site": site,
+                "pair_id": pair_id,
+                "mo_id": mo_observation_id,
+                "inat_id": inat_observation_id,
+                "inat_uuid": inat_observation_uuid,
+                "binding_id": binding_id,
+                "preview_inat_fp": preview_inat_record_fingerprint,
+                "preview_mo_fp": preview_mo_record_fingerprint,
+                "preview_inat_links_fp": preview_inat_links_fingerprint,
+                "preview_mo_links_fp": preview_mo_links_fingerprint,
+                "remote_id": remote_row_id,
+                "remote_uuid": remote_row_uuid,
+                "current_target": current_target_id,
+                "desired_target": desired_target_id,
+                # source_site's CHECK only allows NULL or 'inat'/'mo' — an
+                # empty string satisfies neither and violates the
+                # constraint, which reciprocal-link/pair_finalize rows
+                # (Gate 2A) hit because they legitimately have no
+                # source_site to record. Bind NULL when unset.
+                "dedupe": deduplication_key,
+                "source_site": source_site or None,
+                "source_record_id": source_record_id,
+                "source_photo_id": source_photo_id,
+                "planned_uuid": planned_observation_photo_uuid,
+                "reviewed_fp": reviewed_byte_fingerprint,
+                "sequence_fp": sequence_fingerprint,
+                "normalized_accession": normalized_accession,
+                "normalized_archive": normalized_archive,
+                "source_metadata_fp": source_metadata_fingerprint,
+                "destination_fp": destination_preflight_fingerprint,
+                "evidence_type": evidence_type,
+                "now": now,
+            },
         )
         return int(cursor.lastrowid)
 
     def mint_creation_item_action(
-        self, profile_id: int, group_id: int, creation_item_id: int, ordinal: int, action_type: str, *,
-        pair_id: int, mo_observation_id: int, inat_observation_id: int,
-        inat_observation_uuid: str = "", site: str,
-        source_site: str = "", source_record_id: Optional[int] = None,
-        remote_row_id: str = "", remote_row_uuid: str = "",
+        self,
+        profile_id: int,
+        group_id: int,
+        creation_item_id: int,
+        ordinal: int,
+        action_type: str,
+        *,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
+        inat_observation_uuid: str = "",
+        site: str,
+        source_site: str = "",
+        source_record_id: Optional[int] = None,
+        remote_row_id: str = "",
+        remote_row_uuid: str = "",
         binding_id: Optional[int] = None,
-        current_target_id: Optional[int] = None, desired_target_id: Optional[int] = None,
-        source_photo_id: str = "", planned_observation_photo_uuid: str = "",
+        current_target_id: Optional[int] = None,
+        desired_target_id: Optional[int] = None,
+        source_photo_id: str = "",
+        planned_observation_photo_uuid: str = "",
         reviewed_byte_fingerprint: str = "",
-        sequence_fingerprint: str = "", normalized_accession: str = "", normalized_archive: str = "",
-        source_metadata_fingerprint: str = "", destination_preflight_fingerprint: str = "",
+        sequence_fingerprint: str = "",
+        normalized_accession: str = "",
+        normalized_archive: str = "",
+        source_metadata_fingerprint: str = "",
+        destination_preflight_fingerprint: str = "",
         evidence_type: str = "",
-        preview_inat_record_fingerprint: str = "", preview_mo_record_fingerprint: str = "",
-        preview_inat_links_fingerprint: str = "", preview_mo_links_fingerprint: str = "",
+        preview_inat_record_fingerprint: str = "",
+        preview_mo_record_fingerprint: str = "",
+        preview_inat_links_fingerprint: str = "",
+        preview_mo_links_fingerprint: str = "",
     ) -> int:
         """Atomically mint a per-item follow-up action AND link it to its
         ``sync_creation_items`` row, in one transaction.
@@ -2495,21 +3332,38 @@ class ReconciliationDB:
         of minting a duplicate.
         """
         with self.transaction() as conn:
-            existing = self._require_scoped_creation_item(conn, profile_id, group_id, creation_item_id)
+            existing = self._require_scoped_creation_item(
+                conn, profile_id, group_id, creation_item_id
+            )
             if existing["action_id"] is not None:
                 return int(existing["action_id"])
             action_id = self._insert_creation_followup_action(
-                conn, profile_id, group_id, ordinal, action_type,
-                pair_id=pair_id, mo_observation_id=mo_observation_id, inat_observation_id=inat_observation_id,
-                inat_observation_uuid=inat_observation_uuid, site=site,
-                source_site=source_site, source_record_id=source_record_id,
-                remote_row_id=remote_row_id, remote_row_uuid=remote_row_uuid,
-                binding_id=binding_id, current_target_id=current_target_id, desired_target_id=desired_target_id,
-                source_photo_id=source_photo_id, planned_observation_photo_uuid=planned_observation_photo_uuid,
+                conn,
+                profile_id,
+                group_id,
+                ordinal,
+                action_type,
+                pair_id=pair_id,
+                mo_observation_id=mo_observation_id,
+                inat_observation_id=inat_observation_id,
+                inat_observation_uuid=inat_observation_uuid,
+                site=site,
+                source_site=source_site,
+                source_record_id=source_record_id,
+                remote_row_id=remote_row_id,
+                remote_row_uuid=remote_row_uuid,
+                binding_id=binding_id,
+                current_target_id=current_target_id,
+                desired_target_id=desired_target_id,
+                source_photo_id=source_photo_id,
+                planned_observation_photo_uuid=planned_observation_photo_uuid,
                 reviewed_byte_fingerprint=reviewed_byte_fingerprint,
-                sequence_fingerprint=sequence_fingerprint, normalized_accession=normalized_accession,
-                normalized_archive=normalized_archive, source_metadata_fingerprint=source_metadata_fingerprint,
-                destination_preflight_fingerprint=destination_preflight_fingerprint, evidence_type=evidence_type,
+                sequence_fingerprint=sequence_fingerprint,
+                normalized_accession=normalized_accession,
+                normalized_archive=normalized_archive,
+                source_metadata_fingerprint=source_metadata_fingerprint,
+                destination_preflight_fingerprint=destination_preflight_fingerprint,
+                evidence_type=evidence_type,
                 preview_inat_record_fingerprint=preview_inat_record_fingerprint,
                 preview_mo_record_fingerprint=preview_mo_record_fingerprint,
                 preview_inat_links_fingerprint=preview_inat_links_fingerprint,
@@ -2522,8 +3376,17 @@ class ReconciliationDB:
             return action_id
 
     def fail_creation_item_preflight(
-        self, profile_id: int, group_id: int, creation_item_id: int, action_type: str, *,
-        reason: str, next_ordinal: int, pair_id: int, mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        group_id: int,
+        creation_item_id: int,
+        action_type: str,
+        *,
+        reason: str,
+        next_ordinal: int,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
         site: str = "inat",
     ) -> dict[str, Any]:
         """Atomically fail one creation item's PREFLIGHT check -- i.e. record
@@ -2599,13 +3462,20 @@ class ReconciliationDB:
                     # NULL). Report the item's REAL state with no action id,
                     # exactly like the already-claimed case below.
                     return {
-                        "action_id": 0, "downgraded": False,
+                        "action_id": 0,
+                        "downgraded": False,
                         "state": str(row["state"]),
                     }
                 action_id = self._insert_creation_followup_action(
-                    conn, profile_id, group_id, next_ordinal, action_type,
-                    pair_id=pair_id, mo_observation_id=mo_observation_id,
-                    inat_observation_id=inat_observation_id, site=site,
+                    conn,
+                    profile_id,
+                    group_id,
+                    next_ordinal,
+                    action_type,
+                    pair_id=pair_id,
+                    mo_observation_id=mo_observation_id,
+                    inat_observation_id=inat_observation_id,
+                    site=site,
                 )
                 conn.execute(
                     "UPDATE sync_creation_items SET action_id=?,updated_at=? WHERE creation_item_id=?",
@@ -2658,7 +3528,11 @@ class ReconciliationDB:
             return {"action_id": action_id, "downgraded": False, "state": current_state}
 
     def _require_scoped_creation_item(
-        self, conn: sqlite3.Connection, profile_id: int, group_id: int, creation_item_id: int,
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        group_id: int,
+        creation_item_id: int,
     ) -> sqlite3.Row:
         """Round-3 finding 6: joined through ``sync_creation_attempts`` and
         checked against BOTH ``profile_id`` and ``group_id`` — a bare
@@ -2695,11 +3569,25 @@ class ReconciliationDB:
         return row
 
     def mint_creation_photo_item_action(
-        self, profile_id: int, group_id: int, creation_item_id: int, ordinal: int, *,
-        pair_id: int, mo_observation_id: int, inat_observation_id: int, source_site: str,
-        source_photo_id: str, planned_observation_photo_uuid: str, reviewed_byte_fingerprint: str,
-        byte_fingerprint: str, md5: str, source_license_label: str, source_copyright_holder: str,
-        preview_inat_record_fingerprint: str, preview_mo_record_fingerprint: str,
+        self,
+        profile_id: int,
+        group_id: int,
+        creation_item_id: int,
+        ordinal: int,
+        *,
+        pair_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
+        source_site: str,
+        source_photo_id: str,
+        planned_observation_photo_uuid: str,
+        reviewed_byte_fingerprint: str,
+        byte_fingerprint: str,
+        md5: str,
+        source_license_label: str,
+        source_copyright_holder: str,
+        preview_inat_record_fingerprint: str,
+        preview_mo_record_fingerprint: str,
     ) -> int:
         """Finding 8: a Gate 2A photo item must enter Gate 1E's journaling
         contract completely, not partially. ``mint_creation_item_action``
@@ -2721,7 +3609,9 @@ class ReconciliationDB:
         remote row any of its transfers produced.
         """
         with self.transaction() as conn:
-            existing = self._require_scoped_creation_item(conn, profile_id, group_id, creation_item_id)
+            existing = self._require_scoped_creation_item(
+                conn, profile_id, group_id, creation_item_id
+            )
             if existing["action_id"] is not None:
                 return int(existing["action_id"])
             now = _utc_now()
@@ -2749,9 +3639,17 @@ class ReconciliationDB:
                     "this destination observation — resume/verify that transfer rather than minting a new one."
                 )
             action_id = self._insert_creation_followup_action(
-                conn, profile_id, group_id, ordinal, "inat_photo_attach",
-                pair_id=pair_id, mo_observation_id=mo_observation_id, inat_observation_id=inat_observation_id,
-                site="inat", source_site=source_site, source_photo_id=source_photo_id,
+                conn,
+                profile_id,
+                group_id,
+                ordinal,
+                "inat_photo_attach",
+                pair_id=pair_id,
+                mo_observation_id=mo_observation_id,
+                inat_observation_id=inat_observation_id,
+                site="inat",
+                source_site=source_site,
+                source_photo_id=source_photo_id,
                 planned_observation_photo_uuid=planned_observation_photo_uuid,
                 reviewed_byte_fingerprint=reviewed_byte_fingerprint,
                 preview_inat_record_fingerprint=preview_inat_record_fingerprint,
@@ -2769,9 +3667,17 @@ class ReconciliationDB:
                     "destination_observation_photo_uuid=?,byte_fingerprint=?,md5=?,"
                     "source_license_label=?,source_copyright_holder=?,destination_license_code='',"
                     "state='pending',updated_at=? WHERE transfer_id=?",
-                    (pair_id, action_id, planned_observation_photo_uuid, byte_fingerprint, md5,
-                     source_license_label, source_copyright_holder, now,
-                     int(existing_transfer["transfer_id"])),
+                    (
+                        pair_id,
+                        action_id,
+                        planned_observation_photo_uuid,
+                        byte_fingerprint,
+                        md5,
+                        source_license_label,
+                        source_copyright_holder,
+                        now,
+                        int(existing_transfer["transfer_id"]),
+                    ),
                 )
             else:
                 conn.execute(
@@ -2780,16 +3686,31 @@ class ReconciliationDB:
                     "byte_fingerprint,md5,source_license_label,"
                     "source_copyright_holder,state,created_at,updated_at) VALUES "
                     "(?,?,?,?,?,'inat',?,?,?,?,?,?,'pending',?,?)",
-                    (profile_id, pair_id, action_id, source_site, source_photo_id, inat_observation_id,
-                     planned_observation_photo_uuid, byte_fingerprint, md5, source_license_label,
-                     source_copyright_holder, now, now),
+                    (
+                        profile_id,
+                        pair_id,
+                        action_id,
+                        source_site,
+                        source_photo_id,
+                        inat_observation_id,
+                        planned_observation_photo_uuid,
+                        byte_fingerprint,
+                        md5,
+                        source_license_label,
+                        source_copyright_holder,
+                        now,
+                        now,
+                    ),
                 )
             return action_id
 
     # Gate 1D name-proposal tracking -----------------------------------
 
     def record_name_delegation(
-        self, profile_id: int, pair_id: int, identify_action_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
+        identify_action_id: int,
     ) -> int:
         """Link a confirmed pair to its delegated Identify action id only.
 
@@ -2814,18 +3735,29 @@ class ReconciliationDB:
             return int(row["delegation_id"]) if row else 0
 
     def name_delegation_for_pair(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_name_delegations WHERE profile_id=? AND pair_id=? "
-            "ORDER BY updated_at DESC, delegation_id DESC LIMIT 1",
-            (profile_id, pair_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_name_delegations WHERE profile_id=? AND pair_id=? "
+                "ORDER BY updated_at DESC, delegation_id DESC LIMIT 1",
+                (profile_id, pair_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def record_mo_proposal(
-        self, profile_id: int, pair_id: int, mo_observation_id: int,
-        proposed_name: str, proposed_name_id: Optional[int], current_effective_name: str,
+        self,
+        profile_id: int,
+        pair_id: int,
+        mo_observation_id: int,
+        proposed_name: str,
+        proposed_name_id: Optional[int],
+        current_effective_name: str,
     ) -> int:
         """Create or update an MO proposal tracking row as a fresh pending draft.
 
@@ -2846,8 +3778,16 @@ class ReconciliationDB:
                 "status='pending',became_effective_at='',"
                 "proposal_submitted=0,proposal_remote_id='',submitted_at='',"
                 "updated_at=excluded.updated_at",
-                (profile_id, pair_id, mo_observation_id, proposed_name,
-                 proposed_name_id, current_effective_name, now, now),
+                (
+                    profile_id,
+                    pair_id,
+                    mo_observation_id,
+                    proposed_name,
+                    proposed_name_id,
+                    current_effective_name,
+                    now,
+                    now,
+                ),
             )
             row = conn.execute(
                 "SELECT proposal_id FROM sync_mo_proposals WHERE profile_id=? AND pair_id=? AND proposed_name=?",
@@ -2856,8 +3796,12 @@ class ReconciliationDB:
             return int(row["proposal_id"]) if row else int(cursor.lastrowid)
 
     def update_mo_proposal_status(
-        self, profile_id: int, proposal_id: int, status: str,
-        current_effective_name: str = "", became_effective_at: str = "",
+        self,
+        profile_id: int,
+        proposal_id: int,
+        status: str,
+        current_effective_name: str = "",
+        became_effective_at: str = "",
     ) -> None:
         now = _utc_now()
         with self.transaction() as conn:
@@ -2865,35 +3809,60 @@ class ReconciliationDB:
                 "UPDATE sync_mo_proposals SET status=?,current_effective_name=?,"
                 "became_effective_at=CASE WHEN ?<>'' THEN ? ELSE became_effective_at END,updated_at=? "
                 "WHERE profile_id=? AND proposal_id=?",
-                (status, current_effective_name, became_effective_at, became_effective_at,
-                 now, profile_id, proposal_id),
+                (
+                    status,
+                    current_effective_name,
+                    became_effective_at,
+                    became_effective_at,
+                    now,
+                    profile_id,
+                    proposal_id,
+                ),
             )
 
     def mo_proposal_for_pair(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_mo_proposals WHERE profile_id=? AND pair_id=? "
-            "ORDER BY updated_at DESC, proposal_id DESC LIMIT 1",
-            (profile_id, pair_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_mo_proposals WHERE profile_id=? AND pair_id=? "
+                "ORDER BY updated_at DESC, proposal_id DESC LIMIT 1",
+                (profile_id, pair_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def mo_proposal(self, profile_id: int, proposal_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_mo_proposals WHERE profile_id=? AND proposal_id=?",
-            (profile_id, proposal_id),
-        ).fetchone()
+    def mo_proposal(
+        self, profile_id: int, proposal_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_mo_proposals WHERE profile_id=? AND proposal_id=?",
+                (profile_id, proposal_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def action(self, profile_id: int, action_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_actions WHERE profile_id=? AND action_id=?",
-            (profile_id, action_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_actions WHERE profile_id=? AND action_id=?",
+                (profile_id, action_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def action_detail(self, profile_id: int, action_id: int) -> Optional[dict[str, Any]]:
+    def action_detail(
+        self, profile_id: int, action_id: int
+    ) -> Optional[dict[str, Any]]:
         result = self.action(profile_id, action_id)
         if not result:
             return None
@@ -2903,31 +3872,52 @@ class ReconciliationDB:
         return result
 
     def action_group_rows(self, profile_id: int, group_id: int) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.connection().execute(
-            "SELECT * FROM sync_actions WHERE profile_id=? AND action_group_id=? ORDER BY ordinal,action_id",
-            (profile_id, group_id),
-        ).fetchall()]
+        return [
+            dict(row)
+            for row in self.connection()
+            .execute(
+                "SELECT * FROM sync_actions WHERE profile_id=? AND action_group_id=? ORDER BY ordinal,action_id",
+                (profile_id, group_id),
+            )
+            .fetchall()
+        ]
 
     def action_group(self, profile_id: int, group_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_action_groups WHERE profile_id=? AND action_group_id=?",
-            (profile_id, group_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_action_groups WHERE profile_id=? AND action_group_id=?",
+                (profile_id, group_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def action_snapshot_rows(self, profile_id: int, group_id: int) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.connection().execute(
-            "SELECT * FROM sync_action_snapshot_rows WHERE profile_id=? AND action_group_id=? "
-            "ORDER BY site,observation_id,remote_row_id,remote_row_uuid",
-            (profile_id, group_id),
-        ).fetchall()]
+    def action_snapshot_rows(
+        self, profile_id: int, group_id: int
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.connection()
+            .execute(
+                "SELECT * FROM sync_action_snapshot_rows WHERE profile_id=? AND action_group_id=? "
+                "ORDER BY site,observation_id,remote_row_id,remote_row_uuid",
+                (profile_id, group_id),
+            )
+            .fetchall()
+        ]
 
     def unresolved_action_groups(self, profile_id: int) -> list[int]:
-        return [int(row[0]) for row in self.connection().execute(
-            "SELECT DISTINCT action_group_id FROM sync_actions WHERE profile_id=? "
-            "AND state IN ('pending','running','outcome_unknown') ORDER BY action_group_id",
-            (profile_id,),
-        ).fetchall()]
+        return [
+            int(row[0])
+            for row in self.connection()
+            .execute(
+                "SELECT DISTINCT action_group_id FROM sync_actions WHERE profile_id=? "
+                "AND state IN ('pending','running','outcome_unknown') ORDER BY action_group_id",
+                (profile_id,),
+            )
+            .fetchall()
+        ]
 
     def claim_action(self, profile_id: int, action_id: int, phase: str) -> bool:
         now = _utc_now()
@@ -2940,7 +3930,9 @@ class ReconciliationDB:
             )
             return cursor.rowcount == 1
 
-    def release_finalize_action_to_pending(self, profile_id: int, action_id: int) -> bool:
+    def release_finalize_action_to_pending(
+        self, profile_id: int, action_id: int
+    ) -> bool:
         """Return a claimed ``pair_finalize`` row to 'pending' so a resume can
         retry it. Returns True when the row was actually released.
 
@@ -3023,9 +4015,17 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def finish_action(
-        self, profile_id: int, action_id: int, state: str, *, phase: str,
-        error_code: str = "", http_status: Optional[int] = None,
-        verification_state: str = "", server_row_id: str = "", server_row_uuid: str = "",
+        self,
+        profile_id: int,
+        action_id: int,
+        state: str,
+        *,
+        phase: str,
+        error_code: str = "",
+        http_status: Optional[int] = None,
+        verification_state: str = "",
+        server_row_id: str = "",
+        server_row_uuid: str = "",
     ) -> bool:
         """Record one terminal outcome for a still-resolvable action.
 
@@ -3052,16 +4052,31 @@ class ReconciliationDB:
             "server_row_id=?,server_row_uuid=?,outcome_unknown=?,finished_at=?,updated_at=? "
             "WHERE profile_id=? AND action_id=? "
             "AND state IN ('pending','running','outcome_unknown')",
-            (state, phase, error_code[:80], http_status, verification_state,
-             verification_state, now, server_row_id, server_row_uuid,
-             int(state == "outcome_unknown"), now, now, profile_id, action_id),
+            (
+                state,
+                phase,
+                error_code[:80],
+                http_status,
+                verification_state,
+                verification_state,
+                now,
+                server_row_id,
+                server_row_uuid,
+                int(state == "outcome_unknown"),
+                now,
+                now,
+                profile_id,
+                action_id,
+            ),
         )
         if cursor.rowcount == 1:
             return True
         log.warning(
             "finish_action(%s) did not apply to action %s of profile %s: "
             "the row is missing or already settled",
-            state, action_id, profile_id,
+            state,
+            action_id,
+            profile_id,
         )
         return False
 
@@ -3085,7 +4100,11 @@ class ReconciliationDB:
         return True
 
     def cancel_action_group_tail(
-        self, profile_id: int, group_id: int, after_ordinal: int, error_code: str,
+        self,
+        profile_id: int,
+        group_id: int,
+        after_ordinal: int,
+        error_code: str,
     ) -> int:
         now = _utc_now()
         cursor = self.connection().execute(
@@ -3098,7 +4117,11 @@ class ReconciliationDB:
         return cursor.rowcount
 
     def fail_pending_action_and_cancel_tail(
-        self, profile_id: int, group_id: int, action_id: int, ordinal: int,
+        self,
+        profile_id: int,
+        group_id: int,
+        action_id: int,
+        ordinal: int,
         error_code: str,
     ) -> None:
         """Record a deterministic whole-group preflight failure atomically."""
@@ -3119,7 +4142,9 @@ class ReconciliationDB:
         self._mark_action_groups_stale_if_written(((profile_id, group_id),))
 
     def cancel_pending_actions(
-        self, profile_ids: Iterable[int], error_code: str,
+        self,
+        profile_ids: Iterable[int],
+        error_code: str,
     ) -> int:
         ids = tuple(sorted({int(value) for value in profile_ids if int(value) > 0}))
         if not ids:
@@ -3127,11 +4152,13 @@ class ReconciliationDB:
         placeholders = ",".join("?" for _ in ids)
         groups = [
             (int(row[0]), int(row[1]))
-            for row in self.connection().execute(
+            for row in self.connection()
+            .execute(
                 "SELECT DISTINCT profile_id,action_group_id FROM sync_actions "
                 f"WHERE state='pending' AND profile_id IN ({placeholders})",
                 ids,
-            ).fetchall()
+            )
+            .fetchall()
         ]
         now = _utc_now()
         cursor = self.connection().execute(
@@ -3143,17 +4170,22 @@ class ReconciliationDB:
         return cursor.rowcount
 
     def cancel_pending_groups_for_site(
-        self, profile_id: int, site: str, error_code: str,
+        self,
+        profile_id: int,
+        site: str,
+        error_code: str,
     ) -> int:
         if site not in {"inat", "mo"}:
             raise ValueError("Invalid action site")
         groups = [
             (profile_id, int(row[0]))
-            for row in self.connection().execute(
+            for row in self.connection()
+            .execute(
                 "SELECT DISTINCT action_group_id FROM sync_actions WHERE profile_id=? AND site=? "
                 "AND state IN ('pending','running','outcome_unknown')",
                 (profile_id, site),
-            ).fetchall()
+            )
+            .fetchall()
         ]
         now = _utc_now()
         cursor = self.connection().execute(
@@ -3169,7 +4201,8 @@ class ReconciliationDB:
     def recover_running_actions(self) -> int:
         groups = [
             (int(row[0]), int(row[1]))
-            for row in self.connection().execute(
+            for row in self.connection()
+            .execute(
                 "SELECT g.profile_id,g.action_group_id FROM sync_action_groups g "
                 "WHERE EXISTS (SELECT 1 FROM sync_actions written "
                 "WHERE written.profile_id=g.profile_id AND written.action_group_id=g.action_group_id "
@@ -3179,7 +4212,8 @@ class ReconciliationDB:
                 "AND r.finished_at >= (SELECT MAX(written_again.write_started_at) "
                 "FROM sync_actions written_again WHERE written_again.profile_id=g.profile_id "
                 "AND written_again.action_group_id=g.action_group_id))"
-            ).fetchall()
+            )
+            .fetchall()
         ]
         now = _utc_now()
         # A claimed action is only ambiguous once its write boundary was
@@ -3223,29 +4257,38 @@ class ReconciliationDB:
         return recovered
 
     def _mark_action_groups_stale_if_written(
-        self, groups: Iterable[tuple[int, int]],
+        self,
+        groups: Iterable[tuple[int, int]],
     ) -> None:
         """Retain a visible refresh requirement for every possibly written group."""
         for profile_id, group_id in sorted(set(groups)):
-            row = self.connection().execute(
-                "SELECT g.mo_observation_id,g.inat_observation_id FROM sync_action_groups g "
-                "WHERE g.profile_id=? AND g.action_group_id=? AND EXISTS ("
-                "SELECT 1 FROM sync_actions a WHERE a.profile_id=g.profile_id "
-                "AND a.action_group_id=g.action_group_id AND a.write_started_at IS NOT NULL "
-                "AND a.action_type IN ('inat_ofv_add','inat_ofv_repair','inat_ofv_remove',"
-                "'mo_external_link_add','mo_external_link_repair','mo_external_link_remove'))",
-                (profile_id, group_id),
-            ).fetchone()
+            row = (
+                self.connection()
+                .execute(
+                    "SELECT g.mo_observation_id,g.inat_observation_id FROM sync_action_groups g "
+                    "WHERE g.profile_id=? AND g.action_group_id=? AND EXISTS ("
+                    "SELECT 1 FROM sync_actions a WHERE a.profile_id=g.profile_id "
+                    "AND a.action_group_id=g.action_group_id AND a.write_started_at IS NOT NULL "
+                    "AND a.action_type IN ('inat_ofv_add','inat_ofv_repair','inat_ofv_remove',"
+                    "'mo_external_link_add','mo_external_link_repair','mo_external_link_remove'))",
+                    (profile_id, group_id),
+                )
+                .fetchone()
+            )
             if row:
                 self.mark_link_reconciliation_stale(
-                    profile_id, int(row["mo_observation_id"]),
+                    profile_id,
+                    int(row["mo_observation_id"]),
                     int(row["inat_observation_id"]),
                 )
             # ITS action groups keep a separate, ITS-specific refresh requirement.
             self.mark_its_reconciliation_stale(profile_id, group_id)
 
     def advance_pending_action_fingerprints(
-        self, profile_id: int, group_id: int, live_state: object,
+        self,
+        profile_id: int,
+        group_id: int,
+        live_state: object,
     ) -> None:
         """Advance only pending siblings after a verified write from their group.
 
@@ -3263,17 +4306,29 @@ class ReconciliationDB:
                 str(getattr(live_state, "mo_record_fingerprint")),
                 str(getattr(live_state, "inat_links_fingerprint")),
                 str(getattr(live_state, "mo_links_fingerprint")),
-                now, profile_id, group_id,
+                now,
+                profile_id,
+                group_id,
             ),
         )
 
-    def refresh_authoritative_link_rows(self, profile_id: int, live_state: object) -> None:
+    def refresh_authoritative_link_rows(
+        self, profile_id: int, live_state: object
+    ) -> None:
         """Apply a verified, targeted Gate 1B link-resource reread locally."""
         now = _utc_now()
         with self.transaction() as conn:
             for site, observation_id, rows in (
-                ("inat", int(getattr(live_state, "inat_observation_id")), getattr(live_state, "inat_rows")),
-                ("mo", int(getattr(live_state, "mo_observation_id")), getattr(live_state, "mo_rows")),
+                (
+                    "inat",
+                    int(getattr(live_state, "inat_observation_id")),
+                    getattr(live_state, "inat_rows"),
+                ),
+                (
+                    "mo",
+                    int(getattr(live_state, "mo_observation_id")),
+                    getattr(live_state, "mo_rows"),
+                ),
             ):
                 conn.execute(
                     "DELETE FROM sync_links WHERE profile_id=? AND source_site=? AND source_observation_id=?",
@@ -3287,10 +4342,19 @@ class ReconciliationDB:
                         "INSERT INTO sync_links(profile_id,link_row_id,source_site,source_observation_id,"
                         "target_site,target_observation_id,direction,link_state,external_site_id,parse_state,fingerprint) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                        (profile_id, str(row.row_uuid or row.row_id), site, observation_id,
-                         target_site, row.target_observation_id, f"{site}_to_{target_site}",
-                         str(row.parse_state), row.binding_id, str(row.parse_state),
-                         str(row.row_fingerprint)),
+                        (
+                            profile_id,
+                            str(row.row_uuid or row.row_id),
+                            site,
+                            observation_id,
+                            target_site,
+                            row.target_observation_id,
+                            f"{site}_to_{target_site}",
+                            str(row.parse_state),
+                            row.binding_id,
+                            str(row.parse_state),
+                            str(row.row_fingerprint),
+                        ),
                     )
                 conn.execute(
                     "UPDATE sync_records SET link_malformed=?,last_seen_at=? WHERE profile_id=? "
@@ -3299,11 +4363,16 @@ class ReconciliationDB:
                 )
 
     def mark_link_reconciliation_stale(
-        self, profile_id: int, mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
     ) -> None:
         """Make post-write dashboard staleness explicit until read-only reconciliation."""
         fingerprint = _local_fingerprint(
-            "link_state_refresh_required", mo_observation_id, inat_observation_id,
+            "link_state_refresh_required",
+            mo_observation_id,
+            inat_observation_id,
             _utc_now(),
         )
         with self.transaction() as conn:
@@ -3340,16 +4409,23 @@ class ReconciliationDB:
                         "UPDATE sync_action_groups SET source_fingerprint=?,updated_at=? "
                         "WHERE profile_id=? AND pair_id=? AND source_fingerprint=?",
                         (
-                            pair_source_fingerprint(updated), _utc_now(),
-                            profile_id, int(pair["pair_id"]), previous_source,
+                            pair_source_fingerprint(updated),
+                            _utc_now(),
+                            profile_id,
+                            int(pair["pair_id"]),
+                            previous_source,
                         ),
                     )
             self._upsert_issue_tx(
-                conn, profile_id, "link_state_refresh_required", "warning",
+                conn,
+                profile_id,
+                "link_state_refresh_required",
+                "warning",
                 f"Read-only link refresh required: MO {mo_observation_id} ↔ iNat {inat_observation_id}",
                 "A verified Gate 1B write changed authoritative link state. Run a read-only scan "
                 "before relying on pair or issue categories.",
-                fingerprint, (("mo", mo_observation_id), ("inat", inat_observation_id)),
+                fingerprint,
+                (("mo", mo_observation_id), ("inat", inat_observation_id)),
             )
 
     def mark_its_reconciliation_stale(self, profile_id: int, group_id: int) -> None:
@@ -3360,15 +4436,19 @@ class ReconciliationDB:
         verification, manual cancellation after a write, and journal errors after
         a verified write. No raw sequence data is stored in the issue.
         """
-        row = self.connection().execute(
-            "SELECT g.mo_observation_id,g.inat_observation_id FROM sync_action_groups g "
-            "WHERE g.profile_id=? AND g.action_group_id=? AND EXISTS ("
-            "SELECT 1 FROM sync_actions a WHERE a.profile_id=g.profile_id "
-            "AND a.action_group_id=g.action_group_id AND a.write_started_at IS NOT NULL "
-            "AND a.action_type IN ('inat_its_add','inat_its_repair','inat_its_remove',"
-            "'mo_sequence_add','mo_sequence_repair'))",
-            (profile_id, group_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT g.mo_observation_id,g.inat_observation_id FROM sync_action_groups g "
+                "WHERE g.profile_id=? AND g.action_group_id=? AND EXISTS ("
+                "SELECT 1 FROM sync_actions a WHERE a.profile_id=g.profile_id "
+                "AND a.action_group_id=g.action_group_id AND a.write_started_at IS NOT NULL "
+                "AND a.action_type IN ('inat_its_add','inat_its_repair','inat_its_remove',"
+                "'mo_sequence_add','mo_sequence_repair'))",
+                (profile_id, group_id),
+            )
+            .fetchone()
+        )
         if not row:
             return
         mo_observation_id = int(row["mo_observation_id"])
@@ -3376,45 +4456,64 @@ class ReconciliationDB:
         # Stable fingerprint: keyed on the pair and the latest ITS write. Repeated
         # marks for the same write keep the same fingerprint (they do not churn the
         # issue), while a genuinely newer write bumps it and reopens the issue.
-        latest_write = self.connection().execute(
-            "SELECT MAX(a.write_started_at) FROM sync_actions a JOIN sync_action_groups g "
-            "ON g.profile_id=a.profile_id AND g.action_group_id=a.action_group_id "
-            "WHERE a.profile_id=? AND g.mo_observation_id=? AND g.inat_observation_id=? "
-            "AND a.write_started_at IS NOT NULL AND a.action_type IN ("
-            "'inat_its_add','inat_its_repair','inat_its_remove','mo_sequence_add','mo_sequence_repair')",
-            (profile_id, mo_observation_id, inat_observation_id),
-        ).fetchone()[0]
+        latest_write = (
+            self.connection()
+            .execute(
+                "SELECT MAX(a.write_started_at) FROM sync_actions a JOIN sync_action_groups g "
+                "ON g.profile_id=a.profile_id AND g.action_group_id=a.action_group_id "
+                "WHERE a.profile_id=? AND g.mo_observation_id=? AND g.inat_observation_id=? "
+                "AND a.write_started_at IS NOT NULL AND a.action_type IN ("
+                "'inat_its_add','inat_its_repair','inat_its_remove','mo_sequence_add','mo_sequence_repair')",
+                (profile_id, mo_observation_id, inat_observation_id),
+            )
+            .fetchone()[0]
+        )
         fingerprint = _local_fingerprint(
-            "its_state_refresh_required", mo_observation_id, inat_observation_id, latest_write or "",
+            "its_state_refresh_required",
+            mo_observation_id,
+            inat_observation_id,
+            latest_write or "",
         )
-        title = (
-            f"Read-only ITS refresh required: MO {mo_observation_id} ↔ iNat {inat_observation_id}"
-        )
+        title = f"Read-only ITS refresh required: MO {mo_observation_id} ↔ iNat {inat_observation_id}"
         # If this exact write was already resolved by a fresh comparison, a repeat
         # mark for the same write must not reopen it; only a newer write (which
         # changes the fingerprint) reopens.
-        existing = self.connection().execute(
-            "SELECT fingerprint,state FROM sync_issues WHERE profile_id=? "
-            "AND issue_type='its_state_refresh_required' AND title=?",
-            (profile_id, title),
-        ).fetchone()
-        if existing and str(existing["state"]) == "resolved" and str(existing["fingerprint"]) == fingerprint:
+        existing = (
+            self.connection()
+            .execute(
+                "SELECT fingerprint,state FROM sync_issues WHERE profile_id=? "
+                "AND issue_type='its_state_refresh_required' AND title=?",
+                (profile_id, title),
+            )
+            .fetchone()
+        )
+        if (
+            existing
+            and str(existing["state"]) == "resolved"
+            and str(existing["fingerprint"]) == fingerprint
+        ):
             return
         with self.transaction() as conn:
             self._upsert_issue_tx(
-                conn, profile_id, "its_state_refresh_required", "warning", title,
+                conn,
+                profile_id,
+                "its_state_refresh_required",
+                "warning",
+                title,
                 "A Gate 1C ITS write may have changed remote ITS state for this confirmed pair. Run a "
                 "fresh ITS comparison or read-only reconciliation refresh before relying on ITS evidence.",
-                fingerprint, (("mo", mo_observation_id), ("inat", inat_observation_id)),
+                fingerprint,
+                (("mo", mo_observation_id), ("inat", inat_observation_id)),
             )
 
     def resolve_its_reconciliation_stale(
-        self, profile_id: int, mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
     ) -> None:
         """Resolve the ITS refresh issue once a fresh comparison rebuilt the evidence."""
-        title = (
-            f"Read-only ITS refresh required: MO {mo_observation_id} ↔ iNat {inat_observation_id}"
-        )
+        title = f"Read-only ITS refresh required: MO {mo_observation_id} ↔ iNat {inat_observation_id}"
         now = _utc_now()
         with self.transaction() as conn:
             conn.execute(
@@ -3430,8 +4529,14 @@ class ReconciliationDB:
         return int(self.connection().execute(sql, params).fetchone()[0])
 
     def dashboard_rows(
-        self, profile_id: int, category: str, offset: int, limit: int,
-        *, sort_column: str = "updated_at", descending: bool = True,
+        self,
+        profile_id: int,
+        category: str,
+        offset: int,
+        limit: int,
+        *,
+        sort_column: str = "updated_at",
+        descending: bool = True,
     ) -> list[dict[str, Any]]:
         sql, params = self._dashboard_query(profile_id, category, count=False)
         # Must stay in step with ReconciliationTableModel.KEYS: a key the model
@@ -3440,15 +4545,27 @@ class ReconciliationDB:
         # column the rows are not actually ordered by. Every dashboard branch
         # projects all of these.
         allowed = {
-            "updated_at", "kind", "site", "remote_id", "other_id",
-            "score", "state", "title",
+            "updated_at",
+            "kind",
+            "site",
+            "remote_id",
+            "other_id",
+            "score",
+            "state",
+            "title",
         }
         column = sort_column if sort_column in allowed else "updated_at"
         sql += f" ORDER BY {column} {'DESC' if descending else 'ASC'}, row_key LIMIT ? OFFSET ?"
-        rows = self.connection().execute(sql, (*params, int(limit), int(offset))).fetchall()
+        rows = (
+            self.connection()
+            .execute(sql, (*params, int(limit), int(offset)))
+            .fetchall()
+        )
         return [dict(row) for row in rows]
 
-    def _dashboard_query(self, profile_id: int, category: str, *, count: bool) -> tuple[str, tuple[Any, ...]]:
+    def _dashboard_query(
+        self, profile_id: int, category: str, *, count: bool
+    ) -> tuple[str, tuple[Any, ...]]:
         projection = "COUNT(*)" if count else "*"
         if category == "consolidation_history":
             sql = (
@@ -3499,7 +4616,12 @@ class ReconciliationDB:
                 "updated_at FROM sync_deletion_actions WHERE profile_id=?)"
             )
             return sql, (profile_id, profile_id)
-        if category in {"link_issues", "same_site_duplicates", "changed_deleted", "ignored_resolved"}:
+        if category in {
+            "link_issues",
+            "same_site_duplicates",
+            "changed_deleted",
+            "ignored_resolved",
+        }:
             where = {
                 "link_issues": (
                     "state='open' AND (issue_type LIKE '%link%' "
@@ -3529,7 +4651,12 @@ class ReconciliationDB:
                 "AND cm.local_state='superseded'))"
             )
             return sql, (profile_id,)
-        if category in {"candidate_pairs", "confirmed_links", "confirmed_conflicts", "rejected_excluded"}:
+        if category in {
+            "candidate_pairs",
+            "confirmed_links",
+            "confirmed_conflicts",
+            "rejected_excluded",
+        }:
             where = {
                 "candidate_pairs": "review_state='candidate'",
                 "confirmed_links": "review_state='confirmed' AND link_state='link_confirmed'",
@@ -3550,7 +4677,9 @@ class ReconciliationDB:
                 f"SELECT {projection} FROM (SELECT 'pair:'||pair_id AS row_key,'pair' AS kind,NULL AS issue_id,"
                 "pair_id,'mo' AS site,mo_observation_id AS remote_id,inat_observation_id AS other_id,'inat' AS other_site,score,"
                 "review_state AS state,classification||' candidate' AS title,link_state AS detail,updated_at "
-                "FROM sync_pairs p WHERE p.profile_id=? AND " + where + " AND NOT EXISTS ("
+                "FROM sync_pairs p WHERE p.profile_id=? AND "
+                + where
+                + " AND NOT EXISTS ("
                 "SELECT 1 FROM sync_consolidation_members cm WHERE cm.profile_id=p.profile_id "
                 "AND cm.local_state='superseded' AND "
                 "((cm.site='mo' AND cm.observation_id=p.mo_observation_id) OR "
@@ -3600,72 +4729,112 @@ class ReconciliationDB:
         return f"SELECT {projection} FROM ({inner})", (profile_id, profile_id)
 
     def issue_detail(self, profile_id: int, issue_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_issues WHERE profile_id=? AND issue_id=?",
-            (profile_id, issue_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_issues WHERE profile_id=? AND issue_id=?",
+                (profile_id, issue_id),
+            )
+            .fetchone()
+        )
         if not row:
             return None
         result = dict(row)
-        result["records"] = [dict(item) for item in self.connection().execute(
-            "SELECT ir.site,ir.observation_id,r.taxon_name,r.observed_on,r.public_locality,"
-            "r.fungi_status,r.scope_state,r.is_deleted FROM sync_issue_records ir "
-            "LEFT JOIN sync_records r ON r.profile_id=ir.profile_id AND r.site=ir.site "
-            "AND r.remote_observation_id=ir.observation_id "
-            "WHERE ir.profile_id=? AND ir.issue_id=? ORDER BY ir.site,ir.observation_id",
-            (profile_id, issue_id),
-        ).fetchall()]
+        result["records"] = [
+            dict(item)
+            for item in self.connection()
+            .execute(
+                "SELECT ir.site,ir.observation_id,r.taxon_name,r.observed_on,r.public_locality,"
+                "r.fungi_status,r.scope_state,r.is_deleted FROM sync_issue_records ir "
+                "LEFT JOIN sync_records r ON r.profile_id=ir.profile_id AND r.site=ir.site "
+                "AND r.remote_observation_id=ir.observation_id "
+                "WHERE ir.profile_id=? AND ir.issue_id=? ORDER BY ir.site,ir.observation_id",
+                (profile_id, issue_id),
+            )
+            .fetchall()
+        ]
         return result
 
-    def record_detail(self, profile_id: int, site: str, observation_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_records WHERE profile_id=? AND site=? AND remote_observation_id=?",
-            (profile_id, site, observation_id),
-        ).fetchone()
+    def record_detail(
+        self, profile_id: int, site: str, observation_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_records WHERE profile_id=? AND site=? AND remote_observation_id=?",
+                (profile_id, site, observation_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def inventory_records(
-        self, profile_id: int, site: str,
-        *, scope_states: tuple[str, ...] = ("in_scope", "linked_context"),
+        self,
+        profile_id: int,
+        site: str,
+        *,
+        scope_states: tuple[str, ...] = ("in_scope", "linked_context"),
     ) -> list[InventoryObservation]:
         from datetime import date, datetime
         from .types import MediaIdentity, RemoteRecordKey, RemoteSite
 
         placeholders = ",".join("?" for _ in scope_states)
-        rows = self.connection().execute(
-            f"SELECT * FROM sync_records r WHERE profile_id=? AND site=? "
-            f"AND scope_state IN ({placeholders}) AND NOT EXISTS ("
-            "SELECT 1 FROM sync_consolidation_members cm "
-            "WHERE cm.profile_id=r.profile_id AND cm.site=r.site "
-            "AND cm.observation_id=r.remote_observation_id "
-            "AND cm.local_state='superseded')",
-            (profile_id, site, *scope_states),
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                f"SELECT * FROM sync_records r WHERE profile_id=? AND site=? "
+                f"AND scope_state IN ({placeholders}) AND NOT EXISTS ("
+                "SELECT 1 FROM sync_consolidation_members cm "
+                "WHERE cm.profile_id=r.profile_id AND cm.site=r.site "
+                "AND cm.observation_id=r.remote_observation_id "
+                "AND cm.local_state='superseded')",
+                (profile_id, site, *scope_states),
+            )
+            .fetchall()
+        )
         links_by_record: dict[int, list[sqlite3.Row]] = {}
-        for row in self.connection().execute(
-            "SELECT * FROM sync_links WHERE profile_id=? AND source_site=?",
-            (profile_id, site),
-        ).fetchall():
-            links_by_record.setdefault(int(row["source_observation_id"]), []).append(row)
+        for row in (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_links WHERE profile_id=? AND source_site=?",
+                (profile_id, site),
+            )
+            .fetchall()
+        ):
+            links_by_record.setdefault(int(row["source_observation_id"]), []).append(
+                row
+            )
         identifiers_by_record: dict[int, list[sqlite3.Row]] = {}
-        for row in self.connection().execute(
-            "SELECT observation_id,identifier_type,normalized_value,evidence_tier FROM sync_identifiers "
-            "WHERE profile_id=? AND site=?",
-            (profile_id, site),
-        ).fetchall():
+        for row in (
+            self.connection()
+            .execute(
+                "SELECT observation_id,identifier_type,normalized_value,evidence_tier FROM sync_identifiers "
+                "WHERE profile_id=? AND site=?",
+                (profile_id, site),
+            )
+            .fetchall()
+        ):
             identifiers_by_record.setdefault(int(row["observation_id"]), []).append(row)
         media_by_record: dict[int, list[sqlite3.Row]] = {}
-        for row in self.connection().execute(
-            "SELECT observation_id,photo_id,rendition,source_site,source_photo_id FROM sync_media_hashes "
-            "WHERE profile_id=? AND site=?",
-            (profile_id, site),
-        ).fetchall():
+        for row in (
+            self.connection()
+            .execute(
+                "SELECT observation_id,photo_id,rendition,source_site,source_photo_id FROM sync_media_hashes "
+                "WHERE profile_id=? AND site=?",
+                (profile_id, site),
+            )
+            .fetchall()
+        ):
             media_by_record.setdefault(int(row["observation_id"]), []).append(row)
         sequences_by_record: dict[int, list[tuple[str, int]]] = {}
-        for row in self.connection().execute(
-            "SELECT observation_id,sequence_hash,evidence_tier FROM sync_sequence_hashes WHERE profile_id=? AND site=?",
-            (profile_id, site),
-        ).fetchall():
+        for row in (
+            self.connection()
+            .execute(
+                "SELECT observation_id,sequence_hash,evidence_tier FROM sync_sequence_hashes WHERE profile_id=? AND site=?",
+                (profile_id, site),
+            )
+            .fetchall()
+        ):
             sequences_by_record.setdefault(int(row["observation_id"]), []).append(
                 (str(row["sequence_hash"]), int(row["evidence_tier"]))
             )
@@ -3675,83 +4844,158 @@ class ReconciliationDB:
             links = links_by_record.get(observation_id, [])
             identifiers = identifiers_by_record.get(observation_id, [])
             media_rows = media_by_record.get(observation_id, [])
-            results.append(InventoryObservation(
-                key=RemoteRecordKey(RemoteSite(site), observation_id),
-                account_id=int(row["account_id"]), owner_id=row["owner_id"], owner_login=row["owner_login"],
-                observed_on=date.fromisoformat(row["observed_on"]) if row["observed_on"] else None,
-                taxon_id=row["taxon_id"], taxon_name=row["taxon_name"], taxon_rank=row["taxon_rank"],
-                public_locality=row["public_locality"], fungi_status=row["fungi_status"],
-                updated_at=datetime.fromisoformat(row["remote_updated_at"]) if row["remote_updated_at"] else None,
-                deleted=bool(row["is_deleted"]), scope_state=str(row["scope_state"]),
-                availability_state=str(row["availability_state"]),
-                content_fingerprint=row["content_fingerprint"],
-                authoritative_targets=tuple(sorted({
-                    int(item["target_observation_id"]) for item in links
-                    if item["target_observation_id"] is not None
-                })),
-                link_malformed=bool(row["link_malformed"]),
-                authoritative_links=tuple(
-                    AuthoritativeLinkRow(
-                        str(item["link_row_id"]), item["external_site_id"],
-                        RemoteSite(str(item["target_site"])), item["target_observation_id"],
-                        str(item["parse_state"]), str(item["fingerprint"]),
-                    ) for item in links
-                ),
-                identifiers=tuple((str(item["identifier_type"]), str(item["normalized_value"])) for item in identifiers),
-                inventory_identifiers=tuple(
-                    (str(item["identifier_type"]), str(item["normalized_value"]))
-                    for item in identifiers if int(item["evidence_tier"]) == 1
-                ),
-                sequence_hashes=tuple(sorted({
-                    digest for digest, _tier in sequences_by_record.get(observation_id, ())
-                })),
-                inventory_sequence_hashes=tuple(sorted({
-                    digest for digest, tier in sequences_by_record.get(observation_id, ()) if tier == 2
-                })),
-                media=tuple(MediaIdentity(
-                    RemoteSite(site), str(item["photo_id"]), str(item["rendition"]),
-                    RemoteSite(str(item["source_site"])) if item["source_site"] else None,
-                    str(item["source_photo_id"] or ""),
-                ) for item in media_rows),
-            ))
+            results.append(
+                InventoryObservation(
+                    key=RemoteRecordKey(RemoteSite(site), observation_id),
+                    account_id=int(row["account_id"]),
+                    owner_id=row["owner_id"],
+                    owner_login=row["owner_login"],
+                    observed_on=(
+                        date.fromisoformat(row["observed_on"])
+                        if row["observed_on"]
+                        else None
+                    ),
+                    taxon_id=row["taxon_id"],
+                    taxon_name=row["taxon_name"],
+                    taxon_rank=row["taxon_rank"],
+                    public_locality=row["public_locality"],
+                    fungi_status=row["fungi_status"],
+                    updated_at=(
+                        datetime.fromisoformat(row["remote_updated_at"])
+                        if row["remote_updated_at"]
+                        else None
+                    ),
+                    deleted=bool(row["is_deleted"]),
+                    scope_state=str(row["scope_state"]),
+                    availability_state=str(row["availability_state"]),
+                    content_fingerprint=row["content_fingerprint"],
+                    authoritative_targets=tuple(
+                        sorted(
+                            {
+                                int(item["target_observation_id"])
+                                for item in links
+                                if item["target_observation_id"] is not None
+                            }
+                        )
+                    ),
+                    link_malformed=bool(row["link_malformed"]),
+                    authoritative_links=tuple(
+                        AuthoritativeLinkRow(
+                            str(item["link_row_id"]),
+                            item["external_site_id"],
+                            RemoteSite(str(item["target_site"])),
+                            item["target_observation_id"],
+                            str(item["parse_state"]),
+                            str(item["fingerprint"]),
+                        )
+                        for item in links
+                    ),
+                    identifiers=tuple(
+                        (str(item["identifier_type"]), str(item["normalized_value"]))
+                        for item in identifiers
+                    ),
+                    inventory_identifiers=tuple(
+                        (str(item["identifier_type"]), str(item["normalized_value"]))
+                        for item in identifiers
+                        if int(item["evidence_tier"]) == 1
+                    ),
+                    sequence_hashes=tuple(
+                        sorted(
+                            {
+                                digest
+                                for digest, _tier in sequences_by_record.get(
+                                    observation_id, ()
+                                )
+                            }
+                        )
+                    ),
+                    inventory_sequence_hashes=tuple(
+                        sorted(
+                            {
+                                digest
+                                for digest, tier in sequences_by_record.get(
+                                    observation_id, ()
+                                )
+                                if tier == 2
+                            }
+                        )
+                    ),
+                    media=tuple(
+                        MediaIdentity(
+                            RemoteSite(site),
+                            str(item["photo_id"]),
+                            str(item["rendition"]),
+                            (
+                                RemoteSite(str(item["source_site"]))
+                                if item["source_site"]
+                                else None
+                            ),
+                            str(item["source_photo_id"] or ""),
+                        )
+                        for item in media_rows
+                    ),
+                )
+            )
         return results
 
     def pair_detail(self, profile_id: int, pair_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_pairs WHERE profile_id=? AND pair_id=?", (profile_id, pair_id)
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_pairs WHERE profile_id=? AND pair_id=?",
+                (profile_id, pair_id),
+            )
+            .fetchone()
+        )
         if not row:
             return None
         result = dict(row)
         result["excluded"] = self.pair_is_excluded(profile_id, pair_id)
-        result["evidence"] = [dict(item) for item in self.connection().execute(
-            "SELECT evidence_type,family,score,tier,explanation FROM sync_evidence "
-            "WHERE profile_id=? AND pair_id=? ORDER BY score DESC", (profile_id, pair_id)
-        ).fetchall()]
+        result["evidence"] = [
+            dict(item)
+            for item in self.connection()
+            .execute(
+                "SELECT evidence_type,family,score,tier,explanation FROM sync_evidence "
+                "WHERE profile_id=? AND pair_id=? ORDER BY score DESC",
+                (profile_id, pair_id),
+            )
+            .fetchall()
+        ]
         return result
 
-    def pair_by_records(self, profile_id: int, mo_id: int, inat_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT pair_id FROM sync_pairs WHERE profile_id=? AND mo_observation_id=? AND inat_observation_id=?",
-            (profile_id, mo_id, inat_id),
-        ).fetchone()
+    def pair_by_records(
+        self, profile_id: int, mo_id: int, inat_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT pair_id FROM sync_pairs WHERE profile_id=? AND mo_observation_id=? AND inat_observation_id=?",
+                (profile_id, mo_id, inat_id),
+            )
+            .fetchone()
+        )
         return self.pair_detail(profile_id, int(row[0])) if row else None
 
     def pair_snapshots(self, profile_id: int) -> dict[tuple[int, int], dict[str, Any]]:
         """Load pair review state and evidence in two queries for worker planning."""
         pairs = {
             (int(row["mo_observation_id"]), int(row["inat_observation_id"])): dict(row)
-            for row in self.connection().execute(
-                "SELECT * FROM sync_pairs WHERE profile_id=?", (profile_id,)
-            ).fetchall()
+            for row in self.connection()
+            .execute("SELECT * FROM sync_pairs WHERE profile_id=?", (profile_id,))
+            .fetchall()
         }
         by_id = {int(value["pair_id"]): value for value in pairs.values()}
         for value in pairs.values():
             value["evidence"] = []
-        for row in self.connection().execute(
-            "SELECT pair_id,evidence_type,family,score,tier,explanation FROM sync_evidence "
-            "WHERE profile_id=?", (profile_id,),
-        ).fetchall():
+        for row in (
+            self.connection()
+            .execute(
+                "SELECT pair_id,evidence_type,family,score,tier,explanation FROM sync_evidence "
+                "WHERE profile_id=?",
+                (profile_id,),
+            )
+            .fetchall()
+        ):
             pair = by_id.get(int(row["pair_id"]))
             if pair is not None:
                 pair["evidence"].append(dict(row))
@@ -3760,29 +5004,47 @@ class ReconciliationDB:
     def confirmed_pair_keys(self, profile_id: int) -> list[tuple[int, int]]:
         return [
             (int(row[0]), int(row[1]))
-            for row in self.connection().execute(
+            for row in self.connection()
+            .execute(
                 "SELECT mo_observation_id,inat_observation_id FROM sync_pairs "
-                "WHERE profile_id=? AND review_state='confirmed'", (profile_id,),
-            ).fetchall()
+                "WHERE profile_id=? AND review_state='confirmed'",
+                (profile_id,),
+            )
+            .fetchall()
         ]
 
     def confirmed_pair_conflict(
-        self, profile_id: int, mo_observation_id: int, inat_observation_id: int,
+        self,
+        profile_id: int,
+        mo_observation_id: int,
+        inat_observation_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT pair_id,mo_observation_id,inat_observation_id FROM sync_pairs "
-            "WHERE profile_id=? AND review_state='confirmed' AND "
-            "((mo_observation_id=? AND inat_observation_id!=?) OR "
-            "(inat_observation_id=? AND mo_observation_id!=?)) LIMIT 1",
-            (profile_id, mo_observation_id, inat_observation_id,
-             inat_observation_id, mo_observation_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT pair_id,mo_observation_id,inat_observation_id FROM sync_pairs "
+                "WHERE profile_id=? AND review_state='confirmed' AND "
+                "((mo_observation_id=? AND inat_observation_id!=?) OR "
+                "(inat_observation_id=? AND mo_observation_id!=?)) LIMIT 1",
+                (
+                    profile_id,
+                    mo_observation_id,
+                    inat_observation_id,
+                    inat_observation_id,
+                    mo_observation_id,
+                ),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     # Gate 2B M2/M3: consolidation identity/membership accessors ----------
 
     def consolidation_membership_for_observation(
-        self, profile_id: int, site: str, observation_id: int,
+        self,
+        profile_id: int,
+        site: str,
+        observation_id: int,
     ) -> Optional[dict[str, Any]]:
         """Membership of this record in ANY consolidation, if one exists.
 
@@ -3794,26 +5056,34 @@ class ReconciliationDB:
         global UNIQUE(
         profile_id,site,observation_id) on ``sync_consolidation_members`` to
         raise ``IntegrityError`` at insert time."""
-        row = self.connection().execute(
-            "SELECT m.consolidation_id,m.role,m.local_state,c.state AS consolidation_state "
-            "FROM sync_consolidation_members m "
-            "JOIN sync_consolidations c ON c.consolidation_id=m.consolidation_id "
-            "WHERE m.profile_id=? AND m.site=? AND m.observation_id=?",
-            (profile_id, site, observation_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT m.consolidation_id,m.role,m.local_state,c.state AS consolidation_state "
+                "FROM sync_consolidation_members m "
+                "JOIN sync_consolidations c ON c.consolidation_id=m.consolidation_id "
+                "WHERE m.profile_id=? AND m.site=? AND m.observation_id=?",
+                (profile_id, site, observation_id),
+            )
+            .fetchone()
+        )
         if row:
             return dict(row)
-        proposed = self.connection().execute(
-            "SELECT p.consolidation_id,'donor' AS role,'proposed' AS local_state,"
-            "c.state AS consolidation_state,p.state AS attempt_state "
-            "FROM sync_unresolved_consolidation_proposals p "
-            "JOIN sync_consolidations c "
-            "ON c.consolidation_id=p.consolidation_id "
-            "WHERE p.profile_id=? AND p.site=? AND p.observation_id=? "
-            "ORDER BY CASE p.state WHEN 'outcome_unknown' THEN 0 ELSE 1 END "
-            "LIMIT 1",
-            (profile_id, site, observation_id),
-        ).fetchone()
+        proposed = (
+            self.connection()
+            .execute(
+                "SELECT p.consolidation_id,'donor' AS role,'proposed' AS local_state,"
+                "c.state AS consolidation_state,p.state AS attempt_state "
+                "FROM sync_unresolved_consolidation_proposals p "
+                "JOIN sync_consolidations c "
+                "ON c.consolidation_id=p.consolidation_id "
+                "WHERE p.profile_id=? AND p.site=? AND p.observation_id=? "
+                "ORDER BY CASE p.state WHEN 'outcome_unknown' THEN 0 ELSE 1 END "
+                "LIMIT 1",
+                (profile_id, site, observation_id),
+            )
+            .fetchone()
+        )
         return dict(proposed) if proposed else None
 
     # ``retryable_consolidation_for_members`` was removed here: it required
@@ -3826,7 +5096,9 @@ class ReconciliationDB:
     # members do still carry their membership rows.
 
     def create_consolidation_with_canonical(
-        self, profile_id: int, members: Sequence[tuple[str, int]],
+        self,
+        profile_id: int,
+        members: Sequence[tuple[str, int]],
         canonical_mo_observation_id: Optional[int],
         canonical_inat_observation_id: Optional[int],
     ) -> int:
@@ -3843,7 +5115,10 @@ class ReconciliationDB:
         ``consolidation_membership_for_observation`` first for a clearer
         pre-check error, per M2.
         """
-        if canonical_mo_observation_id is None and canonical_inat_observation_id is None:
+        if (
+            canonical_mo_observation_id is None
+            and canonical_inat_observation_id is None
+        ):
             raise ValueError("At least one canonical observation id is required")
         now = _utc_now()
         with self.transaction() as conn:
@@ -3851,14 +5126,27 @@ class ReconciliationDB:
                 "INSERT INTO sync_consolidations(profile_id,canonical_mo_observation_id,"
                 "canonical_inat_observation_id,canonical_pair_id,state,created_at,updated_at) "
                 "VALUES(?,?,?,NULL,'draft',?,?)",
-                (profile_id, canonical_mo_observation_id, canonical_inat_observation_id, now, now),
+                (
+                    profile_id,
+                    canonical_mo_observation_id,
+                    canonical_inat_observation_id,
+                    now,
+                    now,
+                ),
             )
             consolidation_id = int(cursor.lastrowid)
             for site, observation_id in members:
-                role = "canonical" if (
-                    (site == "mo" and observation_id == canonical_mo_observation_id)
-                    or (site == "inat" and observation_id == canonical_inat_observation_id)
-                ) else "donor"
+                role = (
+                    "canonical"
+                    if (
+                        (site == "mo" and observation_id == canonical_mo_observation_id)
+                        or (
+                            site == "inat"
+                            and observation_id == canonical_inat_observation_id
+                        )
+                    )
+                    else "donor"
+                )
                 if role != "canonical":
                     continue
                 conn.execute(
@@ -3866,76 +5154,106 @@ class ReconciliationDB:
                     "observation_id,role,remote_uuid,reviewed_record_fingerprint,local_state,"
                     "created_at,updated_at) VALUES(?,?,?,?,?,'','',?,?,?)",
                     (
-                        consolidation_id, profile_id, site, observation_id,
-                        role, "canonical", now, now,
+                        consolidation_id,
+                        profile_id,
+                        site,
+                        observation_id,
+                        role,
+                        "canonical",
+                        now,
+                        now,
                     ),
                 )
         return consolidation_id
 
-    def get_consolidation(self, profile_id: int, consolidation_id: int) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_consolidations WHERE profile_id=? AND consolidation_id=?",
-            (profile_id, consolidation_id),
-        ).fetchone()
+    def get_consolidation(
+        self, profile_id: int, consolidation_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_consolidations WHERE profile_id=? AND consolidation_id=?",
+                (profile_id, consolidation_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
-    def list_consolidation_members(self, profile_id: int, consolidation_id: int) -> list[dict[str, Any]]:
-        rows = self.connection().execute(
-            "SELECT * FROM sync_consolidation_members WHERE profile_id=? AND consolidation_id=? "
-            "ORDER BY consolidation_member_id",
-            (profile_id, consolidation_id),
-        ).fetchall()
+    def list_consolidation_members(
+        self, profile_id: int, consolidation_id: int
+    ) -> list[dict[str, Any]]:
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_consolidation_members WHERE profile_id=? AND consolidation_id=? "
+                "ORDER BY consolidation_member_id",
+                (profile_id, consolidation_id),
+            )
+            .fetchall()
+        )
         return [dict(row) for row in rows]
 
     def consolidation_attempt_members(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> list[dict[str, Any]]:
-        rows = self.connection().execute(
-            "SELECT am.attempt_member_id,am.stable_member_id,"
-            "a.consolidation_id,a.profile_id,am.site,am.observation_id,"
-            "am.remote_uuid,"
-            "CASE am.participation_role WHEN 'canonical_context' THEN 'canonical' "
-            "ELSE 'donor' END AS role,"
-            "CASE WHEN am.participation_role='canonical_context' THEN "
-            "COALESCE(m.local_state,'active') "
-            "WHEN a.state='succeeded' THEN 'superseded' ELSE 'proposed' END "
-            "AS local_state,"
-            "m.added_by_attempt_id,m.superseded_by_attempt_id,m.superseded_at,"
-            "am.participation_role,am.proposal_state,"
-            "am.reviewed_record_fingerprint AS attempt_record_fingerprint,"
-            "am.preflight_record_fingerprint AS attempt_preflight_fingerprint,"
-            "am.reviewed_account_identity,am.reviewed_owner_account_id,"
-            "am.reviewed_owner_login,am.reviewed_identity_fingerprint,"
-            "am.reviewed_mutable_components "
-            "FROM sync_consolidation_attempt_members am "
-            "JOIN sync_consolidation_attempts a ON a.attempt_id=am.attempt_id "
-            "LEFT JOIN sync_consolidation_members m "
-            "ON m.consolidation_member_id=am.stable_member_id "
-            "WHERE a.profile_id=? AND am.attempt_id=? "
-            "ORDER BY am.attempt_member_id",
-            (profile_id, attempt_id),
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT am.attempt_member_id,am.stable_member_id,"
+                "a.consolidation_id,a.profile_id,am.site,am.observation_id,"
+                "am.remote_uuid,"
+                "CASE am.participation_role WHEN 'canonical_context' THEN 'canonical' "
+                "ELSE 'donor' END AS role,"
+                "CASE WHEN am.participation_role='canonical_context' THEN "
+                "COALESCE(m.local_state,'active') "
+                "WHEN a.state='succeeded' THEN 'superseded' ELSE 'proposed' END "
+                "AS local_state,"
+                "m.added_by_attempt_id,m.superseded_by_attempt_id,m.superseded_at,"
+                "am.participation_role,am.proposal_state,"
+                "am.reviewed_record_fingerprint AS attempt_record_fingerprint,"
+                "am.preflight_record_fingerprint AS attempt_preflight_fingerprint,"
+                "am.reviewed_account_identity,am.reviewed_owner_account_id,"
+                "am.reviewed_owner_login,am.reviewed_identity_fingerprint,"
+                "am.reviewed_mutable_components "
+                "FROM sync_consolidation_attempt_members am "
+                "JOIN sync_consolidation_attempts a ON a.attempt_id=am.attempt_id "
+                "LEFT JOIN sync_consolidation_members m "
+                "ON m.consolidation_member_id=am.stable_member_id "
+                "WHERE a.profile_id=? AND am.attempt_id=? "
+                "ORDER BY am.attempt_member_id",
+                (profile_id, attempt_id),
+            )
+            .fetchall()
+        )
         return [dict(row) for row in rows]
 
     def consolidation_evidence(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> list[dict[str, Any]]:
-        rows = self.connection().execute(
-            "SELECT e.*,lm.site AS left_site,lm.observation_id AS left_observation_id,"
-            "rm.site AS right_site,rm.observation_id AS right_observation_id "
-            "FROM sync_consolidation_evidence e "
-            "JOIN sync_consolidation_attempts a ON a.attempt_id=e.attempt_id "
-            "JOIN sync_consolidation_attempt_members lm "
-            "ON lm.attempt_member_id=e.left_attempt_member_id "
-            "AND lm.attempt_id=e.attempt_id "
-            "JOIN sync_consolidation_attempt_members rm "
-            "ON rm.attempt_member_id=e.right_attempt_member_id "
-            "AND rm.attempt_id=e.attempt_id "
-            "WHERE a.profile_id=? AND e.attempt_id=? "
-            "ORDER BY e.left_attempt_member_id,e.right_attempt_member_id,"
-            "e.evidence_type",
-            (profile_id, attempt_id),
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT e.*,lm.site AS left_site,lm.observation_id AS left_observation_id,"
+                "rm.site AS right_site,rm.observation_id AS right_observation_id "
+                "FROM sync_consolidation_evidence e "
+                "JOIN sync_consolidation_attempts a ON a.attempt_id=e.attempt_id "
+                "JOIN sync_consolidation_attempt_members lm "
+                "ON lm.attempt_member_id=e.left_attempt_member_id "
+                "AND lm.attempt_id=e.attempt_id "
+                "JOIN sync_consolidation_attempt_members rm "
+                "ON rm.attempt_member_id=e.right_attempt_member_id "
+                "AND rm.attempt_id=e.attempt_id "
+                "WHERE a.profile_id=? AND e.attempt_id=? "
+                "ORDER BY e.left_attempt_member_id,e.right_attempt_member_id,"
+                "e.evidence_type",
+                (profile_id, attempt_id),
+            )
+            .fetchall()
+        )
         return [dict(row) for row in rows]
 
     def cancel_consolidation(self, profile_id: int, consolidation_id: int) -> None:
@@ -3951,7 +5269,8 @@ class ReconciliationDB:
         )
 
     def journal_consolidation_attempt(
-        self, preview: ConsolidationPreview,
+        self,
+        preview: ConsolidationPreview,
     ) -> tuple[int, int, int]:
         """Persist one explicitly approved immutable consolidation plan.
 
@@ -3962,7 +5281,9 @@ class ReconciliationDB:
         if not preview.eligibility.eligible or preview.eligibility.blocking_reasons:
             raise ValueError("An ineligible duplicate set cannot be journaled")
         if any(item.blocking for item in preview.conflicts):
-            raise ValueError("Resolve every blocking consolidation conflict before approval")
+            raise ValueError(
+                "Resolve every blocking consolidation conflict before approval"
+            )
         if not preview.members:
             raise ValueError("A consolidation requires members")
         sites = {member.site for member in preview.members}
@@ -3974,14 +5295,18 @@ class ReconciliationDB:
             (RemoteSite.MO, preview.canonical_mo_observation_id),
             (RemoteSite.INAT, preview.canonical_inat_observation_id),
         }
-        member_keys = {(member.site, member.observation_id) for member in preview.members}
+        member_keys = {
+            (member.site, member.observation_id) for member in preview.members
+        }
         if len(member_keys) != len(preview.members):
             raise ValueError("The durable plan contains duplicate members")
         if any(
             observation_id is not None and (site, observation_id) not in member_keys
             for site, observation_id in canonical_keys
         ):
-            raise ValueError("A selected canonical observation is not in the reviewed set")
+            raise ValueError(
+                "A selected canonical observation is not in the reviewed set"
+            )
         if any(
             not member.record_fingerprint
             or not member.preflight_fingerprint
@@ -4023,6 +5348,7 @@ class ReconciliationDB:
 
         now = _utc_now()
         import uuid as uuidlib
+
         correlation_marker = f"consolidation:{uuidlib.uuid4()}"
         member_fingerprints = sorted(
             (member.site.value, member.observation_id, member.record_fingerprint)
@@ -4043,7 +5369,8 @@ class ReconciliationDB:
                 }
                 for member in preview.donor_members
             ],
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         donor_preflight_fingerprints = json.dumps(
             [
@@ -4054,20 +5381,25 @@ class ReconciliationDB:
                 }
                 for member in preview.donor_members
             ],
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         approved_gaps = json.dumps(
             [
                 {"item_type": item.item_type, "disabled_reason": item.disabled_reason}
                 for item in preview.unsupported_items
             ],
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         evidence_graph_fingerprint = consolidation_evidence_graph_fingerprint(
             (
-                edge.left_site.value, edge.left_observation_id,
-                edge.right_site.value, edge.right_observation_id,
-                edge.evidence_type, edge.evidence_strength,
+                edge.left_site.value,
+                edge.left_observation_id,
+                edge.right_site.value,
+                edge.right_observation_id,
+                edge.evidence_type,
+                edge.evidence_strength,
                 edge.reviewed_evidence_fingerprint,
             )
             for edge in preview.evidence_edges
@@ -4077,7 +5409,8 @@ class ReconciliationDB:
             RemoteSite.INAT: preview.canonical_inat_observation_id,
         }
         canonical_fingerprints = {
-            member.site: member.record_fingerprint for member in preview.canonical_members
+            member.site: member.record_fingerprint
+            for member in preview.canonical_members
         }
         canonical_preflight_fingerprints = {
             member.site: member.preflight_fingerprint
@@ -4200,12 +5533,14 @@ class ReconciliationDB:
                         "FROM sync_consolidation_members "
                         "WHERE profile_id=? AND site=? AND observation_id=?",
                         (
-                            preview.profile_id, member.site.value,
+                            preview.profile_id,
+                            member.site.value,
                             member.observation_id,
                         ),
                     ).fetchone()
                     is_canonical_member = (
-                        member.site, member.observation_id
+                        member.site,
+                        member.observation_id,
                     ) in canonical_keys
                     if is_canonical_member:
                         baseline = conn.execute(
@@ -4214,12 +5549,14 @@ class ReconciliationDB:
                             "WHERE attempt_id=? AND site=? AND observation_id=? "
                             "AND participation_role='canonical_context'",
                             (
-                                base_finalized_attempt_id, member.site.value,
+                                base_finalized_attempt_id,
+                                member.site.value,
                                 member.observation_id,
                             ),
                         ).fetchone()
                         if (
-                            not existing or str(existing["role"]) != "canonical"
+                            not existing
+                            or str(existing["role"]) != "canonical"
                             or str(existing["local_state"]) != "canonical"
                             or not baseline
                             or str(baseline["reviewed_identity_fingerprint"] or "")
@@ -4256,9 +5593,7 @@ class ReconciliationDB:
                     for row in existing_members
                 }
                 expected_canonical_roles = {
-                    (member.site.value, member.observation_id): (
-                        "canonical"
-                    )
+                    (member.site.value, member.observation_id): ("canonical")
                     for member in preview.members
                     if (member.site, member.observation_id) in canonical_keys
                 }
@@ -4338,7 +5673,8 @@ class ReconciliationDB:
                             preview.profile_id,
                             preview.canonical_mo_observation_id,
                             preview.canonical_inat_observation_id,
-                            now, now,
+                            now,
+                            now,
                         ),
                     )
                     consolidation_id = int(consolidation_cursor.lastrowid)
@@ -4364,8 +5700,11 @@ class ReconciliationDB:
                     "canonical_inat_observation_id,canonical_pair_id,state,created_at,updated_at) "
                     "VALUES(?,?,?,NULL,'draft',?,?)",
                     (
-                        preview.profile_id, preview.canonical_mo_observation_id,
-                        preview.canonical_inat_observation_id, now, now,
+                        preview.profile_id,
+                        preview.canonical_mo_observation_id,
+                        preview.canonical_inat_observation_id,
+                        now,
+                        now,
                     ),
                 )
                 consolidation_id = int(consolidation_cursor.lastrowid)
@@ -4375,7 +5714,8 @@ class ReconciliationDB:
                     "FROM sync_unresolved_consolidation_proposals "
                     "WHERE profile_id=? AND site=? AND observation_id=? LIMIT 1",
                     (
-                        preview.profile_id, donor.site.value,
+                        preview.profile_id,
+                        donor.site.value,
                         donor.observation_id,
                     ),
                 ).fetchone()
@@ -4383,7 +5723,8 @@ class ReconciliationDB:
                     "SELECT consolidation_id FROM sync_consolidation_members "
                     "WHERE profile_id=? AND site=? AND observation_id=?",
                     (
-                        preview.profile_id, donor.site.value,
+                        preview.profile_id,
+                        donor.site.value,
                         donor.observation_id,
                     ),
                 ).fetchone()
@@ -4403,10 +5744,14 @@ class ReconciliationDB:
                 "confirmed_at,created_at,updated_at) "
                 "VALUES(?,'creation',NULL,NULL,?,?,?,?,?,?,?)",
                 (
-                    preview.profile_id, pair_fingerprint,
+                    preview.profile_id,
+                    pair_fingerprint,
                     preview.canonical_mo_observation_id,
                     preview.canonical_inat_observation_id,
-                    now, now, now, now,
+                    now,
+                    now,
+                    now,
+                    now,
                 ),
             )
             group_id = int(group_cursor.lastrowid)
@@ -4422,13 +5767,19 @@ class ReconciliationDB:
                 "created_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)",
                 (
-                    consolidation_id, preview.profile_id, group_id, correlation_marker,
+                    consolidation_id,
+                    preview.profile_id,
+                    group_id,
+                    correlation_marker,
                     canonical_fingerprints.get(RemoteSite.MO, ""),
                     canonical_fingerprints.get(RemoteSite.INAT, ""),
                     canonical_preflight_fingerprints.get(RemoteSite.MO, ""),
                     canonical_preflight_fingerprints.get(RemoteSite.INAT, ""),
-                    donor_fingerprints, donor_preflight_fingerprints,
-                    pair_fingerprint, approved_gaps, evidence_graph_fingerprint,
+                    donor_fingerprints,
+                    donor_preflight_fingerprints,
+                    pair_fingerprint,
+                    approved_gaps,
+                    evidence_graph_fingerprint,
                     next(
                         (
                             f"{member.account_id}:{member.owner_login}"
@@ -4445,7 +5796,10 @@ class ReconciliationDB:
                         ),
                         "",
                     ),
-                    supersedes_attempt_id, base_finalized_attempt_id, now, now,
+                    supersedes_attempt_id,
+                    base_finalized_attempt_id,
+                    now,
+                    now,
                 ),
             )
             attempt_id = int(attempt_cursor.lastrowid)
@@ -4465,10 +5819,18 @@ class ReconciliationDB:
                         "added_by_attempt_id,stable_owner_account_id) "
                         "VALUES(?,?,?,?,?,?,?,?,'active',?,?,?,?)",
                         (
-                            consolidation_id, preview.profile_id, member.site.value,
-                            member.observation_id, role, member.remote_uuid or None,
-                            member.record_fingerprint, member.preflight_fingerprint,
-                            now, now, attempt_id, member.owner_id,
+                            consolidation_id,
+                            preview.profile_id,
+                            member.site.value,
+                            member.observation_id,
+                            role,
+                            member.remote_uuid or None,
+                            member.record_fingerprint,
+                            member.preflight_fingerprint,
+                            now,
+                            now,
+                            attempt_id,
+                            member.owner_id,
                         ),
                     )
             member_rows = conn.execute(
@@ -4481,11 +5843,10 @@ class ReconciliationDB:
                 for row in member_rows
             }
             for member in preview.members:
-                stable = member_lookup.get(
-                    (member.site.value, member.observation_id)
-                )
+                stable = member_lookup.get((member.site.value, member.observation_id))
                 is_canonical_member = (
-                    member.site, member.observation_id
+                    member.site,
+                    member.observation_id,
                 ) in canonical_keys
                 if is_canonical_member and stable is None:
                     raise RuntimeError(
@@ -4502,21 +5863,21 @@ class ReconciliationDB:
                     (
                         attempt_id,
                         int(stable["consolidation_member_id"]) if stable else None,
-                        member.site.value, member.observation_id,
+                        member.site.value,
+                        member.observation_id,
                         member.remote_uuid or None,
-                        (
-                            "canonical_context"
-                            if is_canonical_member
-                            else "new_donor"
-                        ),
+                        ("canonical_context" if is_canonical_member else "new_donor"),
                         "canonical_context" if is_canonical_member else "proposed",
-                        member.record_fingerprint, member.preflight_fingerprint,
+                        member.record_fingerprint,
+                        member.preflight_fingerprint,
                         f"{member.account_id}:{member.owner_login}",
-                        member.owner_id, member.owner_login,
+                        member.owner_id,
+                        member.owner_login,
                         member.identity_fingerprint,
                         json.dumps(
                             dict(member.mutable_component_fingerprints),
-                            sort_keys=True, separators=(",", ":"),
+                            sort_keys=True,
+                            separators=(",", ":"),
                         ),
                         now,
                     ),
@@ -4551,10 +5912,14 @@ class ReconciliationDB:
                     "evidence_strength,reviewed_evidence_fingerprint,display_summary,"
                     "created_at) VALUES(?,?,?,?,?,?,?,?)",
                     (
-                        attempt_id, left_id, right_id, edge.evidence_type,
+                        attempt_id,
+                        left_id,
+                        right_id,
+                        edge.evidence_type,
                         edge.evidence_strength,
                         edge.reviewed_evidence_fingerprint,
-                        edge.display_summary, now,
+                        edge.display_summary,
+                        now,
                     ),
                 )
             for member in preview.members:
@@ -4565,10 +5930,16 @@ class ReconciliationDB:
                         "normalized_target_id,parse_state,row_fingerprint) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?)",
                         (
-                            preview.profile_id, group_id, member.site.value,
-                            member.observation_id, row.row_id, row.row_uuid,
-                            row.binding_id, row.target_observation_id,
-                            row.parse_state, row.row_fingerprint,
+                            preview.profile_id,
+                            group_id,
+                            member.site.value,
+                            member.observation_id,
+                            row.row_id,
+                            row.row_uuid,
+                            row.binding_id,
+                            row.target_observation_id,
+                            row.parse_state,
+                            row.row_fingerprint,
                         ),
                     )
             for donor in preview.donor_members:
@@ -4576,7 +5947,8 @@ class ReconciliationDB:
                     if destination_id is None:
                         continue
                     destination = next(
-                        member for member in preview.canonical_members
+                        member
+                        for member in preview.canonical_members
                         if member.site is destination_site
                         and member.observation_id == destination_id
                     )
@@ -4592,60 +5964,88 @@ class ReconciliationDB:
                             "reviewed_byte_fingerprint,action_id,state,disabled_reason,created_at,"
                             "updated_at) VALUES(?,?,?,?,?,?,?,?,?,NULL,'disabled',?,?,?)",
                             (
-                                attempt_id, donor.site.value, donor.observation_id,
-                                destination_site.value, destination_id,
-                                disclosure.item_type, identity,
+                                attempt_id,
+                                donor.site.value,
+                                donor.observation_id,
+                                destination_site.value,
+                                destination_id,
+                                disclosure.item_type,
+                                identity,
                                 _local_fingerprint(
-                                    identity, donor.record_fingerprint,
+                                    identity,
+                                    donor.record_fingerprint,
                                     destination.record_fingerprint,
                                     disclosure.disabled_reason,
                                 ),
-                                "", disclosure.disabled_reason, now, now,
+                                "",
+                                disclosure.disabled_reason,
+                                now,
+                                now,
                             ),
                         )
         return consolidation_id, attempt_id, group_id
 
     def consolidation_ledger_for_group(
-        self, profile_id: int, group_id: int,
+        self,
+        profile_id: int,
+        group_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT ca.*,c.canonical_mo_observation_id,c.canonical_inat_observation_id,"
-            "c.canonical_pair_id,c.state AS consolidation_state "
-            "FROM sync_consolidation_attempts ca "
-            "JOIN sync_consolidations c ON c.consolidation_id=ca.consolidation_id "
-            "WHERE ca.profile_id=? AND ca.action_group_id=?",
-            (profile_id, group_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT ca.*,c.canonical_mo_observation_id,c.canonical_inat_observation_id,"
+                "c.canonical_pair_id,c.state AS consolidation_state "
+                "FROM sync_consolidation_attempts ca "
+                "JOIN sync_consolidations c ON c.consolidation_id=ca.consolidation_id "
+                "WHERE ca.profile_id=? AND ca.action_group_id=?",
+                (profile_id, group_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def consolidation_attempt(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT ca.*,c.canonical_mo_observation_id,c.canonical_inat_observation_id,"
-            "c.canonical_pair_id,c.state AS consolidation_state "
-            "FROM sync_consolidation_attempts ca "
-            "JOIN sync_consolidations c ON c.consolidation_id=ca.consolidation_id "
-            "WHERE ca.profile_id=? AND ca.attempt_id=?",
-            (profile_id, attempt_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT ca.*,c.canonical_mo_observation_id,c.canonical_inat_observation_id,"
+                "c.canonical_pair_id,c.state AS consolidation_state "
+                "FROM sync_consolidation_attempts ca "
+                "JOIN sync_consolidations c ON c.consolidation_id=ca.consolidation_id "
+                "WHERE ca.profile_id=? AND ca.attempt_id=?",
+                (profile_id, attempt_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def consolidation_items(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> list[dict[str, Any]]:
         return [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT ci.* FROM sync_consolidation_items ci "
                 "JOIN sync_consolidation_attempts ca ON ca.attempt_id=ci.attempt_id "
                 "WHERE ca.profile_id=? AND ci.attempt_id=? "
                 "ORDER BY ci.consolidation_item_id",
                 (profile_id, attempt_id),
-            ).fetchall()
+            )
+            .fetchall()
         ]
 
     def set_consolidation_attempt_state(
-        self, profile_id: int, attempt_id: int, state: str,
+        self,
+        profile_id: int,
+        attempt_id: int,
+        state: str,
     ) -> bool:
         if state not in {"failed", "cancelled", "outcome_unknown"}:
             raise ValueError("Invalid consolidation attempt terminal state")
@@ -4657,7 +6057,11 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def resolve_consolidation_unknown(
-        self, profile_id: int, attempt_id: int, *, applied: bool,
+        self,
+        profile_id: int,
+        attempt_id: int,
+        *,
+        applied: bool,
     ) -> bool:
         """Resolve an ambiguous action without ever resending it."""
         target = "pending" if applied else "failed"
@@ -4669,7 +6073,9 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def ensure_consolidation_pair(
-        self, profile_id: int, consolidation_id: int,
+        self,
+        profile_id: int,
+        consolidation_id: int,
     ) -> Optional[int]:
         """Create or reuse the exact canonical pair as provisional.
 
@@ -4685,7 +6091,9 @@ class ReconciliationDB:
                 (profile_id, consolidation_id),
             ).fetchone()
             if not consolidation or str(consolidation["state"]) not in {
-                "draft", "confirmed", "finalized",
+                "draft",
+                "confirmed",
+                "finalized",
             }:
                 raise ValueError("The consolidation identity is not executable")
             mo_id = consolidation["canonical_mo_observation_id"]
@@ -4702,8 +6110,7 @@ class ReconciliationDB:
                     pair is None
                     or str(pair["review_state"]) != "confirmed"
                     or consolidation["canonical_pair_id"] is None
-                    or int(consolidation["canonical_pair_id"])
-                    != int(pair["pair_id"])
+                    or int(consolidation["canonical_pair_id"]) != int(pair["pair_id"])
                 ):
                     raise ValueError(
                         "The finalized consolidation's canonical pair changed"
@@ -4715,8 +6122,15 @@ class ReconciliationDB:
                     "inat_observation_id,link_state,score,classification,review_state,"
                     "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                     (
-                        profile_id, mo_id, inat_id, "", 0,
-                        "gate_2b_consolidation", "provisional", now, now,
+                        profile_id,
+                        mo_id,
+                        inat_id,
+                        "",
+                        0,
+                        "gate_2b_consolidation",
+                        "provisional",
+                        now,
+                        now,
                     ),
                 )
                 pair_id = int(cursor.lastrowid)
@@ -4736,14 +6150,23 @@ class ReconciliationDB:
                 (pair_id, now, profile_id, consolidation_id, mo_id, inat_id),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("Canonical pair linkage changed during consolidation")
+                raise RuntimeError(
+                    "Canonical pair linkage changed during consolidation"
+                )
             return pair_id
 
     def mint_consolidation_action(
-        self, profile_id: int, group_id: int, action_type: str, *,
-        site: str, pair_id: Optional[int],
-        mo_observation_id: Optional[int], inat_observation_id: Optional[int],
-        inat_observation_uuid: str = "", binding_id: Optional[int] = None,
+        self,
+        profile_id: int,
+        group_id: int,
+        action_type: str,
+        *,
+        site: str,
+        pair_id: Optional[int],
+        mo_observation_id: Optional[int],
+        inat_observation_id: Optional[int],
+        inat_observation_uuid: str = "",
+        binding_id: Optional[int] = None,
         desired_target_id: Optional[int] = None,
         preview_inat_record_fingerprint: str = "",
         preview_mo_record_fingerprint: str = "",
@@ -4752,7 +6175,9 @@ class ReconciliationDB:
     ) -> int:
         """Atomically find-or-mint one dynamic Gate 2B saga ordinal."""
         permitted = {
-            "mo_external_link_add", "inat_ofv_add", "consolidation_finalize",
+            "mo_external_link_add",
+            "inat_ofv_add",
+            "consolidation_finalize",
         }
         if action_type not in permitted:
             raise ValueError("This action type is not permitted in a consolidation")
@@ -4775,7 +6200,9 @@ class ReconciliationDB:
                 or ledger["canonical_inat_observation_id"] != inat_observation_id
                 or ledger["canonical_pair_id"] != pair_id
             ):
-                raise ValueError("The consolidation ledger changed before action minting")
+                raise ValueError(
+                    "The consolidation ledger changed before action minting"
+                )
             existing = conn.execute(
                 "SELECT action_id FROM sync_actions WHERE profile_id=? "
                 "AND action_group_id=? AND action_type=? ORDER BY action_id LIMIT 1",
@@ -4783,18 +6210,26 @@ class ReconciliationDB:
             ).fetchone()
             if existing:
                 return int(existing["action_id"])
-            ordinal = int(conn.execute(
-                "SELECT COALESCE(MAX(ordinal),0)+1 FROM sync_actions "
-                "WHERE profile_id=? AND action_group_id=?",
-                (profile_id, group_id),
-            ).fetchone()[0])
+            ordinal = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(ordinal),0)+1 FROM sync_actions "
+                    "WHERE profile_id=? AND action_group_id=?",
+                    (profile_id, group_id),
+                ).fetchone()[0]
+            )
             return self._insert_creation_followup_action(
-                conn, profile_id, group_id, ordinal, action_type,
+                conn,
+                profile_id,
+                group_id,
+                ordinal,
+                action_type,
                 pair_id=pair_id,  # type: ignore[arg-type]
                 mo_observation_id=mo_observation_id,  # type: ignore[arg-type]
                 inat_observation_id=inat_observation_id,  # type: ignore[arg-type]
-                inat_observation_uuid=inat_observation_uuid, site=site,
-                binding_id=binding_id, desired_target_id=desired_target_id,
+                inat_observation_uuid=inat_observation_uuid,
+                site=site,
+                binding_id=binding_id,
+                desired_target_id=desired_target_id,
                 preview_inat_record_fingerprint=preview_inat_record_fingerprint,
                 preview_mo_record_fingerprint=preview_mo_record_fingerprint,
                 preview_inat_links_fingerprint=preview_inat_links_fingerprint,
@@ -4802,8 +6237,12 @@ class ReconciliationDB:
             )
 
     def settle_consolidation_finalize_success(
-        self, profile_id: int, action_id: int, group_id: int,
-        attempt_id: int, consolidation_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
+        group_id: int,
+        attempt_id: int,
+        consolidation_id: int,
     ) -> Optional[int]:
         """M8 all-or-nothing local canonicalization boundary."""
         now = _utc_now()
@@ -4891,12 +6330,17 @@ class ReconciliationDB:
                 )
                 if right < left:
                     left, right = right, left
-                evidence_signatures.append((
-                    left[0], left[1], right[0], right[1],
-                    str(evidence["evidence_type"]),
-                    str(evidence["evidence_strength"]),
-                    str(evidence["reviewed_evidence_fingerprint"]),
-                ))
+                evidence_signatures.append(
+                    (
+                        left[0],
+                        left[1],
+                        right[0],
+                        right[1],
+                        str(evidence["evidence_type"]),
+                        str(evidence["evidence_strength"]),
+                        str(evidence["reviewed_evidence_fingerprint"]),
+                    )
+                )
             evidence_graph_fingerprint = consolidation_evidence_graph_fingerprint(
                 evidence_signatures
             )
@@ -4957,7 +6401,9 @@ class ReconciliationDB:
                 != attempt["base_finalized_attempt_id"]
                 or not graph_validation.valid
             ):
-                raise RuntimeError("The consolidation finalization ledger is inconsistent")
+                raise RuntimeError(
+                    "The consolidation finalization ledger is inconsistent"
+                )
             mo_id = consolidation["canonical_mo_observation_id"]
             inat_id = consolidation["canonical_inat_observation_id"]
             if (
@@ -4965,7 +6411,10 @@ class ReconciliationDB:
                 or group["inat_observation_id"] != inat_id
             ):
                 raise RuntimeError("The action group canonical ids do not match")
-            if action["mo_observation_id"] != mo_id or action["inat_observation_id"] != inat_id:
+            if (
+                action["mo_observation_id"] != mo_id
+                or action["inat_observation_id"] != inat_id
+            ):
                 raise RuntimeError("The finalization action canonical ids do not match")
             canonical_members = [
                 member for member in members if str(member["role"]) == "canonical"
@@ -5003,8 +6452,10 @@ class ReconciliationDB:
                     "AND sa.action_type='consolidation_finalize' "
                     "AND sa.state='succeeded')",
                     (
-                        int(base_attempt_id), profile_id,
-                        consolidation_id, attempt_id,
+                        int(base_attempt_id),
+                        profile_id,
+                        consolidation_id,
+                        attempt_id,
                     ),
                 ).fetchone()
                 if base_attempt is None:
@@ -5037,8 +6488,7 @@ class ReconciliationDB:
                     )
                     if (
                         int(baseline_member["profile_id"]) != profile_id
-                        or int(baseline_member["consolidation_id"])
-                        != consolidation_id
+                        or int(baseline_member["consolidation_id"]) != consolidation_id
                         or str(baseline_member["role"]) != "canonical"
                         or str(baseline_member["local_state"]) != "canonical"
                         or str(baseline_member["stable_site"]) != key[0]
@@ -5100,21 +6550,13 @@ class ReconciliationDB:
                 )
                 baseline_anchors = canonical_strong_anchor_signatures(
                     baseline_edges,
-                    canonical_mo_id=(
-                        int(mo_id) if mo_id is not None else None
-                    ),
-                    canonical_inat_id=(
-                        int(inat_id) if inat_id is not None else None
-                    ),
+                    canonical_mo_id=(int(mo_id) if mo_id is not None else None),
+                    canonical_inat_id=(int(inat_id) if inat_id is not None else None),
                 )
                 current_anchors = canonical_strong_anchor_signatures(
                     structured_edges,
-                    canonical_mo_id=(
-                        int(mo_id) if mo_id is not None else None
-                    ),
-                    canonical_inat_id=(
-                        int(inat_id) if inat_id is not None else None
-                    ),
+                    canonical_mo_id=(int(mo_id) if mo_id is not None else None),
+                    canonical_inat_id=(int(inat_id) if inat_id is not None else None),
                 )
                 if (
                     mo_id is not None
@@ -5156,15 +6598,10 @@ class ReconciliationDB:
                         attempt[f"canonical_{suffix}_fingerprint"] or ""
                     )
                     expected_preflight = str(
-                        attempt[
-                            f"canonical_{suffix}_preflight_fingerprint"
-                        ]
-                        or ""
+                        attempt[f"canonical_{suffix}_preflight_fingerprint"] or ""
                     )
                 else:
-                    expected_full = str(
-                        member["attempt_record_fingerprint"] or ""
-                    )
+                    expected_full = str(member["attempt_record_fingerprint"] or "")
                     expected_preflight = str(
                         member["attempt_preflight_fingerprint"] or ""
                     )
@@ -5189,14 +6626,14 @@ class ReconciliationDB:
                     int(member["reviewed_owner_account_id"] or 0) <= 0
                     or not str(member["reviewed_owner_login"] or "")
                     or not str(member["reviewed_identity_fingerprint"] or "")
-                    or str(member["reviewed_identity_fingerprint"])
-                    != expected_identity
+                    or str(member["reviewed_identity_fingerprint"]) != expected_identity
                 ):
                     raise RuntimeError(
                         "The immutable attempt identity fingerprint is inconsistent"
                     )
             proposed_donors = [
-                member for member in members
+                member
+                for member in members
                 if str(member["participation_role"]) == "new_donor"
             ]
             if len(graph_validation.donor_paths) != len(proposed_donors):
@@ -5208,7 +6645,8 @@ class ReconciliationDB:
                     "SELECT consolidation_id FROM sync_consolidation_members "
                     "WHERE profile_id=? AND site=? AND observation_id=?",
                     (
-                        profile_id, str(member["site"]),
+                        profile_id,
+                        str(member["site"]),
                         int(member["observation_id"]),
                     ),
                 ).fetchone()
@@ -5222,8 +6660,10 @@ class ReconciliationDB:
                     "AND a.state IN ('pending','outcome_unknown') "
                     "AND a.attempt_id!=? LIMIT 1",
                     (
-                        profile_id, str(member["site"]),
-                        int(member["observation_id"]), attempt_id,
+                        profile_id,
+                        str(member["site"]),
+                        int(member["observation_id"]),
+                        attempt_id,
                     ),
                 ).fetchone()
                 if conflict or unresolved_elsewhere:
@@ -5242,12 +6682,19 @@ class ReconciliationDB:
                     "admitted_from_attempt_member_id,stable_owner_account_id) "
                     "VALUES(?,?,?,?, 'donor',?,?,?,'superseded',?,?,?,?,?,?,?,?)",
                     (
-                        consolidation_id, profile_id, str(member["site"]),
+                        consolidation_id,
+                        profile_id,
+                        str(member["site"]),
                         int(member["observation_id"]),
                         str(member["remote_uuid"] or "") or None,
                         str(member["attempt_record_fingerprint"]),
                         str(member["attempt_preflight_fingerprint"]),
-                        now, now, attempt_id, attempt_id, now, attempt_id,
+                        now,
+                        now,
+                        attempt_id,
+                        attempt_id,
+                        now,
+                        attempt_id,
                         int(member["attempt_member_id"]),
                         int(member["reviewed_owner_account_id"]),
                     ),
@@ -5261,11 +6708,13 @@ class ReconciliationDB:
             ).fetchall()
             member_mo_ids = {
                 int(member["observation_id"])
-                for member in stable_members if member["site"] == "mo"
+                for member in stable_members
+                if member["site"] == "mo"
             }
             member_inat_ids = {
                 int(member["observation_id"])
-                for member in stable_members if member["site"] == "inat"
+                for member in stable_members
+                if member["site"] == "inat"
             }
             pair_id: Optional[int] = None
             if mo_id is not None and inat_id is not None:
@@ -5306,7 +6755,9 @@ class ReconciliationDB:
                         (now, profile_id, int(conflict["pair_id"])),
                     )
                     if cursor.rowcount != 1:
-                        raise RuntimeError("An internal donor pair changed during finalization")
+                        raise RuntimeError(
+                            "An internal donor pair changed during finalization"
+                        )
                 cursor = conn.execute(
                     "UPDATE sync_pairs SET review_state='confirmed',"
                     "confirmed_by='consolidation',ever_reviewed=1,ever_confirmed=1,"
@@ -5332,12 +6783,20 @@ class ReconciliationDB:
                     "superseded_at=CASE WHEN ?='superseded' THEN ? ELSE superseded_at END "
                     "WHERE consolidation_member_id=? AND profile_id=? AND local_state='active'",
                     (
-                        desired, now, desired, attempt_id, desired, now,
-                        int(member["stable_member_id"]), profile_id,
+                        desired,
+                        now,
+                        desired,
+                        attempt_id,
+                        desired,
+                        now,
+                        int(member["stable_member_id"]),
+                        profile_id,
                     ),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError("A consolidation member changed during finalization")
+                    raise RuntimeError(
+                        "A consolidation member changed during finalization"
+                    )
             if attempt["base_finalized_attempt_id"] is None:
                 baseline_predicate = "current_finalized_attempt_id IS NULL"
                 baseline_values: tuple[object, ...] = ()
@@ -5352,14 +6811,18 @@ class ReconciliationDB:
                 (now, now, now, profile_id, action_id),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("The finalization action update did not affect one row")
+                raise RuntimeError(
+                    "The finalization action update did not affect one row"
+                )
             cursor = conn.execute(
                 "UPDATE sync_consolidation_attempts SET state='succeeded',updated_at=? "
                 "WHERE profile_id=? AND attempt_id=? AND state='pending'",
                 (now, profile_id, attempt_id),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("The consolidation attempt update did not affect one row")
+                raise RuntimeError(
+                    "The consolidation attempt update did not affect one row"
+                )
             cursor = conn.execute(
                 "UPDATE sync_consolidations SET canonical_pair_id=?,state='finalized',"
                 "current_finalized_attempt_id=?,updated_at=? "
@@ -5367,7 +6830,11 @@ class ReconciliationDB:
                 "AND state IN ('draft','confirmed','finalized') AND "
                 + baseline_predicate,
                 (
-                    pair_id, attempt_id, now, profile_id, consolidation_id,
+                    pair_id,
+                    attempt_id,
+                    now,
+                    profile_id,
+                    consolidation_id,
                     *baseline_values,
                 ),
             )
@@ -5378,15 +6845,15 @@ class ReconciliationDB:
     # Gate 2C deletion ledger ----------------------------------------
 
     def journal_deletion_attempt(
-        self, preview: Any, selected_member_ids: Sequence[int],
+        self,
+        preview: Any,
+        selected_member_ids: Sequence[int],
     ) -> tuple[int, int]:
         """Persist one immutable reviewed donor set; no delete action is minted."""
         selected = tuple(dict.fromkeys(int(value) for value in selected_member_ids))
         if not selected:
             raise ValueError("Select at least one eligible donor")
-        lookup = {
-            int(item.stable_member_id): item for item in preview.donors
-        }
+        lookup = {int(item.stable_member_id): item for item in preview.donors}
         if set(selected) - set(lookup):
             raise ValueError("The deletion selection is not part of this preview")
         chosen = [lookup[value] for value in selected]
@@ -5444,8 +6911,11 @@ class ReconciliationDB:
                         for state in selected_states.values()
                     )
                     and not any(
-                        str(row["state"]) in {
-                            "pending", "running", "outcome_unknown",
+                        str(row["state"])
+                        in {
+                            "pending",
+                            "running",
+                            "outcome_unknown",
                         }
                         for row in unresolved_items
                     )
@@ -5465,13 +6935,9 @@ class ReconciliationDB:
                 "ORDER BY da.deletion_attempt_id DESC",
                 selected,
             ).fetchall()
-            retry_attempt_ids = {
-                int(row["deletion_attempt_id"]) for row in retry_rows
-            }
+            retry_attempt_ids = {int(row["deletion_attempt_id"]) for row in retry_rows}
             if len(retry_attempt_ids) > 1:
-                raise ValueError(
-                    "Selected donors require separate fresh retry reviews"
-                )
+                raise ValueError("Selected donors require separate fresh retry reviews")
             retry_supersedes = (
                 next(iter(retry_attempt_ids)) if retry_attempt_ids else None
             )
@@ -5494,9 +6960,7 @@ class ReconciliationDB:
                     (now, supersedes_attempt_id),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError(
-                        "The prior retry review could not be superseded"
-                    )
+                    raise RuntimeError("The prior retry review could not be superseded")
             # Deletion groups live in their own negative id space so an older
             # generic sync_actions dispatcher can never pick one up. The value
             # is predicted from the next rowid because the attempt row cannot
@@ -5506,10 +6970,12 @@ class ReconciliationDB:
             # finds this attempt again -- silently returns None if the two
             # ever diverge (an AUTOINCREMENT column or a deleted attempt row
             # would be enough).
-            group_id = -int(conn.execute(
-                "SELECT COALESCE(MAX(deletion_attempt_id),0)+1 "
-                "FROM sync_deletion_attempts"
-            ).fetchone()[0])
+            group_id = -int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(deletion_attempt_id),0)+1 "
+                    "FROM sync_deletion_attempts"
+                ).fetchone()[0]
+            )
             cursor = conn.execute(
                 "INSERT INTO sync_deletion_attempts("
                 "profile_id,consolidation_id,base_finalized_attempt_id,"
@@ -5520,16 +6986,19 @@ class ReconciliationDB:
                 "reviewed_mo_key_generation,confirmation_fingerprint,"
                 "created_at,updated_at) VALUES(?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)",
                 (
-                    preview.profile_id, preview.consolidation_id,
+                    preview.profile_id,
+                    preview.consolidation_id,
                     preview.base_finalized_attempt_id,
                     group_id,
                     supersedes_attempt_id,
                     preview.canonical_stable_identity_fingerprint,
                     preview.canonical_mutable_snapshot_fingerprint,
                     preview.parity_report_fingerprint,
-                    preview.auth_generation, preview.mo_key_generation,
+                    preview.auth_generation,
+                    preview.mo_key_generation,
                     preview.confirmation_fingerprint(selected),
-                    now, now,
+                    now,
+                    now,
                 ),
             )
             attempt_id = int(cursor.lastrowid)
@@ -5552,13 +7021,19 @@ class ReconciliationDB:
                     "disabled_reason,created_at,updated_at)"
                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,'pending','',?,?)",
                     (
-                        attempt_id, item.stable_member_id, ordinal,
-                        item.site.value, item.observation_id, item.remote_uuid,
+                        attempt_id,
+                        item.stable_member_id,
+                        ordinal,
+                        item.site.value,
+                        item.observation_id,
+                        item.remote_uuid,
                         item.remote_record_fingerprint,
                         item.content_inventory_fingerprint,
                         item.parity_fingerprint,
                         item.third_party_activity_fingerprint,
-                        item.dependency_fingerprint, now, now,
+                        item.dependency_fingerprint,
+                        now,
+                        now,
                     ),
                 )
                 deletion_item_id = int(cursor.lastrowid)
@@ -5572,47 +7047,70 @@ class ReconciliationDB:
                         "blocking_reason,safe_summary,created_at)"
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
-                            deletion_item_id, parity_ordinal,
-                            parity.content_type, parity.source_identity,
-                            parity.canonical_identity, parity.match_method,
+                            deletion_item_id,
+                            parity_ordinal,
+                            parity.content_type,
+                            parity.source_identity,
+                            parity.canonical_identity,
+                            parity.match_method,
                             parity.source_fingerprint,
                             parity.canonical_fingerprint,
                             "preserved" if parity.preserved else "blocked",
-                            parity.blocking_reason, parity.safe_summary, now,
+                            parity.blocking_reason,
+                            parity.safe_summary,
+                            now,
                         ),
                     )
         return attempt_id, group_id
 
     def deletion_attempt_for_group(
-        self, profile_id: int, group_id: int,
+        self,
+        profile_id: int,
+        group_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
-            "AND action_group_id=?",
-            (profile_id, group_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
+                "AND action_group_id=?",
+                (profile_id, group_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def deletion_attempt(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
-            "AND deletion_attempt_id=?",
-            (profile_id, attempt_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
+                "AND deletion_attempt_id=?",
+                (profile_id, attempt_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def unresolved_deletion_for_consolidation(
-        self, profile_id: int, consolidation_id: int,
+        self,
+        profile_id: int,
+        consolidation_id: int,
     ) -> Optional[dict[str, Any]]:
-        rows = self.connection().execute(
-            "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
-            "AND consolidation_id=? AND state IN "
-            "('pending','partial','outcome_unknown') "
-            "ORDER BY deletion_attempt_id",
-            (profile_id, consolidation_id),
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
+                "AND consolidation_id=? AND state IN "
+                "('pending','partial','outcome_unknown') "
+                "ORDER BY deletion_attempt_id",
+                (profile_id, consolidation_id),
+            )
+            .fetchall()
+        )
         if len(rows) > 1:
             raise RuntimeError(
                 "Deletion ledger corruption: multiple unresolved attempts "
@@ -5622,74 +7120,109 @@ class ReconciliationDB:
             return None
         row = rows[0]
         result = dict(row)
-        unknown = self.connection().execute(
-            "SELECT deletion_action_id FROM sync_deletion_actions "
-            "WHERE profile_id=? AND deletion_attempt_id=? "
-            "AND state='outcome_unknown' ORDER BY ordinal LIMIT 1",
-            (profile_id, int(row["deletion_attempt_id"])),
-        ).fetchone()
+        unknown = (
+            self.connection()
+            .execute(
+                "SELECT deletion_action_id FROM sync_deletion_actions "
+                "WHERE profile_id=? AND deletion_attempt_id=? "
+                "AND state='outcome_unknown' ORDER BY ordinal LIMIT 1",
+                (profile_id, int(row["deletion_attempt_id"])),
+            )
+            .fetchone()
+        )
         result["unknown_action_id"] = (
             int(unknown["deletion_action_id"]) if unknown else None
         )
-        resumable = self.connection().execute(
-            "SELECT 1 FROM sync_deletion_items "
-            "WHERE deletion_attempt_id=? "
-            "AND state IN ('pending','running','outcome_unknown') LIMIT 1",
-            (int(row["deletion_attempt_id"]),),
-        ).fetchone()
+        resumable = (
+            self.connection()
+            .execute(
+                "SELECT 1 FROM sync_deletion_items "
+                "WHERE deletion_attempt_id=? "
+                "AND state IN ('pending','running','outcome_unknown') LIMIT 1",
+                (int(row["deletion_attempt_id"]),),
+            )
+            .fetchone()
+        )
         result["resumable"] = resumable is not None
         return result
 
     def deletion_items(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> list[dict[str, Any]]:
         return [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT di.* FROM sync_deletion_items di "
                 "JOIN sync_deletion_attempts da "
                 "ON da.deletion_attempt_id=di.deletion_attempt_id "
                 "WHERE da.profile_id=? AND di.deletion_attempt_id=? "
                 "ORDER BY di.ordinal",
                 (profile_id, attempt_id),
-            ).fetchall()
+            )
+            .fetchall()
         ]
 
     def deletion_parity_items(
-        self, deletion_item_id: int,
+        self,
+        deletion_item_id: int,
     ) -> list[dict[str, Any]]:
         return [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT * FROM sync_deletion_parity_items "
                 "WHERE deletion_item_id=? ORDER BY ordinal",
                 (deletion_item_id,),
-            ).fetchall()
+            )
+            .fetchall()
         ]
 
     def deletion_action(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
     ) -> Optional[dict[str, Any]]:
-        row = self.connection().execute(
-            "SELECT * FROM sync_deletion_actions WHERE profile_id=? "
-            "AND deletion_action_id=?",
-            (profile_id, action_id),
-        ).fetchone()
+        row = (
+            self.connection()
+            .execute(
+                "SELECT * FROM sync_deletion_actions WHERE profile_id=? "
+                "AND deletion_action_id=?",
+                (profile_id, action_id),
+            )
+            .fetchone()
+        )
         return dict(row) if row else None
 
     def deletion_actions_for_attempt(
-        self, profile_id: int, attempt_id: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
     ) -> list[dict[str, Any]]:
         return [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT * FROM sync_deletion_actions WHERE profile_id=? "
                 "AND deletion_attempt_id=? ORDER BY ordinal",
                 (profile_id, attempt_id),
-            ).fetchall()
+            )
+            .fetchall()
         ]
 
     def mint_deletion_action(
-        self, profile_id: int, attempt_id: int, deletion_item_id: int,
-        *, site: str, observation_id: int, remote_uuid: str,
-        reviewed_identity_fingerprint: str, request_correlation: str,
+        self,
+        profile_id: int,
+        attempt_id: int,
+        deletion_item_id: int,
+        *,
+        site: str,
+        observation_id: int,
+        remote_uuid: str,
+        reviewed_identity_fingerprint: str,
+        request_correlation: str,
     ) -> int:
         """Journal exactly one donor delete immediately before its execution."""
         now = _utc_now()
@@ -5705,7 +7238,8 @@ class ReconciliationDB:
                 (attempt_id, deletion_item_id),
             ).fetchone()
             if (
-                attempt is None or item is None
+                attempt is None
+                or item is None
                 or str(attempt["state"]) not in {"pending", "partial"}
                 or str(item["state"]) != "pending"
                 or str(item["site"]) != site
@@ -5714,14 +7248,15 @@ class ReconciliationDB:
                 or item["action_id"] is not None
             ):
                 raise ValueError("The reviewed donor changed before journaling")
-            ordinal = int(conn.execute(
-                "SELECT COALESCE(MAX(ordinal),0)+1 FROM sync_deletion_actions "
-                "WHERE deletion_attempt_id=?",
-                (attempt_id,),
-            ).fetchone()[0])
+            ordinal = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(ordinal),0)+1 FROM sync_deletion_actions "
+                    "WHERE deletion_attempt_id=?",
+                    (attempt_id,),
+                ).fetchone()[0]
+            )
             action_type = (
-                "inat_observation_delete" if site == "inat"
-                else "mo_observation_delete"
+                "inat_observation_delete" if site == "inat" else "mo_observation_delete"
             )
             cursor = conn.execute(
                 "INSERT INTO sync_deletion_actions("
@@ -5731,10 +7266,18 @@ class ReconciliationDB:
                 "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,"
                 "'pending',?,?,?,?)",
                 (
-                    profile_id, attempt_id, deletion_item_id, ordinal,
-                    action_type, site, observation_id, remote_uuid,
-                    request_correlation, reviewed_identity_fingerprint,
-                    now, now,
+                    profile_id,
+                    attempt_id,
+                    deletion_item_id,
+                    ordinal,
+                    action_type,
+                    site,
+                    observation_id,
+                    remote_uuid,
+                    request_correlation,
+                    reviewed_identity_fingerprint,
+                    now,
+                    now,
                 ),
             )
             action_id = int(cursor.lastrowid)
@@ -5748,7 +7291,9 @@ class ReconciliationDB:
             return action_id
 
     def claim_deletion_action(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
     ) -> bool:
         now = _utc_now()
         with self.transaction() as conn:
@@ -5771,7 +7316,9 @@ class ReconciliationDB:
             return True
 
     def mark_deletion_write_started(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
     ) -> bool:
         now = _utc_now()
         cursor = self.connection().execute(
@@ -5784,7 +7331,10 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def mark_deletion_verified(
-        self, profile_id: int, action_id: int, verification_state: str,
+        self,
+        profile_id: int,
+        action_id: int,
+        verification_state: str,
     ) -> bool:
         if verification_state != "verified_deleted":
             raise ValueError("Only definitive deletion may enter finalization")
@@ -5799,7 +7349,9 @@ class ReconciliationDB:
         return cursor.rowcount == 1
 
     def cancel_pending_deletion_action(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
     ) -> bool:
         now = _utc_now()
         with self.transaction() as conn:
@@ -5832,21 +7384,25 @@ class ReconciliationDB:
                 "UPDATE sync_deletion_items SET state='cancelled',updated_at=? "
                 "WHERE deletion_attempt_id=? AND ordinal>? AND state='pending'",
                 (
-                    now, int(action["deletion_attempt_id"]),
+                    now,
+                    int(action["deletion_attempt_id"]),
                     int(action["ordinal"]),
                 ),
             )
-            succeeded = int(conn.execute(
-                "SELECT COUNT(*) FROM sync_deletion_items "
-                "WHERE deletion_attempt_id=? AND state='succeeded'",
-                (int(action["deletion_attempt_id"]),),
-            ).fetchone()[0])
+            succeeded = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sync_deletion_items "
+                    "WHERE deletion_attempt_id=? AND state='succeeded'",
+                    (int(action["deletion_attempt_id"]),),
+                ).fetchone()[0]
+            )
             cursor = conn.execute(
                 "UPDATE sync_deletion_attempts SET state=?,updated_at=? "
                 "WHERE deletion_attempt_id=? AND state IN ('pending','partial')",
                 (
                     "partial" if succeeded else "cancelled",
-                    now, int(action["deletion_attempt_id"]),
+                    now,
+                    int(action["deletion_attempt_id"]),
                 ),
             )
             if cursor.rowcount != 1:
@@ -5854,7 +7410,10 @@ class ReconciliationDB:
             return True
 
     def cancel_deletion_tail(
-        self, profile_id: int, attempt_id: int, from_ordinal: int,
+        self,
+        profile_id: int,
+        attempt_id: int,
+        from_ordinal: int,
     ) -> int:
         """Stop an unminted tail and preserve partial-completion semantics."""
         now = _utc_now()
@@ -5865,7 +7424,8 @@ class ReconciliationDB:
                 (profile_id, attempt_id),
             ).fetchone()
             if attempt is None or str(attempt["state"]) not in {
-                "pending", "partial",
+                "pending",
+                "partial",
             }:
                 return 0
             cursor = conn.execute(
@@ -5875,11 +7435,13 @@ class ReconciliationDB:
                 (now, attempt_id, from_ordinal),
             )
             changed = int(cursor.rowcount)
-            succeeded = int(conn.execute(
-                "SELECT COUNT(*) FROM sync_deletion_items "
-                "WHERE deletion_attempt_id=? AND state='succeeded'",
-                (attempt_id,),
-            ).fetchone()[0])
+            succeeded = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sync_deletion_items "
+                    "WHERE deletion_attempt_id=? AND state='succeeded'",
+                    (attempt_id,),
+                ).fetchone()[0]
+            )
             cursor = conn.execute(
                 "UPDATE sync_deletion_attempts SET state=?,updated_at=? "
                 "WHERE deletion_attempt_id=? AND state IN ('pending','partial')",
@@ -5891,19 +7453,27 @@ class ReconciliationDB:
 
     def recover_running_deletion_actions(self) -> int:
         """Crash recovery: pre-write claims are retryable; sent writes are unknown."""
-        rows = self.connection().execute(
-            "SELECT profile_id,deletion_action_id FROM sync_deletion_actions "
-            "WHERE state='running'"
-        ).fetchall()
+        rows = (
+            self.connection()
+            .execute(
+                "SELECT profile_id,deletion_action_id FROM sync_deletion_actions "
+                "WHERE state='running'"
+            )
+            .fetchall()
+        )
         for row in rows:
             self.normalize_running_deletion_action(
-                int(row["profile_id"]), int(row["deletion_action_id"]),
+                int(row["profile_id"]),
+                int(row["deletion_action_id"]),
                 error_code="process_interrupted",
             )
         return len(rows)
 
     def normalize_running_deletion_action(
-        self, profile_id: int, action_id: int, *,
+        self,
+        profile_id: int,
+        action_id: int,
+        *,
         error_code: str = "interrupted",
     ) -> Optional[str]:
         """Resolve a discovered running row from its durable write boundary.
@@ -5934,12 +7504,16 @@ class ReconciliationDB:
                 "last_error_code=?,updated_at=? "
                 "WHERE profile_id=? AND deletion_action_id=? AND state='running'",
                 (
-                    state, "verification" if sent else "journaled",
+                    state,
+                    "verification" if sent else "journaled",
                     (
                         f"{error_code}_after_write"
-                        if sent else f"{error_code}_before_write"
+                        if sent
+                        else f"{error_code}_before_write"
                     )[:80],
-                    now, profile_id, action_id,
+                    now,
+                    profile_id,
+                    action_id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -5956,7 +7530,8 @@ class ReconciliationDB:
                     "UPDATE sync_deletion_items SET state='cancelled',updated_at=? "
                     "WHERE deletion_attempt_id=? AND ordinal>? AND state='pending'",
                     (
-                        now, int(action["deletion_attempt_id"]),
+                        now,
+                        int(action["deletion_attempt_id"]),
                         int(action["ordinal"]),
                     ),
                 )
@@ -5968,18 +7543,24 @@ class ReconciliationDB:
                     (now, int(action["deletion_attempt_id"])),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError(
-                        "The unknown deletion attempt was not preserved"
-                    )
+                    raise RuntimeError("The unknown deletion attempt was not preserved")
             return state
 
     def finish_deletion_action(
-        self, profile_id: int, action_id: int, state: str, *,
-        verification_state: str = "", error_code: str = "",
+        self,
+        profile_id: int,
+        action_id: int,
+        state: str,
+        *,
+        verification_state: str = "",
+        error_code: str = "",
         http_status: Optional[int] = None,
     ) -> bool:
         if state not in {
-            "failed", "cancelled", "outcome_unknown", "retry_required",
+            "failed",
+            "cancelled",
+            "outcome_unknown",
+            "retry_required",
         }:
             raise ValueError("Invalid non-success deletion action state")
         now = _utc_now()
@@ -5990,7 +7571,10 @@ class ReconciliationDB:
                 "AND deletion_action_id=?",
                 (profile_id, action_id),
             ).fetchone()
-            if action is None or str(action["state"]) not in {"running", "outcome_unknown"}:
+            if action is None or str(action["state"]) not in {
+                "running",
+                "outcome_unknown",
+            }:
                 return False
             cursor = conn.execute(
                 "UPDATE sync_deletion_actions SET state=?,last_phase='verification',"
@@ -5999,8 +7583,16 @@ class ReconciliationDB:
                 "finished_at=?,updated_at=? WHERE profile_id=? "
                 "AND deletion_action_id=? AND state=?",
                 (
-                    state, error_code[:80], http_status, verification_state,
-                    verification_state, now, now, now, profile_id, action_id,
+                    state,
+                    error_code[:80],
+                    http_status,
+                    verification_state,
+                    verification_state,
+                    now,
+                    now,
+                    now,
+                    profile_id,
+                    action_id,
                     str(action["state"]),
                 ),
             )
@@ -6017,17 +7609,21 @@ class ReconciliationDB:
                 "UPDATE sync_deletion_items SET state='cancelled',updated_at=? "
                 "WHERE deletion_attempt_id=? AND ordinal>? AND state='pending'",
                 (
-                    now, int(action["deletion_attempt_id"]),
+                    now,
+                    int(action["deletion_attempt_id"]),
                     int(action["ordinal"]),
                 ),
             )
-            succeeded = int(conn.execute(
-                "SELECT COUNT(*) FROM sync_deletion_items "
-                "WHERE deletion_attempt_id=? AND state='succeeded'",
-                (int(action["deletion_attempt_id"]),),
-            ).fetchone()[0])
+            succeeded = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sync_deletion_items "
+                    "WHERE deletion_attempt_id=? AND state='succeeded'",
+                    (int(action["deletion_attempt_id"]),),
+                ).fetchone()[0]
+            )
             attempt_state = (
-                "outcome_unknown" if state == "outcome_unknown"
+                "outcome_unknown"
+                if state == "outcome_unknown"
                 else "partial" if succeeded else state
             )
             cursor = conn.execute(
@@ -6041,7 +7637,9 @@ class ReconciliationDB:
             return True
 
     def settle_deletion_success(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
     ) -> bool:
         """M7 exact-count, all-or-nothing local tombstone finalization."""
         now = _utc_now()
@@ -6063,14 +7661,13 @@ class ReconciliationDB:
                     "AND m.deleted_by_deletion_item_id=di.deletion_item_id",
                     (
                         int(action["deletion_item_id"]),
-                        int(action["deletion_attempt_id"]), action_id,
+                        int(action["deletion_attempt_id"]),
+                        action_id,
                     ),
                 ).fetchone()
                 if settled is not None:
                     return True
-                raise ValueError(
-                    "A succeeded delete action lacks its exact tombstone"
-                )
+                raise ValueError("A succeeded delete action lacks its exact tombstone")
             if (
                 action is None
                 or str(action["state"]) not in {"running", "outcome_unknown"}
@@ -6082,7 +7679,8 @@ class ReconciliationDB:
                 "AND deletion_attempt_id=? AND action_id=?",
                 (
                     int(action["deletion_item_id"]),
-                    int(action["deletion_attempt_id"]), action_id,
+                    int(action["deletion_attempt_id"]),
+                    action_id,
                 ),
             ).fetchone()
             attempt = conn.execute(
@@ -6124,7 +7722,9 @@ class ReconciliationDB:
                 expected_owner_id,
             )
             if (
-                consolidation is None or member is None or profile is None
+                consolidation is None
+                or member is None
+                or profile is None
                 or int(consolidation["current_finalized_attempt_id"] or 0)
                 != int(attempt["base_finalized_attempt_id"])
                 or str(action["action_type"]) != expected_action_type
@@ -6132,12 +7732,9 @@ class ReconciliationDB:
                 or str(action["site"]) != str(member["site"])
                 or int(action["observation_id"]) != int(item["observation_id"])
                 or int(action["observation_id"]) != int(member["observation_id"])
-                or str(action["remote_uuid"] or "")
-                != str(item["remote_uuid"] or "")
-                or str(action["remote_uuid"] or "")
-                != str(member["remote_uuid"] or "")
-                or str(action["reviewed_identity_fingerprint"])
-                != expected_identity
+                or str(action["remote_uuid"] or "") != str(item["remote_uuid"] or "")
+                or str(action["remote_uuid"] or "") != str(member["remote_uuid"] or "")
+                or str(action["reviewed_identity_fingerprint"]) != expected_identity
                 or action["write_started_at"] is None
                 or str(member["role"]) != "donor"
                 or str(member["local_state"]) != "superseded"
@@ -6152,7 +7749,9 @@ class ReconciliationDB:
                 if str(item["site"]) == "inat"
                 else consolidation["canonical_mo_observation_id"]
             )
-            if canonical_id is not None and int(canonical_id) == int(item["observation_id"]):
+            if canonical_id is not None and int(canonical_id) == int(
+                item["observation_id"]
+            ):
                 raise ValueError("A canonical observation cannot be tombstoned")
             cursor = conn.execute(
                 "UPDATE sync_consolidation_members SET remote_state='deleted',"
@@ -6164,11 +7763,13 @@ class ReconciliationDB:
                 "AND remote_state='online' AND role='donor' "
                 "AND local_state='superseded'",
                 (
-                    now, int(attempt["deletion_attempt_id"]),
+                    now,
+                    int(attempt["deletion_attempt_id"]),
                     int(item["deletion_item_id"]),
                     str(item["reviewed_remote_record_fingerprint"]),
                     consolidation["canonical_mo_observation_id"],
-                    consolidation["canonical_inat_observation_id"], now,
+                    consolidation["canonical_inat_observation_id"],
+                    now,
                     int(member["consolidation_member_id"]),
                 ),
             )
@@ -6190,11 +7791,13 @@ class ReconciliationDB:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("The deletion item did not settle")
-            remaining = int(conn.execute(
-                "SELECT COUNT(*) FROM sync_deletion_items "
-                "WHERE deletion_attempt_id=? AND state!='succeeded'",
-                (int(attempt["deletion_attempt_id"]),),
-            ).fetchone()[0])
+            remaining = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sync_deletion_items "
+                    "WHERE deletion_attempt_id=? AND state!='succeeded'",
+                    (int(attempt["deletion_attempt_id"]),),
+                ).fetchone()[0]
+            )
             attempt_state = "succeeded" if remaining == 0 else "partial"
             cursor = conn.execute(
                 "UPDATE sync_deletion_attempts SET state=?,updated_at=? "
@@ -6208,7 +7811,9 @@ class ReconciliationDB:
 
     def consolidation_history(self, profile_id: int) -> list[dict[str, Any]]:
         return [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT c.consolidation_id,c.state,c.canonical_mo_observation_id,"
                 "c.canonical_inat_observation_id,c.canonical_pair_id,"
                 "c.current_finalized_attempt_id,c.updated_at,"
@@ -6230,16 +7835,21 @@ class ReconciliationDB:
                 "ORDER BY ca2.attempt_id DESC LIMIT 1) "
                 "WHERE c.profile_id=? ORDER BY c.updated_at DESC,c.consolidation_id DESC",
                 (profile_id,),
-            ).fetchall()
+            )
+            .fetchall()
         ]
 
     def consolidation_detail(
-        self, profile_id: int, consolidation_id: int,
+        self,
+        profile_id: int,
+        consolidation_id: int,
     ) -> Optional[dict[str, Any]]:
         result = self.get_consolidation(profile_id, consolidation_id)
         if result is None:
             return None
-        result["members"] = self.list_consolidation_members(profile_id, consolidation_id)
+        result["members"] = self.list_consolidation_members(
+            profile_id, consolidation_id
+        )
         canonical_parts = []
         if result.get("canonical_mo_observation_id") is not None:
             canonical_parts.append(f"MO {int(result['canonical_mo_observation_id'])}")
@@ -6262,24 +7872,26 @@ class ReconciliationDB:
                 else ""
             )
         result["attempts"] = [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT * FROM sync_consolidation_attempts WHERE profile_id=? "
                 "AND consolidation_id=? ORDER BY attempt_id",
                 (profile_id, consolidation_id),
-            ).fetchall()
+            )
+            .fetchall()
         ]
         original_attempt_id = (
-            int(result["attempts"][0]["attempt_id"])
-            if result["attempts"] else None
+            int(result["attempts"][0]["attempt_id"]) if result["attempts"] else None
         )
         for attempt in result["attempts"]:
             attempt["is_original_attempt"] = (
                 int(attempt["attempt_id"]) == original_attempt_id
             )
-            attempt["is_current_finalized_baseline"] = (
-                result.get("current_finalized_attempt_id") is not None
-                and int(attempt["attempt_id"])
-                == int(result["current_finalized_attempt_id"])
+            attempt["is_current_finalized_baseline"] = result.get(
+                "current_finalized_attempt_id"
+            ) is not None and int(attempt["attempt_id"]) == int(
+                result["current_finalized_attempt_id"]
             )
             attempt["members"] = self.consolidation_attempt_members(
                 profile_id, int(attempt["attempt_id"])
@@ -6294,11 +7906,14 @@ class ReconciliationDB:
                 profile_id, int(attempt["action_group_id"])
             )
         result["deletion_attempts"] = [
-            dict(row) for row in self.connection().execute(
+            dict(row)
+            for row in self.connection()
+            .execute(
                 "SELECT * FROM sync_deletion_attempts WHERE profile_id=? "
                 "AND consolidation_id=? ORDER BY deletion_attempt_id",
                 (profile_id, consolidation_id),
-            ).fetchall()
+            )
+            .fetchall()
         ]
         for deletion_attempt in result["deletion_attempts"]:
             items = self.deletion_items(
@@ -6317,16 +7932,25 @@ class ReconciliationDB:
     def superseded_member_keys(self, profile_id: int) -> set[tuple[str, int]]:
         return {
             (str(row["site"]), int(row["observation_id"]))
-            for row in self.connection().execute(
+            for row in self.connection()
+            .execute(
                 "SELECT site,observation_id FROM sync_consolidation_members "
                 "WHERE profile_id=? AND local_state='superseded'",
                 (profile_id,),
-            ).fetchall()
+            )
+            .fetchall()
         }
 
     def _upsert_issue_tx(
-        self, conn: sqlite3.Connection, profile_id: int, issue_type: str, severity: str,
-        title: str, detail: str, fingerprint: str, records: Sequence[tuple[str, int]],
+        self,
+        conn: sqlite3.Connection,
+        profile_id: int,
+        issue_type: str,
+        severity: str,
+        title: str,
+        detail: str,
+        fingerprint: str,
+        records: Sequence[tuple[str, int]],
     ) -> int:
         row = conn.execute(
             "SELECT issue_id,fingerprint,state FROM sync_issues WHERE profile_id=? AND issue_type=? AND title=?",
@@ -6336,19 +7960,33 @@ class ReconciliationDB:
         if row:
             issue_id = int(row[0])
             state = (
-                "open" if str(row[1]) != fingerprint or str(row[2]) == "resolved"
+                "open"
+                if str(row[1]) != fingerprint or str(row[2]) == "resolved"
                 else str(row[2])
             )
             conn.execute(
                 "UPDATE sync_issues SET severity=?,detail=?,fingerprint=?,state=?,updated_at=? WHERE issue_id=?",
                 (severity, detail, fingerprint, state, now, issue_id),
             )
-            conn.execute("DELETE FROM sync_issue_records WHERE profile_id=? AND issue_id=?", (profile_id, issue_id))
+            conn.execute(
+                "DELETE FROM sync_issue_records WHERE profile_id=? AND issue_id=?",
+                (profile_id, issue_id),
+            )
         else:
             cur = conn.execute(
                 "INSERT INTO sync_issues(profile_id,issue_type,severity,title,detail,fingerprint,state,created_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?)",
-                (profile_id, issue_type, severity, title, detail, fingerprint, "open", now, now),
+                (
+                    profile_id,
+                    issue_type,
+                    severity,
+                    title,
+                    detail,
+                    fingerprint,
+                    "open",
+                    now,
+                    now,
+                ),
             )
             issue_id = int(cur.lastrowid)
         for site, observation_id in records:
@@ -6375,7 +8013,10 @@ def _classification(score: int) -> str:
 
 def _local_fingerprint(*parts: object) -> str:
     import hashlib
-    return hashlib.sha256("\x1f".join(str(part) for part in parts).encode("utf-8")).hexdigest()
+
+    return hashlib.sha256(
+        "\x1f".join(str(part) for part in parts).encode("utf-8")
+    ).hexdigest()
 
 
 def consolidation_evidence_graph_fingerprint(
@@ -6396,13 +8037,25 @@ def consolidation_evidence_graph_fingerprint(
     return _local_fingerprint(
         "consolidation_evidence_graph_v1",
         *(
-            "|".join((
-                left_site, str(left_id), right_site, str(right_id),
-                evidence_type, evidence_strength, reviewed_fingerprint,
-            ))
+            "|".join(
+                (
+                    left_site,
+                    str(left_id),
+                    right_site,
+                    str(right_id),
+                    evidence_type,
+                    evidence_strength,
+                    reviewed_fingerprint,
+                )
+            )
             for (
-                left_site, left_id, right_site, right_id,
-                evidence_type, evidence_strength, reviewed_fingerprint,
+                left_site,
+                left_id,
+                right_site,
+                right_id,
+                evidence_type,
+                evidence_strength,
+                reviewed_fingerprint,
             ) in sorted(
                 edges,
                 key=lambda item: (item[0], item[1], item[2], item[3], item[4]),
@@ -6424,15 +8077,21 @@ def pair_source_fingerprint(pair: Any) -> str:
     from .normalization import public_fingerprint
 
     return public_fingerprint(
-        "pair", pair["pair_id"], pair["updated_at"], pair["review_state"],
-        pair["link_state"], pair["confirmed_by"],
+        "pair",
+        pair["pair_id"],
+        pair["updated_at"],
+        pair["review_state"],
+        pair["link_state"],
+        pair["confirmed_by"],
     )
 
 
 def _review_fingerprint(review: object) -> str:
     return _local_fingerprint(
-        review["issue_fingerprint"], review["review_intent"],  # type: ignore[index]
-        review["mo_observation_id"], review["inat_observation_id"],  # type: ignore[index]
+        review["issue_fingerprint"],
+        review["review_intent"],  # type: ignore[index]
+        review["mo_observation_id"],
+        review["inat_observation_id"],  # type: ignore[index]
         review["reviewed_at"],  # type: ignore[index]
     )
 
@@ -6518,12 +8177,20 @@ def _migration_v1(conn: sqlite3.Connection) -> None:
 
 
 def _migration_v2(conn: sqlite3.Connection) -> None:
-    conn.execute("ALTER TABLE sync_records ADD COLUMN link_malformed INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "ALTER TABLE sync_records ADD COLUMN link_malformed INTEGER NOT NULL DEFAULT 0"
+    )
     conn.execute("ALTER TABLE sync_records ADD COLUMN changed_at TEXT")
     conn.execute("ALTER TABLE sync_links ADD COLUMN external_site_id INTEGER")
-    conn.execute("ALTER TABLE sync_links ADD COLUMN parse_state TEXT NOT NULL DEFAULT 'valid'")
-    conn.execute("ALTER TABLE sync_links ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''")
-    conn.execute("ALTER TABLE sync_pair_exclusions ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "ALTER TABLE sync_links ADD COLUMN parse_state TEXT NOT NULL DEFAULT 'valid'"
+    )
+    conn.execute(
+        "ALTER TABLE sync_links ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''"
+    )
+    conn.execute(
+        "ALTER TABLE sync_pair_exclusions ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''"
+    )
 
     conn.execute("ALTER TABLE sync_identifiers RENAME TO sync_identifiers_v1")
     conn.execute(
@@ -6537,13 +8204,11 @@ def _migration_v2(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE sync_identifiers_v1")
 
     conn.execute("ALTER TABLE sync_sequence_hashes RENAME TO sync_sequence_hashes_v1")
-    conn.execute(
-        """CREATE TABLE sync_sequence_hashes(
+    conn.execute("""CREATE TABLE sync_sequence_hashes(
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             site TEXT NOT NULL, observation_id INTEGER NOT NULL, sequence_hash TEXT NOT NULL,
             evidence_tier INTEGER NOT NULL,
-            PRIMARY KEY(profile_id,site,observation_id,sequence_hash,evidence_tier))"""
-    )
+            PRIMARY KEY(profile_id,site,observation_id,sequence_hash,evidence_tier))""")
     # The v1 table did not distinguish inventory, enrichment, or deep reads.
     conn.execute("DROP TABLE sync_sequence_hashes_v1")
     conn.execute(
@@ -6562,8 +8227,12 @@ def _migration_v3(conn: sqlite3.Connection) -> None:
     conn.execute(
         "ALTER TABLE sync_records ADD COLUMN availability_state TEXT NOT NULL DEFAULT 'available'"
     )
-    conn.execute("ALTER TABLE sync_pairs ADD COLUMN ever_reviewed INTEGER NOT NULL DEFAULT 0")
-    conn.execute("ALTER TABLE sync_pairs ADD COLUMN ever_confirmed INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "ALTER TABLE sync_pairs ADD COLUMN ever_reviewed INTEGER NOT NULL DEFAULT 0"
+    )
+    conn.execute(
+        "ALTER TABLE sync_pairs ADD COLUMN ever_confirmed INTEGER NOT NULL DEFAULT 0"
+    )
     conn.execute(
         "ALTER TABLE sync_pairs ADD COLUMN historical_confirmed_by TEXT NOT NULL DEFAULT ''"
     )
@@ -6573,7 +8242,9 @@ def _migration_v3(conn: sqlite3.Connection) -> None:
         "historical_confirmed_by=CASE WHEN review_state='confirmed' THEN confirmed_by ELSE '' END"
     )
     conn.execute("ALTER TABLE sync_media_hashes ADD COLUMN source_site TEXT")
-    conn.execute("ALTER TABLE sync_media_hashes ADD COLUMN source_photo_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "ALTER TABLE sync_media_hashes ADD COLUMN source_photo_id TEXT NOT NULL DEFAULT ''"
+    )
     # Version 1 did not record acquisition provenance. Keeping these rows could
     # turn hydrated evidence into inventory evidence indefinitely, so rebuild it.
     conn.execute("DELETE FROM sync_identifiers")
@@ -6582,9 +8253,7 @@ def _migration_v3(conn: sqlite3.Connection) -> None:
         "UPDATE sync_pairs SET score=0,classification='hidden' WHERE pair_id IN "
         "(SELECT DISTINCT pair_id FROM sync_evidence WHERE family IN ('specimen','barcode'))"
     )
-    conn.execute(
-        "DELETE FROM sync_evidence WHERE family IN ('specimen','barcode')"
-    )
+    conn.execute("DELETE FROM sync_evidence WHERE family IN ('specimen','barcode')")
 
 
 def _migration_v4(conn: sqlite3.Connection) -> None:
@@ -6731,8 +8400,12 @@ def _migration_v5(conn: sqlite3.Connection) -> None:
         f"INSERT INTO sync_actions({old_columns}) SELECT {old_columns} FROM sync_actions_v4"
     )
     conn.execute("DROP TABLE sync_actions_v4")
-    conn.execute("CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)")
-    conn.execute("CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)")
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX uq_sync_unresolved_action ON sync_actions(profile_id,deduplication_key) "
         "WHERE state IN ('pending','running','outcome_unknown')"
@@ -6745,7 +8418,10 @@ def _migration_v6(conn: sqlite3.Connection) -> None:
     A dedicated migration (rather than editing v5 in place) so that any database
     that already completed an earlier schema-v5 build gains the column too.
     """
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sync_actions)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(sync_actions)").fetchall()
+    }
     if "normalized_archive" not in columns:
         conn.execute(
             "ALTER TABLE sync_actions ADD COLUMN normalized_archive TEXT NOT NULL DEFAULT ''"
@@ -6831,23 +8507,24 @@ def _migration_v7(conn: sqlite3.Connection) -> None:
         f"INSERT INTO sync_actions({old_columns}) SELECT {old_columns} FROM sync_actions_v6"
     )
     conn.execute("DROP TABLE sync_actions_v6")
-    conn.execute("CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)")
-    conn.execute("CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)")
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX uq_sync_unresolved_action ON sync_actions(profile_id,deduplication_key) "
         "WHERE state IN ('pending','running','outcome_unknown')"
     )
-    conn.execute(
-        """CREATE TABLE sync_name_delegations(
+    conn.execute("""CREATE TABLE sync_name_delegations(
             delegation_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER NOT NULL REFERENCES sync_pairs(pair_id) ON DELETE CASCADE,
             identify_action_id INTEGER NOT NULL,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            UNIQUE(profile_id,pair_id,identify_action_id))"""
-    )
-    conn.execute(
-        """CREATE TABLE sync_mo_proposals(
+            UNIQUE(profile_id,pair_id,identify_action_id))""")
+    conn.execute("""CREATE TABLE sync_mo_proposals(
             proposal_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER NOT NULL REFERENCES sync_pairs(pair_id) ON DELETE CASCADE,
@@ -6865,8 +8542,7 @@ def _migration_v7(conn: sqlite3.Connection) -> None:
             submitted_at TEXT NOT NULL DEFAULT '',
             became_effective_at TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            UNIQUE(profile_id,pair_id,proposed_name))"""
-    )
+            UNIQUE(profile_id,pair_id,proposed_name))""")
 
 
 def _migration_v8(conn: sqlite3.Connection) -> None:
@@ -6962,14 +8638,17 @@ def _migration_v8(conn: sqlite3.Connection) -> None:
         f"INSERT INTO sync_actions({old_columns}) SELECT {old_columns} FROM sync_actions_v7"
     )
     conn.execute("DROP TABLE sync_actions_v7")
-    conn.execute("CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)")
-    conn.execute("CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)")
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX uq_sync_unresolved_action ON sync_actions(profile_id,deduplication_key) "
         "WHERE state IN ('pending','running','outcome_unknown')"
     )
-    conn.execute(
-        """CREATE TABLE sync_photo_transfers(
+    conn.execute("""CREATE TABLE sync_photo_transfers(
             transfer_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER REFERENCES sync_pairs(pair_id) ON DELETE CASCADE,
@@ -6996,8 +8675,7 @@ def _migration_v8(conn: sqlite3.Connection) -> None:
             -- The authoritative "have we already sent this one?" key: one source
             -- photo lands at most once on a given destination observation.
             UNIQUE(profile_id,source_site,source_photo_id,
-                   destination_site,destination_observation_id))"""
-    )
+                   destination_site,destination_observation_id))""")
     conn.execute(
         "CREATE INDEX idx_photo_transfers_pair ON sync_photo_transfers(profile_id,pair_id)"
     )
@@ -7059,7 +8737,9 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
     # dropped, children (sync_action_snapshot_rows_v8, sync_actions_v8) before
     # parent (sync_action_groups_v8), so ON DELETE CASCADE never fires against
     # a parent that's mid-rebuild.
-    conn.execute("ALTER TABLE sync_action_snapshot_rows RENAME TO sync_action_snapshot_rows_v8")
+    conn.execute(
+        "ALTER TABLE sync_action_snapshot_rows RENAME TO sync_action_snapshot_rows_v8"
+    )
     conn.execute("ALTER TABLE sync_actions RENAME TO sync_actions_v8")
     conn.execute("ALTER TABLE sync_action_groups RENAME TO sync_action_groups_v8")
     conn.execute(
@@ -7087,8 +8767,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
     # new sync_action_groups. Recreated (and repopulated) here rather than
     # left alone so that no reviewed link-repair snapshot is lost to the
     # cascade described above.
-    conn.execute(
-        """CREATE TABLE sync_action_snapshot_rows(
+    conn.execute("""CREATE TABLE sync_action_snapshot_rows(
             snapshot_row_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             action_group_id INTEGER NOT NULL,
@@ -7099,8 +8778,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
             parse_state TEXT NOT NULL, row_fingerprint TEXT NOT NULL,
             FOREIGN KEY(profile_id,action_group_id)
                 REFERENCES sync_action_groups(profile_id,action_group_id) ON DELETE CASCADE,
-            UNIQUE(profile_id,action_group_id,site,remote_row_id,remote_row_uuid))"""
-    )
+            UNIQUE(profile_id,action_group_id,site,remote_row_id,remote_row_uuid))""")
     snapshot_columns = (
         "snapshot_row_id,profile_id,action_group_id,site,observation_id,"
         "remote_row_id,remote_row_uuid,binding_id,normalized_target_id,"
@@ -7110,8 +8788,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
         f"INSERT INTO sync_action_snapshot_rows({snapshot_columns}) "
         f"SELECT {snapshot_columns} FROM sync_action_snapshot_rows_v8"
     )
-    conn.execute(
-        """CREATE TABLE sync_actions(
+    conn.execute("""CREATE TABLE sync_actions(
             action_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             action_group_id INTEGER NOT NULL,
@@ -7171,8 +8848,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
             CHECK (
                 action_type IN ('inat_observation_create','mo_observation_create','pair_finalize')
                 OR (mo_observation_id IS NOT NULL AND inat_observation_id IS NOT NULL)
-            ))"""
-    )
+            ))""")
     old_columns = (
         "action_id,profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
         "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,"
@@ -7198,8 +8874,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
     # sync_actions — before sync_actions_v8 is dropped, or the drop fails with
     # "FOREIGN KEY constraint failed" against the still-referencing old rows.
     conn.execute("ALTER TABLE sync_photo_transfers RENAME TO sync_photo_transfers_v8")
-    conn.execute(
-        """CREATE TABLE sync_photo_transfers(
+    conn.execute("""CREATE TABLE sync_photo_transfers(
             transfer_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER REFERENCES sync_pairs(pair_id) ON DELETE CASCADE,
@@ -7219,8 +8894,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
                 CHECK(state IN ('pending','succeeded','failed','outcome_unknown')),
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             UNIQUE(profile_id,source_site,source_photo_id,
-                   destination_site,destination_observation_id))"""
-    )
+                   destination_site,destination_observation_id))""")
     photo_transfer_columns = (
         "transfer_id,profile_id,pair_id,action_id,source_site,source_photo_id,"
         "destination_site,destination_observation_id,destination_photo_id,"
@@ -7242,14 +8916,17 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE sync_action_snapshot_rows_v8")
     conn.execute("DROP TABLE sync_actions_v8")
     conn.execute("DROP TABLE sync_action_groups_v8")
-    conn.execute("CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)")
-    conn.execute("CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)")
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX uq_sync_unresolved_action ON sync_actions(profile_id,deduplication_key) "
         "WHERE state IN ('pending','running','outcome_unknown')"
     )
-    conn.execute(
-        """CREATE TABLE sync_created_observations(
+    conn.execute("""CREATE TABLE sync_created_observations(
             creation_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             -- SET NULL, not CASCADE: deleting the local pair must never erase
@@ -7276,13 +8953,11 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(profile_id,action_group_id)
                 REFERENCES sync_action_groups(profile_id,action_group_id) ON DELETE CASCADE,
             UNIQUE(profile_id,destination_site,correlation_marker),
-            UNIQUE(profile_id,source_site,source_observation_id,destination_site))"""
-    )
+            UNIQUE(profile_id,source_site,source_observation_id,destination_site))""")
     conn.execute(
         "CREATE INDEX idx_created_observations_group ON sync_created_observations(profile_id,action_group_id)"
     )
-    conn.execute(
-        """CREATE TABLE sync_creation_items(
+    conn.execute("""CREATE TABLE sync_creation_items(
             creation_item_id INTEGER PRIMARY KEY,
             creation_id INTEGER NOT NULL REFERENCES sync_created_observations(creation_id) ON DELETE CASCADE,
             action_id INTEGER REFERENCES sync_actions(action_id) ON DELETE SET NULL,
@@ -7297,8 +8972,7 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
             destination_remote_id TEXT NOT NULL DEFAULT '',
             state TEXT NOT NULL DEFAULT 'pending'
                 CHECK(state IN ('pending','succeeded','failed','outcome_unknown')),
-            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
-    )
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
     conn.execute(
         "CREATE INDEX idx_creation_items_creation ON sync_creation_items(creation_id)"
     )
@@ -7346,10 +9020,11 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
     dropping the old ones; drop child before parent.
     """
     conn.execute("ALTER TABLE sync_creation_items RENAME TO sync_creation_items_v9")
-    conn.execute("ALTER TABLE sync_created_observations RENAME TO sync_created_observations_v9")
-
     conn.execute(
-        """CREATE TABLE sync_created_observations(
+        "ALTER TABLE sync_created_observations RENAME TO sync_created_observations_v9"
+    )
+
+    conn.execute("""CREATE TABLE sync_created_observations(
             creation_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER REFERENCES sync_pairs(pair_id) ON DELETE SET NULL,
@@ -7359,10 +9034,8 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
             destination_observation_id INTEGER,
             destination_observation_uuid TEXT,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            UNIQUE(profile_id,source_site,source_observation_id,destination_site))"""
-    )
-    conn.execute(
-        """CREATE TABLE sync_creation_attempts(
+            UNIQUE(profile_id,source_site,source_observation_id,destination_site))""")
+    conn.execute("""CREATE TABLE sync_creation_attempts(
             attempt_id INTEGER PRIMARY KEY,
             creation_id INTEGER NOT NULL REFERENCES sync_created_observations(creation_id) ON DELETE CASCADE,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
@@ -7414,10 +9087,8 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
             -- deliberately purged first.
             FOREIGN KEY(profile_id,action_group_id)
                 REFERENCES sync_action_groups(profile_id,action_group_id) ON DELETE RESTRICT,
-            UNIQUE(profile_id,destination_site,correlation_marker))"""
-    )
-    conn.execute(
-        """CREATE TABLE sync_creation_items(
+            UNIQUE(profile_id,destination_site,correlation_marker))""")
+    conn.execute("""CREATE TABLE sync_creation_items(
             creation_item_id INTEGER PRIMARY KEY,
             attempt_id INTEGER NOT NULL REFERENCES sync_creation_attempts(attempt_id) ON DELETE CASCADE,
             action_id INTEGER REFERENCES sync_actions(action_id) ON DELETE SET NULL,
@@ -7437,18 +9108,28 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
             -- Round-3 finding 5: one approved attempt can never contain two
             -- entries for the same source item (e.g. the same MO photo id
             -- reviewed twice).
-            UNIQUE(attempt_id,item_type,source_item_identity))"""
-    )
+            UNIQUE(attempt_id,item_type,source_item_identity))""")
 
-    old_identities = conn.execute("SELECT * FROM sync_created_observations_v9").fetchall()
+    old_identities = conn.execute(
+        "SELECT * FROM sync_created_observations_v9"
+    ).fetchall()
     for old in old_identities:
         conn.execute(
             "INSERT INTO sync_created_observations(creation_id,profile_id,pair_id,source_site,"
             "source_observation_id,destination_site,destination_observation_id,"
             "destination_observation_uuid,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (old["creation_id"], old["profile_id"], old["pair_id"], old["source_site"],
-             old["source_observation_id"], old["destination_site"], old["destination_observation_id"],
-             old["destination_observation_uuid"], old["created_at"], old["updated_at"]),
+            (
+                old["creation_id"],
+                old["profile_id"],
+                old["pair_id"],
+                old["source_site"],
+                old["source_observation_id"],
+                old["destination_site"],
+                old["destination_observation_id"],
+                old["destination_observation_uuid"],
+                old["created_at"],
+                old["updated_at"],
+            ),
         )
         create_action = conn.execute(
             "SELECT action_id,state,write_started_at FROM sync_actions WHERE profile_id=? "
@@ -7493,9 +9174,19 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
             "reviewed_source_taxon_rank,resolution_mode,taxon_resolution_fingerprint,state,"
             "supersedes_attempt_id,created_at,updated_at) VALUES "
             "(?,?,?,?,?,?,?,?,NULL,'','','','','',?,NULL,?,?)",
-            (old["creation_id"], old["creation_id"], old["profile_id"], old["action_group_id"],
-             old["destination_site"], old["correlation_marker"], old["marker_location"],
-             old["approved_field_gaps"], attempt_state, old["created_at"], old["updated_at"]),
+            (
+                old["creation_id"],
+                old["creation_id"],
+                old["profile_id"],
+                old["action_group_id"],
+                old["destination_site"],
+                old["correlation_marker"],
+                old["marker_location"],
+                old["approved_field_gaps"],
+                attempt_state,
+                old["created_at"],
+                old["updated_at"],
+            ),
         )
     old_items = conn.execute("SELECT * FROM sync_creation_items_v9").fetchall()
     for item in old_items:
@@ -7503,10 +9194,19 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
             "INSERT INTO sync_creation_items(creation_item_id,attempt_id,action_id,item_type,"
             "source_item_identity,reviewed_metadata_fingerprint,planned_remote_uuid_or_marker,"
             "destination_remote_id,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (item["creation_item_id"], item["creation_id"], item["action_id"], item["item_type"],
-             item["source_item_identity"], item["reviewed_metadata_fingerprint"],
-             item["planned_remote_uuid_or_marker"], item["destination_remote_id"], item["state"],
-             item["created_at"], item["updated_at"]),
+            (
+                item["creation_item_id"],
+                item["creation_id"],
+                item["action_id"],
+                item["item_type"],
+                item["source_item_identity"],
+                item["reviewed_metadata_fingerprint"],
+                item["planned_remote_uuid_or_marker"],
+                item["destination_remote_id"],
+                item["state"],
+                item["created_at"],
+                item["updated_at"],
+            ),
         )
 
     conn.execute("DROP TABLE sync_creation_items_v9")
@@ -7596,8 +9296,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE sync_creation_items RENAME TO sync_creation_items_v10")
     conn.execute("ALTER TABLE sync_actions RENAME TO sync_actions_v10")
 
-    conn.execute(
-        """CREATE TABLE sync_actions(
+    conn.execute("""CREATE TABLE sync_actions(
             action_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             action_group_id INTEGER NOT NULL,
@@ -7662,8 +9361,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
                 action_type IN ('inat_observation_create','mo_observation_create',
                                  'pair_finalize','consolidation_finalize')
                 OR (mo_observation_id IS NOT NULL AND inat_observation_id IS NOT NULL)
-            ))"""
-    )
+            ))""")
     action_columns = (
         "action_id,profile_id,action_group_id,ordinal,action_type,site,state,last_phase,"
         "pair_id,issue_id,mo_observation_id,inat_observation_id,inat_observation_uuid,"
@@ -7683,8 +9381,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
         f"INSERT INTO sync_actions({action_columns}) SELECT {action_columns} FROM sync_actions_v10"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_photo_transfers(
+    conn.execute("""CREATE TABLE sync_photo_transfers(
             transfer_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             pair_id INTEGER REFERENCES sync_pairs(pair_id) ON DELETE CASCADE,
@@ -7704,8 +9401,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
                 CHECK(state IN ('pending','succeeded','failed','outcome_unknown')),
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             UNIQUE(profile_id,source_site,source_photo_id,
-                   destination_site,destination_observation_id))"""
-    )
+                   destination_site,destination_observation_id))""")
     photo_transfer_columns = (
         "transfer_id,profile_id,pair_id,action_id,source_site,source_photo_id,"
         "destination_site,destination_observation_id,destination_photo_id,"
@@ -7717,8 +9413,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
         f"SELECT {photo_transfer_columns} FROM sync_photo_transfers_v10"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_creation_items(
+    conn.execute("""CREATE TABLE sync_creation_items(
             creation_item_id INTEGER PRIMARY KEY,
             attempt_id INTEGER NOT NULL REFERENCES sync_creation_attempts(attempt_id) ON DELETE CASCADE,
             action_id INTEGER REFERENCES sync_actions(action_id) ON DELETE SET NULL,
@@ -7731,8 +9426,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
             state TEXT NOT NULL DEFAULT 'pending'
                 CHECK(state IN ('pending','succeeded','failed','outcome_unknown')),
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            UNIQUE(attempt_id,item_type,source_item_identity))"""
-    )
+            UNIQUE(attempt_id,item_type,source_item_identity))""")
     creation_item_columns = (
         "creation_item_id,attempt_id,action_id,item_type,source_item_identity,"
         "reviewed_metadata_fingerprint,reviewed_byte_fingerprint,planned_remote_uuid_or_marker,"
@@ -7749,8 +9443,12 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE sync_creation_items_v10")
     conn.execute("DROP TABLE sync_actions_v10")
 
-    conn.execute("CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)")
-    conn.execute("CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)")
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_state ON sync_actions(profile_id,state,created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_sync_actions_group ON sync_actions(profile_id,action_group_id,ordinal)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX uq_sync_unresolved_action ON sync_actions(profile_id,deduplication_key) "
         "WHERE state IN ('pending','running','outcome_unknown')"
@@ -7771,8 +9469,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
     )
 
     # --- New consolidation domain model. ---
-    conn.execute(
-        """CREATE TABLE sync_consolidations(
+    conn.execute("""CREATE TABLE sync_consolidations(
             consolidation_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
             canonical_mo_observation_id INTEGER,
@@ -7783,8 +9480,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             UNIQUE(profile_id,consolidation_id),
             CHECK (canonical_mo_observation_id IS NOT NULL
-                   OR canonical_inat_observation_id IS NOT NULL))"""
-    )
+                   OR canonical_inat_observation_id IS NOT NULL))""")
     conn.execute(
         "CREATE INDEX idx_consolidations_profile ON sync_consolidations(profile_id,state)"
     )
@@ -7799,8 +9495,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
         "WHERE state IN ('draft','confirmed') AND canonical_inat_observation_id IS NOT NULL"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_consolidation_members(
+    conn.execute("""CREATE TABLE sync_consolidation_members(
             consolidation_member_id INTEGER PRIMARY KEY,
             consolidation_id INTEGER NOT NULL,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
@@ -7818,15 +9513,13 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
             -- Deliberately global per (profile,site,observation), NOT scoped to
             -- one consolidation_id: schema-level backstop for M2's "must not
             -- belong to another unresolved consolidation" eligibility rule.
-            UNIQUE(profile_id,site,observation_id))"""
-    )
+            UNIQUE(profile_id,site,observation_id))""")
     conn.execute(
         "CREATE INDEX idx_consolidation_members_consolidation "
         "ON sync_consolidation_members(consolidation_id)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_consolidation_attempts(
+    conn.execute("""CREATE TABLE sync_consolidation_attempts(
             attempt_id INTEGER PRIMARY KEY,
             consolidation_id INTEGER NOT NULL,
             profile_id INTEGER NOT NULL REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
@@ -7856,8 +9549,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
                 REFERENCES sync_action_groups(profile_id,action_group_id) ON DELETE RESTRICT,
             FOREIGN KEY(profile_id,consolidation_id)
                 REFERENCES sync_consolidations(profile_id,consolidation_id) ON DELETE RESTRICT,
-            UNIQUE(profile_id,correlation_marker))"""
-    )
+            UNIQUE(profile_id,correlation_marker))""")
     conn.execute(
         "CREATE INDEX idx_consolidation_attempts_consolidation "
         "ON sync_consolidation_attempts(profile_id,consolidation_id)"
@@ -7867,8 +9559,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
         "ON sync_consolidation_attempts(profile_id,action_group_id)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_consolidation_items(
+    conn.execute("""CREATE TABLE sync_consolidation_items(
             consolidation_item_id INTEGER PRIMARY KEY,
             attempt_id INTEGER NOT NULL REFERENCES sync_consolidation_attempts(attempt_id) ON DELETE CASCADE,
             source_site TEXT NOT NULL CHECK(source_site IN ('inat','mo')),
@@ -7884,8 +9575,7 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
                 CHECK(state IN ('pending','succeeded','failed','outcome_unknown','disabled')),
             disabled_reason TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            UNIQUE(attempt_id,item_type,source_item_identity))"""
-    )
+            UNIQUE(attempt_id,item_type,source_item_identity))""")
     conn.execute(
         "CREATE INDEX idx_consolidation_items_attempt ON sync_consolidation_items(attempt_id)"
     )
@@ -7915,8 +9605,7 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         "ALTER TABLE sync_action_snapshot_rows "
         "RENAME TO sync_action_snapshot_rows_v11"
     )
-    conn.execute(
-        """CREATE TABLE sync_action_snapshot_rows(
+    conn.execute("""CREATE TABLE sync_action_snapshot_rows(
             snapshot_row_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL
                 REFERENCES sync_profiles(profile_id) ON DELETE CASCADE,
@@ -7932,8 +9621,7 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(profile_id,action_group_id)
                 REFERENCES sync_action_groups(profile_id,action_group_id)
                 ON DELETE CASCADE,
-            UNIQUE(profile_id,action_group_id,site,remote_row_id,remote_row_uuid))"""
-    )
+            UNIQUE(profile_id,action_group_id,site,remote_row_id,remote_row_uuid))""")
     conn.execute(
         "INSERT INTO sync_action_snapshot_rows("
         "snapshot_row_id,profile_id,action_group_id,site,observation_id,"
@@ -7964,8 +9652,7 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         "ADD COLUMN reviewed_evidence_graph_fingerprint "
         "TEXT NOT NULL DEFAULT ''"
     )
-    conn.execute(
-        """CREATE TABLE sync_consolidation_attempt_members(
+    conn.execute("""CREATE TABLE sync_consolidation_attempt_members(
             attempt_id INTEGER NOT NULL
                 REFERENCES sync_consolidation_attempts(attempt_id) ON DELETE CASCADE,
             consolidation_member_id INTEGER NOT NULL
@@ -7976,14 +9663,12 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
             reviewed_record_fingerprint TEXT NOT NULL,
             preflight_record_fingerprint TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            PRIMARY KEY(attempt_id,consolidation_member_id))"""
-    )
+            PRIMARY KEY(attempt_id,consolidation_member_id))""")
     conn.execute(
         "CREATE INDEX idx_consolidation_attempt_members_member "
         "ON sync_consolidation_attempt_members(consolidation_member_id,attempt_id)"
     )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_identity
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_identity
         BEFORE INSERT ON sync_consolidation_attempt_members
         WHEN NOT EXISTS (
             SELECT 1
@@ -7997,17 +9682,13 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'attempt member must belong to the attempt consolidation');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_immutable
         BEFORE UPDATE ON sync_consolidation_attempt_members
         BEGIN
             SELECT RAISE(ABORT, 'attempt member evidence is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TABLE sync_consolidation_evidence(
+        END""")
+    conn.execute("""CREATE TABLE sync_consolidation_evidence(
             consolidation_evidence_id INTEGER PRIMARY KEY,
             attempt_id INTEGER NOT NULL,
             left_member_id INTEGER NOT NULL,
@@ -8025,19 +9706,16 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
                 REFERENCES sync_consolidation_attempt_members(
                     attempt_id,consolidation_member_id) ON DELETE CASCADE,
             CHECK(left_member_id < right_member_id),
-            UNIQUE(attempt_id,left_member_id,right_member_id,evidence_type))"""
-    )
+            UNIQUE(attempt_id,left_member_id,right_member_id,evidence_type))""")
     conn.execute(
         "CREATE INDEX idx_consolidation_evidence_attempt "
         "ON sync_consolidation_evidence(attempt_id,left_member_id,right_member_id)"
     )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_evidence_immutable
+    conn.execute("""CREATE TRIGGER trg_consolidation_evidence_immutable
         BEFORE UPDATE ON sync_consolidation_evidence
         BEGIN
             SELECT RAISE(ABORT, 'consolidation evidence is immutable');
-        END"""
-    )
+        END""")
 
     attempts = conn.execute(
         "SELECT * FROM sync_consolidation_attempts ORDER BY attempt_id"
@@ -8050,7 +9728,8 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         first_attempt_by_consolidation.setdefault(consolidation_id, attempt_id)
         if str(attempt["state"]) == "succeeded":
             successful_attempt_by_consolidation[consolidation_id] = (
-                attempt_id, str(attempt["updated_at"]),
+                attempt_id,
+                str(attempt["updated_at"]),
             )
         donor_full = {
             (str(item["site"]), int(item["observation_id"])): str(item["fingerprint"])
@@ -8058,9 +9737,7 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         }
         donor_preflight = {
             (str(item["site"]), int(item["observation_id"])): str(item["fingerprint"])
-            for item in json.loads(
-                str(attempt["donor_preflight_fingerprints"] or "[]")
-            )
+            for item in json.loads(str(attempt["donor_preflight_fingerprints"] or "[]"))
         }
         members = conn.execute(
             "SELECT * FROM sync_consolidation_members WHERE consolidation_id=? "
@@ -8088,8 +9765,11 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
                     "reviewed_record_fingerprint,preflight_record_fingerprint,created_at"
                     ") VALUES(?,?,?,?,?,?)",
                     (
-                        attempt_id, int(member["consolidation_member_id"]),
-                        participation_role, reviewed, preflight,
+                        attempt_id,
+                        int(member["consolidation_member_id"]),
+                        participation_role,
+                        reviewed,
+                        preflight,
                         str(attempt["created_at"]),
                     ),
                 )
@@ -8099,9 +9779,10 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
             "WHERE consolidation_id=?",
             (attempt_id, consolidation_id),
         )
-    for consolidation_id, (attempt_id, superseded_at) in (
-        successful_attempt_by_consolidation.items()
-    ):
+    for consolidation_id, (
+        attempt_id,
+        superseded_at,
+    ) in successful_attempt_by_consolidation.items():
         conn.execute(
             "UPDATE sync_consolidation_members SET superseded_by_attempt_id=?,"
             "superseded_at=? WHERE consolidation_id=? AND role='donor' "
@@ -8123,16 +9804,15 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
         "ON sync_consolidations(profile_id,canonical_inat_observation_id) "
         "WHERE state!='cancelled' AND canonical_inat_observation_id IS NOT NULL"
     )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_member_identity_immutable
+    conn.execute("""CREATE TRIGGER trg_consolidation_member_identity_immutable
         BEFORE UPDATE OF consolidation_id,profile_id,site,observation_id,role,
             remote_uuid,reviewed_record_fingerprint,preflight_record_fingerprint,
             created_at,added_by_attempt_id
         ON sync_consolidation_members
         BEGIN
             SELECT RAISE(ABORT, 'stable consolidation member identity is immutable');
-        END"""
-    )
+        END""")
+
 
 def _migration_v13(conn: sqlite3.Connection) -> None:
     """Finalized baselines and attempt-scoped proposed consolidation donors.
@@ -8154,8 +9834,7 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
         "REFERENCES sync_consolidation_attempts(attempt_id)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_consolidation_attempt_members_v13(
+    conn.execute("""CREATE TABLE sync_consolidation_attempt_members_v13(
             attempt_member_id INTEGER PRIMARY KEY,
             attempt_id INTEGER NOT NULL
                 REFERENCES sync_consolidation_attempts(attempt_id) ON DELETE CASCADE,
@@ -8174,8 +9853,7 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
             reviewed_account_identity TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             UNIQUE(attempt_id,site,observation_id),
-            UNIQUE(attempt_id,attempt_member_id))"""
-    )
+            UNIQUE(attempt_id,attempt_member_id))""")
     conn.execute(
         "INSERT INTO sync_consolidation_attempt_members_v13("
         "attempt_id,stable_member_id,site,observation_id,remote_uuid,"
@@ -8228,12 +9906,14 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
         "JOIN sync_consolidation_attempt_members_v13 ram "
         "ON ram.attempt_id=e.attempt_id AND ram.stable_member_id=e.right_member_id"
     )
-    old_evidence_count = int(conn.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_evidence"
-    ).fetchone()[0])
-    new_evidence_count = int(conn.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_evidence_v13"
-    ).fetchone()[0])
+    old_evidence_count = int(
+        conn.execute("SELECT COUNT(*) FROM sync_consolidation_evidence").fetchone()[0]
+    )
+    new_evidence_count = int(
+        conn.execute("SELECT COUNT(*) FROM sync_consolidation_evidence_v13").fetchone()[
+            0
+        ]
+    )
     if old_evidence_count != new_evidence_count:
         raise RuntimeError(
             "v13 migration could not preserve every consolidation evidence edge"
@@ -8268,8 +9948,7 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
         "ON sync_consolidation_evidence("
         "attempt_id,left_attempt_member_id,right_attempt_member_id)"
     )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_identity
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_identity
         BEFORE INSERT ON sync_consolidation_attempt_members
         WHEN NEW.stable_member_id IS NOT NULL AND NOT EXISTS (
             SELECT 1
@@ -8285,22 +9964,17 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'attempt member must match its stable consolidation member');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_immutable
         BEFORE UPDATE ON sync_consolidation_attempt_members
         BEGIN
             SELECT RAISE(ABORT, 'attempt member evidence is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_evidence_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_evidence_immutable
         BEFORE UPDATE ON sync_consolidation_evidence
         BEGIN
             SELECT RAISE(ABORT, 'consolidation evidence is immutable');
-        END"""
-    )
+        END""")
 
     # Establish the ordered baseline chain only from attempts whose local
     # finalization action is durably succeeded.
@@ -8379,7 +10053,8 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
             "WHERE consolidation_member_id=? AND role='donor' "
             "AND local_state='superseded'",
             (
-                int(finalized["attempt_id"]), str(finalized["updated_at"]),
+                int(finalized["attempt_id"]),
+                str(finalized["updated_at"]),
                 member_id,
             ),
         )
@@ -8413,25 +10088,23 @@ def _migration_v13(conn: sqlite3.Connection) -> None:
             (member_id,),
         )
         if cursor.rowcount != 1:
-            raise RuntimeError("v13 migration could not release a legacy donor proposal")
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_immutable
+            raise RuntimeError(
+                "v13 migration could not release a legacy donor proposal"
+            )
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_immutable
         BEFORE UPDATE ON sync_consolidation_attempt_members
         BEGIN
             SELECT RAISE(ABORT, 'attempt member evidence is immutable');
-        END"""
-    )
+        END""")
 
     # A pending or outcome-unknown proposal is globally reserved without being
     # mislabeled as admitted stable membership.
-    conn.execute(
-        """CREATE VIEW sync_unresolved_consolidation_proposals AS
+    conn.execute("""CREATE VIEW sync_unresolved_consolidation_proposals AS
         SELECT a.profile_id,a.consolidation_id,am.site,am.observation_id,a.state
         FROM sync_consolidation_attempt_members am
         JOIN sync_consolidation_attempts a ON a.attempt_id=am.attempt_id
         WHERE am.participation_role='new_donor'
-          AND a.state IN ('pending','outcome_unknown')"""
-    )
+          AND a.state IN ('pending','outcome_unknown')""")
 
 
 def _migration_v14(conn: sqlite3.Connection) -> None:
@@ -8465,8 +10138,7 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
             raise RuntimeError(
                 "v14 migration could not establish an attempt identity fingerprint"
             )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_immutable
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_immutable
         BEFORE UPDATE OF attempt_id,site,observation_id,remote_uuid,
             participation_role,proposal_state,reviewed_record_fingerprint,
             preflight_record_fingerprint,reviewed_account_identity,created_at,
@@ -8474,8 +10146,7 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
         ON sync_consolidation_attempt_members
         BEGIN
             SELECT RAISE(ABORT, 'attempt member evidence is immutable');
-        END"""
-    )
+        END""")
 
     conn.execute(
         "ALTER TABLE sync_consolidation_members ADD COLUMN "
@@ -8510,8 +10181,10 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
             "AND am.participation_role='new_donor' "
             "AND a.profile_id=? AND a.consolidation_id=?",
             (
-                int(admission_attempt), str(donor["site"]),
-                int(donor["observation_id"]), int(donor["profile_id"]),
+                int(admission_attempt),
+                str(donor["site"]),
+                int(donor["observation_id"]),
+                int(donor["profile_id"]),
                 int(donor["consolidation_id"]),
             ),
         ).fetchone()
@@ -8524,14 +10197,14 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
             "SET added_by_attempt_id=?,admitted_from_attempt_member_id=? "
             "WHERE consolidation_member_id=? AND role='donor'",
             (
-                int(admission_attempt), int(snapshot["attempt_member_id"]),
+                int(admission_attempt),
+                int(snapshot["attempt_member_id"]),
                 int(donor["consolidation_member_id"]),
             ),
         )
         if cursor.rowcount != 1:
             raise RuntimeError("v14 migration could not link donor admission")
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_member_admission_insert
+    conn.execute("""CREATE TRIGGER trg_consolidation_member_admission_insert
         BEFORE INSERT ON sync_consolidation_members
         WHEN NEW.role='donor' AND (
             NEW.added_by_attempt_id IS NULL
@@ -8554,10 +10227,8 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'stable donor must match its admitting attempt member');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_member_admission_update
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_member_admission_update
         BEFORE UPDATE OF added_by_attempt_id,admitted_from_attempt_member_id,
             profile_id,consolidation_id,site,observation_id,role
         ON sync_consolidation_members
@@ -8582,10 +10253,8 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'stable donor must match its admitting attempt member');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_member_identity_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_member_identity_immutable
         BEFORE UPDATE OF consolidation_id,profile_id,site,observation_id,role,
             remote_uuid,reviewed_record_fingerprint,preflight_record_fingerprint,
             created_at,added_by_attempt_id,originally_proposed_by_attempt_id,
@@ -8593,8 +10262,7 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
         ON sync_consolidation_members
         BEGIN
             SELECT RAISE(ABORT, 'stable consolidation member identity is immutable');
-        END"""
-    )
+        END""")
 
 
 def _migration_v15(conn: sqlite3.Connection) -> None:
@@ -8632,7 +10300,9 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
             "SET reviewed_owner_account_id=?,reviewed_owner_login=?,"
             "reviewed_identity_fingerprint=? WHERE attempt_member_id=?",
             (
-                owner_account_id, owner_login, fingerprint,
+                owner_account_id,
+                owner_login,
+                fingerprint,
                 int(row["attempt_member_id"]),
             ),
         )
@@ -8640,8 +10310,7 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
             raise RuntimeError(
                 "v15 migration could not establish stable attempt ownership"
             )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_attempt_member_immutable
+    conn.execute("""CREATE TRIGGER trg_consolidation_attempt_member_immutable
         BEFORE UPDATE OF attempt_id,site,observation_id,remote_uuid,
             participation_role,proposal_state,reviewed_record_fingerprint,
             preflight_record_fingerprint,reviewed_account_identity,created_at,
@@ -8650,8 +10319,7 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
         ON sync_consolidation_attempt_members
         BEGIN
             SELECT RAISE(ABORT, 'attempt member evidence is immutable');
-        END"""
-    )
+        END""")
 
     conn.execute(
         "ALTER TABLE sync_consolidation_members ADD COLUMN "
@@ -8684,8 +10352,7 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
                 "v15 migration could not establish stable numeric ownership"
             )
     conn.execute("DROP TRIGGER trg_consolidation_member_identity_immutable")
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_member_identity_immutable
+    conn.execute("""CREATE TRIGGER trg_consolidation_member_identity_immutable
         BEFORE UPDATE OF consolidation_id,profile_id,site,observation_id,role,
             remote_uuid,reviewed_record_fingerprint,preflight_record_fingerprint,
             created_at,added_by_attempt_id,originally_proposed_by_attempt_id,
@@ -8693,8 +10360,7 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
         ON sync_consolidation_members
         BEGIN
             SELECT RAISE(ABORT, 'stable consolidation member identity is immutable');
-        END"""
-    )
+        END""")
     _install_v15_baseline_guards(conn)
 
 
@@ -8748,9 +10414,7 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         "OR am.participation_role!='new_donor') LIMIT 1"
     ).fetchone()
     if invalid_admission is not None:
-        raise RuntimeError(
-            "v15 migration found invalid admitted-donor provenance"
-        )
+        raise RuntimeError("v15 migration found invalid admitted-donor provenance")
 
     current_condition = """
         NEW.current_finalized_attempt_id IS NOT NULL AND NOT EXISTS (
@@ -8773,17 +10437,14 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         "BEFORE UPDATE OF current_finalized_attempt_id,profile_id,consolidation_id",
     ):
         suffix = "insert" if event == "BEFORE INSERT" else "update"
-        conn.execute(
-            f"""CREATE TRIGGER trg_consolidation_current_baseline_{suffix}
+        conn.execute(f"""CREATE TRIGGER trg_consolidation_current_baseline_{suffix}
             {event} ON sync_consolidations
             WHEN {current_condition}
             BEGIN
                 SELECT RAISE(ABORT,
                     'current baseline must be a successfully finalized attempt');
-            END"""
-        )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_current_baseline_monotonic
+            END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_current_baseline_monotonic
         BEFORE UPDATE OF current_finalized_attempt_id
         ON sync_consolidations
         WHEN OLD.current_finalized_attempt_id IS NOT NULL AND (
@@ -8793,8 +10454,7 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'current finalized baseline can only advance');
-        END"""
-    )
+        END""")
 
     base_condition = """
         NOT EXISTS (
@@ -8827,27 +10487,22 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
               )
         )
     """
-    conn.execute(
-        f"""CREATE TRIGGER trg_consolidation_attempt_base_insert
+    conn.execute(f"""CREATE TRIGGER trg_consolidation_attempt_base_insert
         AFTER INSERT ON sync_consolidation_attempts
         WHEN {base_condition}
         BEGIN
             SELECT RAISE(ABORT,
                 'attempt base must equal its consolidation current baseline');
-        END"""
-    )
-    conn.execute(
-        f"""CREATE TRIGGER trg_consolidation_attempt_base_update
+        END""")
+    conn.execute(f"""CREATE TRIGGER trg_consolidation_attempt_base_update
         BEFORE UPDATE OF base_finalized_attempt_id,profile_id,consolidation_id
         ON sync_consolidation_attempts
         WHEN {base_condition}
         BEGIN
             SELECT RAISE(ABORT,
                 'attempt base must equal its consolidation current baseline');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_current_attempt_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_current_attempt_immutable
         BEFORE UPDATE OF profile_id,consolidation_id,state,action_group_id
         ON sync_consolidation_attempts
         WHEN (
@@ -8868,10 +10523,8 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'a current finalized baseline attempt is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_current_finalize_action_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_current_finalize_action_immutable
         BEFORE UPDATE OF profile_id,action_group_id,action_type,state
         ON sync_actions
         WHEN OLD.action_type='consolidation_finalize'
@@ -8900,10 +10553,8 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'a current baseline finalization action is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_consolidation_current_finalize_action_delete
+        END""")
+    conn.execute("""CREATE TRIGGER trg_consolidation_current_finalize_action_delete
         BEFORE DELETE ON sync_actions
         WHEN OLD.action_type='consolidation_finalize'
           AND OLD.state='succeeded'
@@ -8925,8 +10576,7 @@ def _install_v15_baseline_guards(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'a current baseline finalization action is immutable');
-        END"""
-    )
+        END""")
 
 
 def _migration_v16(conn: sqlite3.Connection) -> None:
@@ -8966,8 +10616,7 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
         "canonical_destination_inat_id INTEGER"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_deletion_attempts(
+    conn.execute("""CREATE TABLE sync_deletion_attempts(
             deletion_attempt_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL
                 REFERENCES sync_profiles(profile_id) ON DELETE RESTRICT,
@@ -8995,15 +10644,13 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(base_finalized_attempt_id)
                 REFERENCES sync_consolidation_attempts(attempt_id)
                 ON DELETE RESTRICT,
-            UNIQUE(profile_id,action_group_id))"""
-    )
+            UNIQUE(profile_id,action_group_id))""")
     conn.execute(
         "CREATE INDEX idx_deletion_attempts_consolidation "
         "ON sync_deletion_attempts(profile_id,consolidation_id,state)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_deletion_items(
+    conn.execute("""CREATE TABLE sync_deletion_items(
             deletion_item_id INTEGER PRIMARY KEY,
             deletion_attempt_id INTEGER NOT NULL
                 REFERENCES sync_deletion_attempts(deletion_attempt_id)
@@ -9030,15 +10677,13 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL,
             UNIQUE(deletion_attempt_id,stable_member_id),
             UNIQUE(deletion_attempt_id,ordinal),
-            UNIQUE(action_id))"""
-    )
+            UNIQUE(action_id))""")
     conn.execute(
         "CREATE INDEX idx_deletion_items_member "
         "ON sync_deletion_items(stable_member_id,state)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_deletion_actions(
+    conn.execute("""CREATE TABLE sync_deletion_actions(
             deletion_action_id INTEGER PRIMARY KEY,
             profile_id INTEGER NOT NULL
                 REFERENCES sync_profiles(profile_id) ON DELETE RESTRICT,
@@ -9074,8 +10719,7 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL,
             UNIQUE(profile_id,deletion_action_id),
             UNIQUE(deletion_attempt_id,ordinal),
-            UNIQUE(request_correlation))"""
-    )
+            UNIQUE(request_correlation))""")
     conn.execute(
         "CREATE UNIQUE INDEX uq_unresolved_deletion_member "
         "ON sync_deletion_actions(profile_id,site,observation_id) "
@@ -9087,8 +10731,7 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
         "ON sync_deletion_actions(profile_id,state,created_at)"
     )
 
-    conn.execute(
-        """CREATE TABLE sync_deletion_parity_items(
+    conn.execute("""CREATE TABLE sync_deletion_parity_items(
             deletion_parity_item_id INTEGER PRIMARY KEY,
             deletion_item_id INTEGER NOT NULL
                 REFERENCES sync_deletion_items(deletion_item_id)
@@ -9106,11 +10749,9 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
             safe_summary TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             UNIQUE(deletion_item_id,ordinal),
-            UNIQUE(deletion_item_id,source_content_type,source_content_identity))"""
-    )
+            UNIQUE(deletion_item_id,source_content_type,source_content_identity))""")
 
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_attempt_review_immutable
+    conn.execute("""CREATE TRIGGER trg_deletion_attempt_review_immutable
         BEFORE UPDATE OF profile_id,consolidation_id,base_finalized_attempt_id,
             action_group_id,supersedes_attempt_id,
             canonical_stable_identity_fingerprint,
@@ -9120,10 +10761,8 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
         ON sync_deletion_attempts
         BEGIN
             SELECT RAISE(ABORT, 'deletion review is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_item_review_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_item_review_immutable
         BEFORE UPDATE OF deletion_attempt_id,stable_member_id,ordinal,site,
             observation_id,remote_uuid,reviewed_remote_record_fingerprint,
             reviewed_content_inventory_fingerprint,reviewed_parity_fingerprint,
@@ -9132,22 +10771,17 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
         ON sync_deletion_items
         BEGIN
             SELECT RAISE(ABORT, 'deletion item review is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_parity_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_parity_immutable
         BEFORE UPDATE ON sync_deletion_parity_items
         BEGIN
             SELECT RAISE(ABORT, 'deletion parity proof is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_parity_no_delete
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_parity_no_delete
         BEFORE DELETE ON sync_deletion_parity_items
         BEGIN
             SELECT RAISE(ABORT, 'deletion parity history cannot be removed');
-        END"""
-    )
+        END""")
 
 
 def _migration_v17(conn: sqlite3.Connection) -> None:
@@ -9163,8 +10797,7 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
             "v17 migration found multiple unresolved deletion attempts for "
             "one consolidation; manual ledger review is required"
         )
-    invalid_tombstone = conn.execute(
-        """SELECT 1
+    invalid_tombstone = conn.execute("""SELECT 1
         FROM sync_consolidation_members m
         WHERE m.remote_state='deleted' AND NOT EXISTS (
             SELECT 1
@@ -9191,8 +10824,7 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
                     ELSE 'mo_observation_delete' END
               AND act.write_started_at IS NOT NULL
               AND act.verification_state='verified_deleted'
-        ) LIMIT 1"""
-    ).fetchone()
+        ) LIMIT 1""").fetchone()
     if invalid_tombstone is not None:
         raise RuntimeError(
             "v17 migration found a remote tombstone without exact deletion "
@@ -9204,8 +10836,7 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
         "WHERE state IN ('pending','partial','outcome_unknown')"
     )
 
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_attempt_blocks_phase2b_activity
+    conn.execute("""CREATE TRIGGER trg_deletion_attempt_blocks_phase2b_activity
         BEFORE INSERT ON sync_deletion_attempts
         WHEN EXISTS (
             SELECT 1 FROM sync_consolidation_attempts a
@@ -9227,10 +10858,8 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'Phase 2B activity blocks deletion journaling');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_phase2b_attempt_blocks_deletion_activity
+        END""")
+    conn.execute("""CREATE TRIGGER trg_phase2b_attempt_blocks_deletion_activity
         BEFORE INSERT ON sync_consolidation_attempts
         WHEN EXISTS (
             SELECT 1 FROM sync_deletion_attempts da
@@ -9241,10 +10870,8 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'Phase 2C deletion activity blocks Phase 2B journaling');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_blocks_baseline_advance
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_blocks_baseline_advance
         BEFORE UPDATE OF current_finalized_attempt_id
         ON sync_consolidations
         WHEN NEW.current_finalized_attempt_id IS NOT OLD.current_finalized_attempt_id
@@ -9257,11 +10884,9 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT,
                 'Phase 2C deletion activity blocks canonical baseline changes');
-        END"""
-    )
+        END""")
 
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_tombstone_exact_provenance
+    conn.execute("""CREATE TRIGGER trg_deletion_tombstone_exact_provenance
         BEFORE UPDATE OF remote_state,deleted_by_deletion_attempt_id,
             deleted_by_deletion_item_id
         ON sync_consolidation_members
@@ -9306,20 +10931,16 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
             THEN RAISE(ABORT,
                 'deleted member provenance does not match exact delete chain')
             END;
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_action_identity_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_action_identity_immutable
         BEFORE UPDATE OF profile_id,deletion_attempt_id,deletion_item_id,
             ordinal,action_type,site,observation_id,remote_uuid,
             request_correlation,reviewed_identity_fingerprint,created_at
         ON sync_deletion_actions
         BEGIN
             SELECT RAISE(ABORT, 'deletion action identity is immutable');
-        END"""
-    )
-    conn.execute(
-        """CREATE TRIGGER trg_deletion_tombstone_provenance_immutable
+        END""")
+    conn.execute("""CREATE TRIGGER trg_deletion_tombstone_provenance_immutable
         BEFORE UPDATE OF remote_state,deleted_remotely_at,
             deleted_by_deletion_attempt_id,deleted_by_deletion_item_id,
             last_deletion_reviewed_record_fingerprint,
@@ -9341,8 +10962,7 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
         )
         BEGIN
             SELECT RAISE(ABORT, 'remote deletion tombstone is immutable');
-        END"""
-    )
+        END""")
 
 
 def _migration_v18(conn: sqlite3.Connection) -> None:

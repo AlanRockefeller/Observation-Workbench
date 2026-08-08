@@ -1,4 +1,5 @@
 """Dialog for manual browser-based iNaturalist API-token authentication."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -59,6 +60,7 @@ class AuthDialog(QDialog):
         if raw.startswith("{"):
             try:
                 import json
+
                 parsed = json.loads(raw)
                 if isinstance(parsed.get("api_token"), str):
                     return parsed["api_token"].strip()

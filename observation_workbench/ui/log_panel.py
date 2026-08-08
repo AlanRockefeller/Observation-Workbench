@@ -10,6 +10,7 @@ Usage:
     panel = LogPanel(handler, parent=main_window)
     main_window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, panel)
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,8 +18,12 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import (
-    QDockWidget, QHBoxLayout, QPlainTextEdit, QPushButton,
-    QVBoxLayout, QWidget,
+    QDockWidget,
+    QHBoxLayout,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 

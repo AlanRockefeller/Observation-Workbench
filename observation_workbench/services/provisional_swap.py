@@ -1,4 +1,5 @@
 """Helpers for swapping Provisional Species Name observation field values."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -143,9 +144,13 @@ def swap_provisional_name(
             break
         if ref.field_id is None:
             result.skipped += 1
-            message = f"Skipped observation {ref.observation_id} (no editable field ID)."
+            message = (
+                f"Skipped observation {ref.observation_id} (no editable field ID)."
+            )
             if progress:
-                progress(index, total, result.updated, result.skipped, result.failed, message)
+                progress(
+                    index, total, result.updated, result.skipped, result.failed, message
+                )
             continue
         try:
             client.update_observation_field_value(
@@ -162,7 +167,9 @@ def swap_provisional_name(
             message = f"Observation {ref.observation_id}: {exc}"
             result.errors.append(message)
         if progress:
-            progress(index, total, result.updated, result.skipped, result.failed, message)
+            progress(
+                index, total, result.updated, result.skipped, result.failed, message
+            )
     return result
 
 
@@ -202,10 +209,17 @@ def _extract_provisional_field_value(
         if not isinstance(item, dict):
             continue
         obs_field = item.get("observation_field") or item.get("field") or {}
-        field_name = item.get("name") or item.get("field_name") or obs_field.get("name") or ""
+        field_name = (
+            item.get("name") or item.get("field_name") or obs_field.get("name") or ""
+        )
         if field_name.casefold() != wanted_field:
             continue
-        value = item.get("value") or item.get("display_value") or item.get("value_text") or ""
+        value = (
+            item.get("value")
+            or item.get("display_value")
+            or item.get("value_text")
+            or ""
+        )
         # Match case-insensitively to mirror iNaturalist's field-value search;
         # an exact-case compare would push valid matches into the missing-ids
         # re-fetch and ultimately drop them.

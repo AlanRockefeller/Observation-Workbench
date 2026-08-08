@@ -6,6 +6,7 @@ Loading indicator shown while image is fetching.
 
 Waterfall loading: original → large → medium (via ImagePrefetcher).
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,17 +15,25 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
-    QLabel, QSizePolicy, QVBoxLayout, QWidget,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
 log = logging.getLogger(__name__)
 
-_CLICK_THRESHOLD = 5  # max manhattan distance (px) between press and release to count as a click
+_CLICK_THRESHOLD = (
+    5  # max manhattan distance (px) between press and release to count as a click
+)
 
 
 class _ClickableGraphicsView(QGraphicsView):
     """QGraphicsView that emits `clicked` when the user clicks without dragging."""
+
     clicked = Signal()
 
     def __init__(self, scene, parent=None):
@@ -76,7 +85,9 @@ class ViewerPanel(QWidget):
         self._view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self._view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self._view.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+        )
         self._view.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self._view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -91,7 +102,9 @@ class ViewerPanel(QWidget):
         layout.addWidget(self._status_label)
 
         self._pixmap_item = QGraphicsPixmapItem()
-        self._pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self._pixmap_item.setTransformationMode(
+            Qt.TransformationMode.SmoothTransformation
+        )
         self._scene.addItem(self._pixmap_item)
 
     def set_photo_info(self, idx: int, total: int) -> None:
@@ -141,11 +154,15 @@ class ViewerPanel(QWidget):
         if not self._pixmap or self._pixmap.isNull():
             return
         if self._fit_mode:
-            self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._view.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
             self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self._view.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
         else:
-            self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._view.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
             self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self._view.resetTransform()
 

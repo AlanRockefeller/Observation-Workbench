@@ -8,6 +8,7 @@ Each Mushroom Observer ``Sequence`` row is modelled as one composite record so
 that bases, archive, and accession — which belong to the same MO record — are
 never split apart when proposing or submitting a repair.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,19 +20,38 @@ from observation_workbench.api.client import INatAPIError, INatClient
 
 from .db import ReconciliationDB
 from .inat_reader import (
-    ACCESSION_FIELD_NAME, INatReconciliationReader, ITS_FIELD_NAME,
+    ACCESSION_FIELD_NAME,
+    INatReconciliationReader,
+    ITS_FIELD_NAME,
 )
-from .mo_client import MOAPIError, MOClient, ReconciliationCancelled, results_from_payload
+from .mo_client import (
+    MOAPIError,
+    MOClient,
+    ReconciliationCancelled,
+    results_from_payload,
+)
 from .mo_parsing import mo_record_fingerprint, parse_mo_observation, positive_int
 from .normalization import (
-    MO_GENBANK_ARCHIVE, accession_namespace, is_genbank_accession,
-    is_mo_writable_archive, normalize_accession, normalize_archive,
-    normalize_sequence, public_fingerprint, sequence_digest,
+    MO_GENBANK_ARCHIVE,
+    accession_namespace,
+    is_genbank_accession,
+    is_mo_writable_archive,
+    normalize_accession,
+    normalize_archive,
+    normalize_sequence,
+    public_fingerprint,
+    sequence_digest,
 )
 from .specimen_state import evaluate_specimen_state
 from .types import (
-    HydratedObservation, InventoryObservation, ITSActionOption, ITSActionType,
-    ITSComparisonPreview, ITSRecordSnapshot, MOSequenceRecord, ReconciliationProfile,
+    HydratedObservation,
+    InventoryObservation,
+    ITSActionOption,
+    ITSActionType,
+    ITSComparisonPreview,
+    ITSRecordSnapshot,
+    MOSequenceRecord,
+    ReconciliationProfile,
     RemoteSite,
 )
 
@@ -93,8 +113,12 @@ class ITSSyncService:
     """Fresh-read comparison and write service for confirmed pairs only."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
     ) -> None:
@@ -107,7 +131,9 @@ class ITSSyncService:
         self.mo_key_generation_provider = mo_key_generation_provider
 
     def prepare_preview(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> ITSComparisonPreview:
         pair = self._eligible_pair(profile_id, pair_id)
@@ -126,13 +152,17 @@ class ITSSyncService:
         warnings: list[str] = list(live.specimen_warnings)
         if live.specimen_conflict:
             warnings.append(
-                "ITS writes are blocked while specimen evidence conflicts: " + live.specimen_conflict
+                "ITS writes are blocked while specimen evidence conflicts: "
+                + live.specimen_conflict
             )
         options = self._options(profile, live, warnings)
         if not options and not live.specimen_conflict:
-            warnings.append("No safe ITS write is proposed for the current remote state.")
+            warnings.append(
+                "No safe ITS write is proposed for the current remote state."
+            )
         return ITSComparisonPreview(
-            profile_id=profile_id, pair_id=pair_id,
+            profile_id=profile_id,
+            pair_id=pair_id,
             auth_generation=live.auth_generation,
             mo_key_generation=live.mo_key_generation,
             source_fingerprint=_pair_fingerprint(pair),
@@ -144,16 +174,24 @@ class ITSSyncService:
             inat_record_fingerprint=live.inat_record_fingerprint,
             mo_record_fingerprint=live.mo_record_fingerprint,
             specimen_state_fingerprint=live.specimen_state_fingerprint,
-            states=states, inat_records=live.inat_records, mo_records=live.mo_records,
-            options=tuple(options), warnings=tuple(warnings),
+            states=states,
+            inat_records=live.inat_records,
+            mo_records=live.mo_records,
+            options=tuple(options),
+            warnings=tuple(warnings),
         )
 
     def execute_group(
-        self, profile_id: int, group_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        group_id: int,
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> list[ITSActionResult]:
         rows = self.db.action_group_rows(profile_id, group_id)
-        if len(rows) != 1 or not _is_its_action(rows[0].get("action_type") if rows else None):
+        if len(rows) != 1 or not _is_its_action(
+            rows[0].get("action_type") if rows else None
+        ):
             raise ITSSyncError(
                 "An ITS journal group must contain exactly one individually reviewed action.",
                 "invalid_its_group",
@@ -165,20 +203,30 @@ class ITSSyncService:
         if state == "succeeded":
             return []
         if state != "pending":
-            return [ITSActionResult(
-                int(row["action_id"]), state,
-                "This ITS action is terminal; create a fresh comparison for another write.",
-            )]
+            return [
+                ITSActionResult(
+                    int(row["action_id"]),
+                    state,
+                    "This ITS action is terminal; create a fresh comparison for another write.",
+                )
+            ]
         return [self._execute(row, cancelled, progress)]
 
     def verify_unknown(
-        self, profile_id: int, action_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        action_id: int,
+        cancelled: Callable[[], bool],
     ) -> ITSActionResult:
         row = self.db.action(profile_id, action_id)
         if not row or not _is_its_action(row.get("action_type")):
-            raise ITSSyncError("The selected journal row is not an ITS action.", "invalid_its_action")
+            raise ITSSyncError(
+                "The selected journal row is not an ITS action.", "invalid_its_action"
+            )
         if str(row["state"]) != "outcome_unknown":
-            return ITSActionResult(action_id, str(row["state"]), "No unknown outcome remains to verify.")
+            return ITSActionResult(
+                action_id, str(row["state"]), "No unknown outcome remains to verify."
+            )
         profile = self.db.profile(profile_id)
         # Verifying an already-submitted write uses the immutable journaled
         # observation identities, not current pair eligibility. A pair that was
@@ -186,40 +234,59 @@ class ITSSyncService:
         # eligibility gates new writes, not mandatory outcome recovery.
         pair = self._pair_from_journal(profile_id, row)
         try:
-            live = self._refresh(profile, pair, cancelled, require_mo_key=False, verification_only=True)
+            live = self._refresh(
+                profile, pair, cancelled, require_mo_key=False, verification_only=True
+            )
         except Exception:
             return ITSActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "Destination reread is still unavailable; the action was not retried.",
             )
         outcome = self._classify_unknown(row, live)
         if outcome == "succeeded":
             # _finish_success rebuilds evidence and resolves the stale requirement.
             self._finish_success(row, live, verification_state="verified_after_unknown")
-            return ITSActionResult(action_id, "succeeded", "Verified the prior submission without retrying it.")
+            return ITSActionResult(
+                action_id,
+                "succeeded",
+                "Verified the prior submission without retrying it.",
+            )
         # A possibly written group whose result is not a verified success keeps a
         # visible ITS refresh requirement.
         self.db.mark_its_reconciliation_stale(profile_id, int(row["action_group_id"]))
         if outcome == "failed":
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="verification",
-                error_code="verified_not_applied", verification_state="verified_not_applied",
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
+                error_code="verified_not_applied",
+                verification_state="verified_not_applied",
             )
             return ITSActionResult(
-                action_id, "failed",
+                action_id,
+                "failed",
                 "The destination was reread; it is exactly unchanged and the write was not applied.",
             )
         # Destination changed but the requested result cannot be proven.
         self.db.finish_action(
-            profile_id, action_id, "outcome_unknown", phase="verification",
-            error_code="changed_not_proven", verification_state="changed_not_proven",
+            profile_id,
+            action_id,
+            "outcome_unknown",
+            phase="verification",
+            error_code="changed_not_proven",
+            verification_state="changed_not_proven",
         )
         return ITSActionResult(
-            action_id, "outcome_unknown",
+            action_id,
+            "outcome_unknown",
             "The destination changed but does not prove this write; run a fresh ITS comparison.",
         )
 
-    def _pair_from_journal(self, profile_id: int, row: dict[str, Any]) -> dict[str, Any]:
+    def _pair_from_journal(
+        self, profile_id: int, row: dict[str, Any]
+    ) -> dict[str, Any]:
         """Build a pair view from immutable journaled IDs, not current eligibility."""
         current = self.db.pair_detail(profile_id, int(row["pair_id"])) or {}
         return {
@@ -242,14 +309,18 @@ class ITSSyncService:
         return "unknown"
 
     def _execute(
-        self, row: dict[str, Any], cancelled: Callable[[], bool],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> ITSActionResult:
         profile_id = int(row["profile_id"])
         action_id = int(row["action_id"])
         if not self.db.claim_action(profile_id, action_id, "resource_preflight"):
             current = self.db.action(profile_id, action_id) or row
-            return ITSActionResult(action_id, str(current["state"]), "The ITS action is no longer pending.")
+            return ITSActionResult(
+                action_id, str(current["state"]), "The ITS action is no longer pending."
+            )
         write_started = False
         resolved_success = False
         try:
@@ -260,15 +331,22 @@ class ITSSyncService:
             self._require_current_source(row, pair)
             profile = self.db.profile(profile_id)
             live = self._refresh(
-                profile, pair, cancelled,
+                profile,
+                pair,
+                cancelled,
                 require_mo_key=str(row["site"]) == RemoteSite.MO.value,
             )
             if self._is_satisfied(row, live):
                 self._finish_success(row, live, verification_state="already_correct")
-                return ITSActionResult(action_id, "succeeded", "Destination was already correct; no write was sent.")
+                return ITSActionResult(
+                    action_id,
+                    "succeeded",
+                    "Destination was already correct; no write was sent.",
+                )
             if live.specimen_conflict:
                 raise ITSSyncError(
-                    "Fresh specimen evidence conflicts; no ITS write was sent: " + live.specimen_conflict,
+                    "Fresh specimen evidence conflicts; no ITS write was sent: "
+                    + live.specimen_conflict,
                     "specimen_conflict",
                 )
             if live.mo_unreadable_rows:
@@ -280,8 +358,13 @@ class ITSSyncService:
             self._require_unchanged_context(row, live)
             source = self._current_source(row, live)
             if source is None:
-                raise ITSSyncError("The exact source ITS evidence changed after preview.", "source_changed")
-            if self._destination_fingerprint(row, live) != str(row["destination_preflight_fingerprint"]):
+                raise ITSSyncError(
+                    "The exact source ITS evidence changed after preview.",
+                    "source_changed",
+                )
+            if self._destination_fingerprint(row, live) != str(
+                row["destination_preflight_fingerprint"]
+            ):
                 raise ITSSyncError(
                     "The destination ITS state changed after preview. No write was sent.",
                     "stale_destination",
@@ -306,13 +389,17 @@ class ITSSyncService:
                     )
                 write_started = True
 
-            progress(f"ITS action {action_id}: submitting one explicitly confirmed write")
+            progress(
+                f"ITS action {action_id}: submitting one explicitly confirmed write"
+            )
             write_error: Optional[Exception] = None
             http_status: Optional[int] = None
             server_id = ""
             server_uuid = ""
             try:
-                response = self._write(row, profile, live, source, cancelled, begin_write)
+                response = self._write(
+                    row, profile, live, source, cancelled, begin_write
+                )
                 metadata = getattr(response, "metadata", None)
                 http_status = getattr(metadata, "status_code", None)
                 server_id, server_uuid = _response_identity(response)
@@ -323,106 +410,180 @@ class ITSSyncService:
             progress(f"ITS action {action_id}: verifying destination state")
             try:
                 verified = self._refresh(
-                    profile, pair, lambda: False, require_mo_key=False,
+                    profile,
+                    pair,
+                    lambda: False,
+                    require_mo_key=False,
                     verification_only=True,
                 )
             except Exception:
                 self.db.finish_action(
-                    profile_id, action_id, "outcome_unknown", phase="verification",
-                    error_code="verification_unavailable", http_status=http_status,
-                    verification_state="unavailable", server_row_id=server_id,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    phase="verification",
+                    error_code="verification_unavailable",
+                    http_status=http_status,
+                    verification_state="unavailable",
+                    server_row_id=server_id,
                     server_row_uuid=server_uuid,
                 )
                 return ITSActionResult(
-                    action_id, "outcome_unknown",
+                    action_id,
+                    "outcome_unknown",
                     "The write may have been submitted, but destination verification is unavailable.",
                 )
             if self._is_satisfied(row, verified):
                 self._finish_success(
-                    row, verified, verification_state="verified_final_state",
-                    http_status=http_status, server_id=server_id, server_uuid=server_uuid,
+                    row,
+                    verified,
+                    verification_state="verified_final_state",
+                    http_status=http_status,
+                    server_id=server_id,
+                    server_uuid=server_uuid,
                 )
                 # _finish_success rebuilt evidence and resolved (or re-raised) the
                 # stale requirement; the finally block must not re-open it.
                 resolved_success = True
-                return ITSActionResult(action_id, "succeeded", "Verified the normalized ITS final state.")
-            unchanged = self._destination_fingerprint(row, verified) == str(row["destination_preflight_fingerprint"])
+                return ITSActionResult(
+                    action_id, "succeeded", "Verified the normalized ITS final state."
+                )
+            unchanged = self._destination_fingerprint(row, verified) == str(
+                row["destination_preflight_fingerprint"]
+            )
             if unchanged:
                 self.db.finish_action(
-                    profile_id, action_id, "failed", phase="verification",
-                    error_code="verified_not_applied", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "failed",
+                    phase="verification",
+                    error_code="verified_not_applied",
+                    http_status=http_status,
                     verification_state="verified_not_applied",
                 )
-                return ITSActionResult(action_id, "failed", "Verification shows that the write was not applied.")
-            if write_error is not None and bool(getattr(write_error, "outcome_unknown", False)):
+                return ITSActionResult(
+                    action_id,
+                    "failed",
+                    "Verification shows that the write was not applied.",
+                )
+            if write_error is not None and bool(
+                getattr(write_error, "outcome_unknown", False)
+            ):
                 self.db.finish_action(
-                    profile_id, action_id, "outcome_unknown", phase="verification",
-                    error_code="write_outcome_unknown", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    phase="verification",
+                    error_code="write_outcome_unknown",
+                    http_status=http_status,
                     verification_state="changed_not_proven",
                 )
-                return ITSActionResult(action_id, "outcome_unknown", "Write outcome remains unknown.")
+                return ITSActionResult(
+                    action_id, "outcome_unknown", "Write outcome remains unknown."
+                )
             # The destination changed but does not prove this action; do not mark
             # it failed merely because the desired result is currently absent.
             self.db.finish_action(
-                profile_id, action_id, "outcome_unknown", phase="verification",
-                error_code="changed_not_proven", http_status=http_status,
+                profile_id,
+                action_id,
+                "outcome_unknown",
+                phase="verification",
+                error_code="changed_not_proven",
+                http_status=http_status,
                 verification_state="changed_not_proven",
             )
             return ITSActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "The destination changed but does not prove the requested ITS state; run a fresh comparison.",
             )
         except ReconciliationCancelled:
             self.db.finish_action(
-                profile_id, action_id, "cancelled", phase="resource_preflight",
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="resource_preflight",
                 error_code="user_cancelled",
             )
-            return ITSActionResult(action_id, "cancelled", "Cancelled before an ITS write was sent.")
+            return ITSActionResult(
+                action_id, "cancelled", "Cancelled before an ITS write was sent."
+            )
         except ITSSyncError as exc:
             self.db.finish_action(
-                profile_id, action_id,
+                profile_id,
+                action_id,
                 "outcome_unknown" if write_started else "failed",
                 phase="verification" if write_started else "resource_preflight",
                 error_code=exc.code,
             )
             if write_started:
                 return ITSActionResult(
-                    action_id, "outcome_unknown",
-                    "A write may have been submitted; verify before any retry. " + str(exc),
+                    action_id,
+                    "outcome_unknown",
+                    "A write may have been submitted; verify before any retry. "
+                    + str(exc),
                 )
             return ITSActionResult(action_id, "failed", str(exc))
         except Exception:
             terminal = "outcome_unknown" if write_started else "failed"
             self.db.finish_action(
-                profile_id, action_id, terminal,
+                profile_id,
+                action_id,
+                terminal,
                 phase="verification" if write_started else "resource_preflight",
-                error_code="local_journal_failure" if write_started else "preflight_failed",
+                error_code=(
+                    "local_journal_failure" if write_started else "preflight_failed"
+                ),
             )
             return ITSActionResult(
-                action_id, terminal,
-                "The write outcome must be verified before any retry."
-                if write_started else "ITS preflight failed before a write was sent.",
+                action_id,
+                terminal,
+                (
+                    "The write outcome must be verified before any retry."
+                    if write_started
+                    else "ITS preflight failed before a write was sent."
+                ),
             )
         finally:
             # A write was started but did not end in a verified success with
             # rebuilt evidence: keep a visible ITS refresh requirement.
             if write_started and not resolved_success:
-                self.db.mark_its_reconciliation_stale(profile_id, int(row["action_group_id"]))
+                self.db.mark_its_reconciliation_stale(
+                    profile_id, int(row["action_group_id"])
+                )
 
-    def _require_unchanged_context(self, row: dict[str, Any], live: _LiveITSState) -> None:
+    def _require_unchanged_context(
+        self, row: dict[str, Any], live: _LiveITSState
+    ) -> None:
         """Stop before an unsafe write if observation identity or specimen result moved."""
         if str(row["preview_inat_record_fingerprint"]) != live.inat_record_fingerprint:
-            raise ITSSyncError("The iNaturalist observation changed after preview.", "inat_record_changed")
-        if str(row["preview_mo_record_fingerprint"]) != live.mo_record_fingerprint:
-            raise ITSSyncError("The Mushroom Observer observation changed after preview.", "mo_record_changed")
-        if str(row["preview_inat_links_fingerprint"]) != live.specimen_state_fingerprint:
             raise ITSSyncError(
-                "The specimen-identity validation changed after preview.", "specimen_state_changed",
+                "The iNaturalist observation changed after preview.",
+                "inat_record_changed",
+            )
+        if str(row["preview_mo_record_fingerprint"]) != live.mo_record_fingerprint:
+            raise ITSSyncError(
+                "The Mushroom Observer observation changed after preview.",
+                "mo_record_changed",
+            )
+        if (
+            str(row["preview_inat_links_fingerprint"])
+            != live.specimen_state_fingerprint
+        ):
+            raise ITSSyncError(
+                "The specimen-identity validation changed after preview.",
+                "specimen_state_changed",
             )
 
     def _finish_success(
-        self, row: dict[str, Any], live: _LiveITSState, *, verification_state: str,
-        http_status: Optional[int] = None, server_id: str = "", server_uuid: str = "",
+        self,
+        row: dict[str, Any],
+        live: _LiveITSState,
+        *,
+        verification_state: str,
+        http_status: Optional[int] = None,
+        server_id: str = "",
+        server_uuid: str = "",
     ) -> None:
         profile_id = int(row["profile_id"])
         if ITSActionType(str(row["action_type"])) is not ITSActionType.INAT_ITS_REMOVE:
@@ -430,14 +591,21 @@ class ITSSyncService:
             server_id = server_id or verified_id
             server_uuid = server_uuid or verified_uuid
         self.db.finish_action(
-            profile_id, int(row["action_id"]), "succeeded", phase="verification",
-            http_status=http_status, verification_state=verification_state,
-            server_row_id=server_id, server_row_uuid=server_uuid,
+            profile_id,
+            int(row["action_id"]),
+            "succeeded",
+            phase="verification",
+            http_status=http_status,
+            verification_state=verification_state,
+            server_row_id=server_id,
+            server_row_uuid=server_uuid,
         )
         if not self._persist_evidence(profile_id, live):
             # The verified remote result is already durable, but local evidence
             # was not rebuilt, so keep a visible refresh requirement.
-            self.db.mark_its_reconciliation_stale(profile_id, int(row["action_group_id"]))
+            self.db.mark_its_reconciliation_stale(
+                profile_id, int(row["action_group_id"])
+            )
 
     def _persist_evidence(self, profile_id: int, live: _LiveITSState) -> bool:
         """Rebuild persistent safe ITS derivatives and resolve the stale issue.
@@ -447,7 +615,8 @@ class ITSSyncService:
         """
         try:
             self.db.refresh_its_evidence(
-                profile_id, live.pair_id,
+                profile_id,
+                live.pair_id,
                 mo_observation_id=live.mo_observation_id,
                 inat_observation_id=live.inat_observation_id,
                 mo_hashes=_mo_sequence_fingerprints(live.mo_sequences),
@@ -458,14 +627,18 @@ class ITSSyncService:
             # Only after the derivatives and pair score are durably refreshed do
             # we resolve the refresh requirement.
             self.db.resolve_its_reconciliation_stale(
-                profile_id, live.mo_observation_id, live.inat_observation_id,
+                profile_id,
+                live.mo_observation_id,
+                live.inat_observation_id,
             )
             return True
         except Exception:
             return False
 
     def _verified_result_identity(
-        self, row: dict[str, Any], live: _LiveITSState,
+        self,
+        row: dict[str, Any],
+        live: _LiveITSState,
     ) -> tuple[str, str]:
         desired_hash = str(row["sequence_fingerprint"] or "")
         desired_accession = str(row["normalized_accession"] or "")
@@ -475,26 +648,38 @@ class ITSSyncService:
         def matches(seq_fp: str, archive: str, accession: str) -> bool:
             if desired_hash:
                 return seq_fp == desired_hash
-            return bool(desired_accession) and archive == desired_archive and accession == desired_accession
+            return (
+                bool(desired_accession)
+                and archive == desired_archive
+                and accession == desired_accession
+            )
 
         if str(row["site"]) == "mo":
             for item in live.mo_sequences:
                 if target and str(item.sequence_id) != target:
                     continue
-                if matches(item.sequence_fingerprint, item.archive, item.normalized_accession):
+                if matches(
+                    item.sequence_fingerprint, item.archive, item.normalized_accession
+                ):
                     return str(item.sequence_id), ""
             return "", ""
         for item in live.inat_records:
             if target and item.remote_id != target:
                 continue
-            if matches(item.sequence_fingerprint, item.archive, item.normalized_accession):
+            if matches(
+                item.sequence_fingerprint, item.archive, item.normalized_accession
+            ):
                 return item.remote_id, item.remote_uuid
         return "", ""
 
     def _write(
-        self, row: dict[str, Any], profile: ReconciliationProfile,
-        live: _LiveITSState, source: _WriteSource,
-        cancelled: Callable[[], bool], on_send: Callable[[], None],
+        self,
+        row: dict[str, Any],
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        source: _WriteSource,
+        cancelled: Callable[[], bool],
+        on_send: Callable[[], None],
     ) -> object:
         """Validate every local precondition, then send exactly one request.
 
@@ -504,7 +689,10 @@ class ITSSyncService:
         ambiguous "a write may have been submitted".
         """
         action = ITSActionType(str(row["action_type"]))
-        targets_mo = action in {ITSActionType.MO_SEQUENCE_ADD, ITSActionType.MO_SEQUENCE_REPAIR}
+        targets_mo = action in {
+            ITSActionType.MO_SEQUENCE_ADD,
+            ITSActionType.MO_SEQUENCE_REPAIR,
+        }
         # Recheck BOTH credential contexts before every write. Even an MO write
         # was reviewed under the selected iNaturalist account context.
         auth = self._recheck_inat_auth(live)
@@ -512,11 +700,15 @@ class ITSSyncService:
             if action is ITSActionType.INAT_ITS_REMOVE:
                 on_send()
                 return self.inat_client.delete_reconciliation_field_value_v2(
-                    auth.api_token, str(row["remote_row_uuid"]),
+                    auth.api_token,
+                    str(row["remote_row_uuid"]),
                 )
             binding_id = positive_int(row["binding_id"])
             if not binding_id:
-                raise ITSSyncError("The exact iNaturalist destination field is unavailable.", "binding_missing")
+                raise ITSSyncError(
+                    "The exact iNaturalist destination field is unavailable.",
+                    "binding_missing",
+                )
             if binding_id == live.inat_accession_field_id and (
                 source.archive != MO_GENBANK_ARCHIVE
                 or not is_genbank_accession(source.normalized_accession)
@@ -529,18 +721,31 @@ class ITSSyncService:
             # Write the NORMALIZED sequence to iNaturalist's DNA field so a FASTA
             # header, digits, dashes/dots, or stray whitespace from the MO source
             # never lands in the iNaturalist value. Raw text stays for display only.
-            value = source.normalized_sequence if source.sequence_fingerprint else source.normalized_accession
+            value = (
+                source.normalized_sequence
+                if source.sequence_fingerprint
+                else source.normalized_accession
+            )
             if not value:
-                raise ITSSyncError("The source no longer contains the selected ITS value.", "source_changed")
+                raise ITSSyncError(
+                    "The source no longer contains the selected ITS value.",
+                    "source_changed",
+                )
             if action is ITSActionType.INAT_ITS_ADD:
                 on_send()
                 return self.inat_client.create_reconciliation_field_value_v2(
-                    auth.api_token, live.inat_observation_uuid, binding_id, value,
+                    auth.api_token,
+                    live.inat_observation_uuid,
+                    binding_id,
+                    value,
                 )
             on_send()
             return self.inat_client.update_reconciliation_field_value_v2(
-                auth.api_token, str(row["remote_row_uuid"]),
-                live.inat_observation_uuid, binding_id, value,
+                auth.api_token,
+                str(row["remote_row_uuid"]),
+                live.inat_observation_uuid,
+                binding_id,
+                value,
             )
 
         key = self._recheck_mo_key(profile, live)
@@ -548,21 +753,36 @@ class ITSSyncService:
             bases = source.raw_sequence if source.sequence_fingerprint else ""
             archive, accession = self._mo_deposit_fields(source)
             if not bases and not (archive and accession):
-                raise ITSSyncError("The source no longer contains a writable MO sequence value.", "source_changed")
+                raise ITSSyncError(
+                    "The source no longer contains a writable MO sequence value.",
+                    "source_changed",
+                )
             on_send()
             return self.mo_client.create_sequence(
-                key, live.mo_observation_id, "ITS",
-                cancelled, bases=bases, archive=archive, accession=accession,
+                key,
+                live.mo_observation_id,
+                "ITS",
+                cancelled,
+                bases=bases,
+                archive=archive,
+                accession=accession,
                 notes="Synchronized from confirmed iNaturalist pair",
             )
 
         # MO_SEQUENCE_REPAIR: operate on the complete composite MO row.
         sequence_id = positive_int(row["remote_row_id"])
         if not sequence_id:
-            raise ITSSyncError("The exact MO sequence ID is unavailable.", "mo_sequence_id_missing")
-        composite = next((item for item in live.mo_sequences if item.sequence_id == sequence_id), None)
+            raise ITSSyncError(
+                "The exact MO sequence ID is unavailable.", "mo_sequence_id_missing"
+            )
+        composite = next(
+            (item for item in live.mo_sequences if item.sequence_id == sequence_id),
+            None,
+        )
         if composite is None:
-            raise ITSSyncError("The exact MO sequence row is no longer present.", "mo_sequence_missing")
+            raise ITSSyncError(
+                "The exact MO sequence row is no longer present.", "mo_sequence_missing"
+            )
         self._require_mo_edit_permission(profile, composite)
         if source.sequence_fingerprint:
             # Replace bases; the existing deposit is retained by MO. Only allow it
@@ -570,17 +790,27 @@ class ITSSyncService:
             self._require_retained_deposit_compatible(composite, live)
             on_send()
             return self.mo_client.update_sequence(
-                key, sequence_id, cancelled, bases=source.raw_sequence,
+                key,
+                sequence_id,
+                cancelled,
+                bases=source.raw_sequence,
             )
         archive, accession = self._mo_deposit_fields(source)
         if not (archive and accession):
-            raise ITSSyncError("The source does not provide a complete archive-plus-accession deposit.", "incomplete_deposit")
+            raise ITSSyncError(
+                "The source does not provide a complete archive-plus-accession deposit.",
+                "incomplete_deposit",
+            )
         # Replace the deposit; existing bases are retained by MO. Only allow it
         # when those retained bases are proven compatible with the source pair.
         self._require_retained_bases_compatible(composite, live)
         on_send()
         return self.mo_client.update_sequence(
-            key, sequence_id, cancelled, archive=archive, accession=accession,
+            key,
+            sequence_id,
+            cancelled,
+            archive=archive,
+            accession=accession,
         )
 
     def _recheck_inat_auth(self, live: _LiveITSState) -> AuthState:
@@ -590,20 +820,31 @@ class ITSSyncService:
             or self.auth_generation_provider() != live.auth_generation
             or public_fingerprint(auth.api_token) != live.inat_token_marker
         ):
-            raise ITSSyncError("iNaturalist authentication changed after preflight.", "inat_auth_changed")
+            raise ITSSyncError(
+                "iNaturalist authentication changed after preflight.",
+                "inat_auth_changed",
+            )
         return auth
 
-    def _recheck_mo_key(self, profile: ReconciliationProfile, live: _LiveITSState) -> str:
+    def _recheck_mo_key(
+        self, profile: ReconciliationProfile, live: _LiveITSState
+    ) -> str:
         key = self.mo_key_provider(profile.profile_id)
         if (
-            not key or self.mo_key_generation_provider() != live.mo_key_generation
+            not key
+            or self.mo_key_generation_provider() != live.mo_key_generation
             or public_fingerprint(key) != live.mo_key_marker
         ):
-            raise ITSSyncError("The Mushroom Observer API key changed after preflight.", "mo_key_changed")
+            raise ITSSyncError(
+                "The Mushroom Observer API key changed after preflight.",
+                "mo_key_changed",
+            )
         return key
 
     @staticmethod
-    def _require_mo_edit_permission(profile: ReconciliationProfile, composite: MOSequenceRecord) -> None:
+    def _require_mo_edit_permission(
+        profile: ReconciliationProfile, composite: MOSequenceRecord
+    ) -> None:
         if composite.creator_user_id is None:
             raise ITSSyncError(
                 "The Mushroom Observer sequence creator is unknown; row edit permission cannot be proven.",
@@ -628,7 +869,9 @@ class ITSSyncService:
             )
         return archive, accession
 
-    def _require_retained_deposit_compatible(self, composite: MOSequenceRecord, live: _LiveITSState) -> None:
+    def _require_retained_deposit_compatible(
+        self, composite: MOSequenceRecord, live: _LiveITSState
+    ) -> None:
         """A bases repair may retain the deposit only if it is empty or proven-valid.
 
         A nonempty-invalid deposit (incomplete or unparseable) must never be left
@@ -637,7 +880,10 @@ class ITSSyncService:
         """
         if composite.accession_validation == "empty":
             return
-        if composite.has_deposit and composite.accession_identity in self._inat_accession_identities(live):
+        if (
+            composite.has_deposit
+            and composite.accession_identity in self._inat_accession_identities(live)
+        ):
             return
         raise ITSSyncError(
             "This MO row carries a mixed, invalid, or unproven deposit alongside its bases; "
@@ -645,11 +891,17 @@ class ITSSyncService:
             "mixed_mo_record",
         )
 
-    def _require_retained_bases_compatible(self, composite: MOSequenceRecord, live: _LiveITSState) -> None:
+    def _require_retained_bases_compatible(
+        self, composite: MOSequenceRecord, live: _LiveITSState
+    ) -> None:
         """An accession repair may retain the bases only if they are empty or proven-valid."""
         if composite.sequence_validation == "empty":
             return
-        if composite.has_bases and composite.sequence_fingerprint in _sequence_fingerprints(live.inat_records):
+        if (
+            composite.has_bases
+            and composite.sequence_fingerprint
+            in _sequence_fingerprints(live.inat_records)
+        ):
             return
         raise ITSSyncError(
             "This MO row carries mixed, malformed, or unproven bases alongside its deposit; "
@@ -662,13 +914,18 @@ class ITSSyncService:
         return {
             (item.archive, item.normalized_accession)
             for item in live.inat_records
-            if item.value_kind == "accession" and item.validation_state == "valid"
+            if item.value_kind == "accession"
+            and item.validation_state == "valid"
             and item.normalized_accession
         }
 
     def _refresh(
-        self, profile: ReconciliationProfile, pair: dict[str, Any],
-        cancelled: Callable[[], bool], *, require_mo_key: bool,
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        require_mo_key: bool,
         verification_only: bool = False,
     ) -> _LiveITSState:
         if cancelled():
@@ -684,7 +941,10 @@ class ITSSyncService:
             )
         if not verification_only:
             current = _first_result(self.inat_client.get_current_user_v2(token))
-            if positive_int(current.get("id") if current else None) != profile.inat_user_id:
+            if (
+                positive_int(current.get("id") if current else None)
+                != profile.inat_user_id
+            ):
                 raise ITSSyncError(
                     "The authenticated iNaturalist account does not match the profile.",
                     "inat_auth_mismatch",
@@ -694,44 +954,85 @@ class ITSSyncService:
         stored = self.db.field_binding(profile.profile_id, "its")
         definitions = reader.resolve_field_definitions(ITS_FIELD_NAME, ("dna",))
         if stored is None or str(stored["verification_state"]) != "verified":
-            raise ITSSyncError("Verify the exact DNA Barcode ITS field binding first.", "its_field_unverified")
+            raise ITSSyncError(
+                "Verify the exact DNA Barcode ITS field binding first.",
+                "its_field_unverified",
+            )
         field_id = int(stored["field_id"])
-        if len([item for item in definitions if positive_int(item.get("id")) == field_id]) != 1:
-            raise ITSSyncError("The stored DNA Barcode ITS field binding is no longer valid.", "its_field_changed")
+        if (
+            len(
+                [
+                    item
+                    for item in definitions
+                    if positive_int(item.get("id")) == field_id
+                ]
+            )
+            != 1
+        ):
+            raise ITSSyncError(
+                "The stored DNA Barcode ITS field binding is no longer valid.",
+                "its_field_changed",
+            )
         accession_field_id: Optional[int] = None
         accession_binding = self.db.field_binding(profile.profile_id, "its_accession")
-        if accession_binding is not None and str(accession_binding["verification_state"]) == "verified":
+        if (
+            accession_binding is not None
+            and str(accession_binding["verification_state"]) == "verified"
+        ):
             candidate_id = int(accession_binding["field_id"])
-            accession_definitions = reader.resolve_field_definitions(ACCESSION_FIELD_NAME)
-            if len([
-                item for item in accession_definitions
-                if positive_int(item.get("id")) == candidate_id
-            ]) == 1:
+            accession_definitions = reader.resolve_field_definitions(
+                ACCESSION_FIELD_NAME
+            )
+            if (
+                len(
+                    [
+                        item
+                        for item in accession_definitions
+                        if positive_int(item.get("id")) == candidate_id
+                    ]
+                )
+                == 1
+            ):
                 accession_field_id = candidate_id
 
         inat_id = int(pair["inat_observation_id"])
         mo_id = int(pair["mo_observation_id"])
-        inat_raw = _first_result(self.inat_client.get_reconciliation_detail(inat_id, token, deep=True))
+        inat_raw = _first_result(
+            self.inat_client.get_reconciliation_detail(inat_id, token, deep=True)
+        )
         if not inat_raw or positive_int(inat_raw.get("id")) != inat_id:
-            raise ITSSyncError("The iNaturalist observation is unavailable.", "inat_unavailable")
+            raise ITSSyncError(
+                "The iNaturalist observation is unavailable.", "inat_unavailable"
+            )
         inat_uuid = str(inat_raw.get("uuid") or "").strip()
         inat_user_raw = inat_raw.get("user")
         inat_user = inat_user_raw if isinstance(inat_user_raw, dict) else {}
         if not inat_uuid or positive_int(inat_user.get("id")) != profile.inat_user_id:
-            raise ITSSyncError("The iNaturalist record identity or owner changed.", "inat_owner_changed")
+            raise ITSSyncError(
+                "The iNaturalist record identity or owner changed.",
+                "inat_owner_changed",
+            )
 
-        mo_raw = _first_result(self.mo_client.observation(mo_id, cancelled, detail="high"))
+        mo_raw = _first_result(
+            self.mo_client.observation(mo_id, cancelled, detail="high")
+        )
         # Prove the payload is the observation we asked for: MO reports a rejected
         # filter as a fatal error inside HTTP 200, and every check below (owner,
         # record fingerprint, specimen evidence) would otherwise be computed from
         # a different record than the one this action writes to.
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_id:
-            raise ITSSyncError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+            raise ITSSyncError(
+                "The Mushroom Observer observation is unavailable.", "mo_unavailable"
+            )
         mo_observation = parse_mo_observation(mo_raw, profile.mo_user_id)
         if mo_observation.owner_id != profile.mo_user_id:
-            raise ITSSyncError("The Mushroom Observer record owner changed.", "mo_owner_changed")
+            raise ITSSyncError(
+                "The Mushroom Observer record owner changed.", "mo_owner_changed"
+            )
         sequence_payload = self.mo_client.sequences(
-            profile.mo_user_id, (mo_id,), cancelled,
+            profile.mo_user_id,
+            (mo_id,),
+            cancelled,
         )
         inat_records = _inat_records(inat_raw, field_id, accession_field_id, inat_id)
         mo_sequences = _mo_composites(sequence_payload, mo_id)
@@ -739,24 +1040,43 @@ class ITSSyncService:
         mo_records = _mo_display_records(mo_sequences)
 
         specimen_conflict, specimen_state, specimen_warnings = self._specimen_state(
-            profile, pair, inat_raw, mo_raw, reader, cancelled,
+            profile,
+            pair,
+            inat_raw,
+            mo_raw,
+            reader,
+            cancelled,
         )
 
         key = self.mo_key_provider(profile.profile_id) if require_mo_key else ""
         if require_mo_key:
             if not key:
-                raise ITSSyncError("A Mushroom Observer API key is required.", "mo_key_missing")
-            if self.mo_client.authenticated_user_id(key, profile.mo_user_id, cancelled) != profile.mo_user_id:
-                raise ITSSyncError("The Mushroom Observer API key does not match the profile.", "mo_key_mismatch")
+                raise ITSSyncError(
+                    "A Mushroom Observer API key is required.", "mo_key_missing"
+                )
+            if (
+                self.mo_client.authenticated_user_id(key, profile.mo_user_id, cancelled)
+                != profile.mo_user_id
+            ):
+                raise ITSSyncError(
+                    "The Mushroom Observer API key does not match the profile.",
+                    "mo_key_mismatch",
+                )
         if not verification_only and (
             auth_generation != self.auth_generation_provider()
             or mo_key_generation != self.mo_key_generation_provider()
         ):
-            raise ITSSyncError("Credential state changed during ITS preflight.", "credential_context_changed")
+            raise ITSSyncError(
+                "Credential state changed during ITS preflight.",
+                "credential_context_changed",
+            )
         return _LiveITSState(
-            profile_id=profile.profile_id, pair_id=int(pair["pair_id"]),
-            mo_observation_id=mo_id, inat_observation_id=inat_id,
-            inat_observation_uuid=inat_uuid, inat_field_id=field_id,
+            profile_id=profile.profile_id,
+            pair_id=int(pair["pair_id"]),
+            mo_observation_id=mo_id,
+            inat_observation_id=inat_id,
+            inat_observation_uuid=inat_uuid,
+            inat_field_id=field_id,
             inat_accession_field_id=accession_field_id,
             inat_record_fingerprint=_inat_record_fingerprint(inat_raw),
             mo_record_fingerprint=mo_record_fingerprint(mo_raw),
@@ -765,16 +1085,24 @@ class ITSSyncService:
             specimen_state_fingerprint=specimen_state,
             inat_token_marker=public_fingerprint(token),
             mo_key_marker=public_fingerprint(key) if key else "",
-            auth_generation=auth_generation, mo_key_generation=mo_key_generation,
-            specimen_conflict=specimen_conflict, specimen_warnings=specimen_warnings,
-            inat_records=inat_records, mo_records=mo_records, mo_sequences=mo_sequences,
+            auth_generation=auth_generation,
+            mo_key_generation=mo_key_generation,
+            specimen_conflict=specimen_conflict,
+            specimen_warnings=specimen_warnings,
+            inat_records=inat_records,
+            mo_records=mo_records,
+            mo_sequences=mo_sequences,
             mo_unreadable_rows=mo_unreadable_rows,
         )
 
     def _specimen_state(
-        self, profile: ReconciliationProfile, pair: dict[str, Any],
-        inat_raw: dict[str, Any], mo_raw: dict[str, Any],
-        reader: INatReconciliationReader, cancelled: Callable[[], bool],
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
+        inat_raw: dict[str, Any],
+        mo_raw: dict[str, Any],
+        reader: INatReconciliationReader,
+        cancelled: Callable[[], bool],
     ) -> tuple[str, str, tuple[str, ...]]:
         """Full fresh specimen-identity validation reusing the shared validator.
 
@@ -785,12 +1113,21 @@ class ITSSyncService:
         which the observation payload never carries).
         """
         return evaluate_specimen_state(
-            self.db, profile, pair, inat_raw, mo_raw, reader,
-            mo_client=self.mo_client, cancelled=cancelled,
+            self.db,
+            profile,
+            pair,
+            inat_raw,
+            mo_raw,
+            reader,
+            mo_client=self.mo_client,
+            cancelled=cancelled,
         )
 
     def _options(
-        self, profile: ReconciliationProfile, live: _LiveITSState, warnings: list[str],
+        self,
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        warnings: list[str],
     ) -> list[ITSActionOption]:
         if live.specimen_conflict:
             return []
@@ -812,16 +1149,27 @@ class ITSSyncService:
         return result
 
     def _sequence_options(
-        self, profile: ReconciliationProfile, live: _LiveITSState, warnings: list[str],
+        self,
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        warnings: list[str],
     ) -> list[ITSActionOption]:
         result: list[ITSActionOption] = []
         mo_row = _single_mo_row(live)
-        inat_its_rows = [item for item in live.inat_records if item.binding_id == live.inat_field_id]
+        inat_its_rows = [
+            item for item in live.inat_records if item.binding_id == live.inat_field_id
+        ]
         if len(live.mo_sequences) > 1 or len(inat_its_rows) > 1:
-            warnings.append("Multiple ITS sequence records require manual review; no sequence transfer is proposed.")
+            warnings.append(
+                "Multiple ITS sequence records require manual review; no sequence transfer is proposed."
+            )
             return result
-        inat_valid = next((item for item in inat_its_rows if item.validation_state == "valid"), None)
-        inat_invalid = next((item for item in inat_its_rows if item.validation_state != "valid"), None)
+        inat_valid = next(
+            (item for item in inat_its_rows if item.validation_state == "valid"), None
+        )
+        inat_invalid = next(
+            (item for item in inat_its_rows if item.validation_state != "valid"), None
+        )
         mo_has_bases = bool(mo_row and mo_row.has_bases)
 
         # MO valid bases → iNaturalist ITS field.
@@ -830,61 +1178,129 @@ class ITSSyncService:
                 result.append(self._mo_to_inat_sequence(live, mo_row, destination=None))
             elif inat_invalid is not None and inat_valid is None:
                 # The field is occupied by exactly one invalid value: repair, not add.
-                result.append(self._mo_to_inat_sequence(live, mo_row, destination=inat_invalid))
-            elif inat_valid is not None and inat_valid.sequence_fingerprint != mo_row.sequence_fingerprint:
-                result.append(self._mo_to_inat_sequence(live, mo_row, destination=inat_valid, manual=True))
+                result.append(
+                    self._mo_to_inat_sequence(live, mo_row, destination=inat_invalid)
+                )
+            elif (
+                inat_valid is not None
+                and inat_valid.sequence_fingerprint != mo_row.sequence_fingerprint
+            ):
+                result.append(
+                    self._mo_to_inat_sequence(
+                        live, mo_row, destination=inat_valid, manual=True
+                    )
+                )
         # iNaturalist valid sequence → Mushroom Observer.
         if inat_valid is not None:
             if mo_row is None:
-                result.append(self._inat_to_mo_sequence(profile, live, inat_valid, destination=None))
+                result.append(
+                    self._inat_to_mo_sequence(
+                        profile, live, inat_valid, destination=None
+                    )
+                )
             elif not mo_row.has_bases:
-                result.append(self._inat_to_mo_sequence(profile, live, inat_valid, destination=mo_row))
+                result.append(
+                    self._inat_to_mo_sequence(
+                        profile, live, inat_valid, destination=mo_row
+                    )
+                )
             elif mo_row.sequence_fingerprint != inat_valid.sequence_fingerprint:
-                result.append(self._inat_to_mo_sequence(profile, live, inat_valid, destination=mo_row, manual=True))
+                result.append(
+                    self._inat_to_mo_sequence(
+                        profile, live, inat_valid, destination=mo_row, manual=True
+                    )
+                )
         return result
 
     def _accession_options(
-        self, profile: ReconciliationProfile, live: _LiveITSState, warnings: list[str],
+        self,
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        warnings: list[str],
     ) -> list[ITSActionOption]:
         result: list[ITSActionOption] = []
         mo_row = _single_mo_row(live)
         acc_field = live.inat_accession_field_id
         inat_acc_rows = [
-            item for item in live.inat_records
+            item
+            for item in live.inat_records
             if acc_field is not None and item.binding_id == acc_field
         ]
         if len(live.mo_sequences) > 1 or len(inat_acc_rows) > 1:
-            warnings.append("Multiple ITS accession records require manual review; no accession transfer is proposed.")
+            warnings.append(
+                "Multiple ITS accession records require manual review; no accession transfer is proposed."
+            )
             return result
-        inat_valid = next((item for item in inat_acc_rows if item.validation_state == "valid"), None)
-        inat_invalid = next((item for item in inat_acc_rows if item.validation_state != "valid"), None)
+        inat_valid = next(
+            (item for item in inat_acc_rows if item.validation_state == "valid"), None
+        )
+        inat_invalid = next(
+            (item for item in inat_acc_rows if item.validation_state != "valid"), None
+        )
         mo_has_deposit = bool(mo_row and mo_row.has_deposit)
 
         # MO deposit → iNaturalist GenBank field. Only a GenBank-archive deposit
         # qualifies; an ENA/UNITE/BOLD deposit is display/compare-only here.
         if mo_has_deposit and mo_row is not None and acc_field is not None:
-            genbank_ok = (
-                mo_row.archive == MO_GENBANK_ARCHIVE
-                and is_genbank_accession(mo_row.normalized_accession)
+            genbank_ok = mo_row.archive == MO_GENBANK_ARCHIVE and is_genbank_accession(
+                mo_row.normalized_accession
             )
             if inat_valid is None and inat_invalid is None:
-                result.append(self._mo_to_inat_accession(live, mo_row, destination=None, genbank_ok=genbank_ok))
+                result.append(
+                    self._mo_to_inat_accession(
+                        live, mo_row, destination=None, genbank_ok=genbank_ok
+                    )
+                )
             elif inat_invalid is not None and inat_valid is None:
-                result.append(self._mo_to_inat_accession(live, mo_row, destination=inat_invalid, genbank_ok=genbank_ok))
-            elif inat_valid is not None and (mo_row.archive, mo_row.normalized_accession) != (inat_valid.archive, inat_valid.normalized_accession):
-                result.append(self._mo_to_inat_accession(live, mo_row, destination=inat_valid, genbank_ok=genbank_ok, manual=True))
-        elif mo_row is not None and mo_row.normalized_accession and not mo_row.has_deposit:
+                result.append(
+                    self._mo_to_inat_accession(
+                        live, mo_row, destination=inat_invalid, genbank_ok=genbank_ok
+                    )
+                )
+            elif inat_valid is not None and (
+                mo_row.archive,
+                mo_row.normalized_accession,
+            ) != (inat_valid.archive, inat_valid.normalized_accession):
+                result.append(
+                    self._mo_to_inat_accession(
+                        live,
+                        mo_row,
+                        destination=inat_valid,
+                        genbank_ok=genbank_ok,
+                        manual=True,
+                    )
+                )
+        elif (
+            mo_row is not None
+            and mo_row.normalized_accession
+            and not mo_row.has_deposit
+        ):
             warnings.append(
                 "The Mushroom Observer accession is not a complete, recognised deposit; transfer is disabled."
             )
         # iNaturalist GenBank accession → Mushroom Observer deposit.
         if inat_valid is not None:
             if mo_row is None:
-                result.append(self._inat_to_mo_accession(profile, live, inat_valid, destination=None))
+                result.append(
+                    self._inat_to_mo_accession(
+                        profile, live, inat_valid, destination=None
+                    )
+                )
             elif not mo_row.has_deposit:
-                result.append(self._inat_to_mo_accession(profile, live, inat_valid, destination=mo_row))
-            elif mo_row.accession_identity != (inat_valid.archive, inat_valid.normalized_accession):
-                result.append(self._inat_to_mo_accession(profile, live, inat_valid, destination=mo_row, manual=True))
+                result.append(
+                    self._inat_to_mo_accession(
+                        profile, live, inat_valid, destination=mo_row
+                    )
+                )
+            elif mo_row.accession_identity != (
+                inat_valid.archive,
+                inat_valid.normalized_accession,
+            ):
+                result.append(
+                    self._inat_to_mo_accession(
+                        profile, live, inat_valid, destination=mo_row, manual=True
+                    )
+                )
         return result
 
     def _removal_options(self, live: _LiveITSState) -> list[ITSActionOption]:
@@ -892,46 +1308,72 @@ class ITSSyncService:
         for record in live.inat_records:
             if record.validation_state == "valid":
                 continue
-            invalid_text = record.raw_value or record.raw_sequence or record.normalized_accession or "(empty)"
-            result.append(ITSActionOption(
-                action_type=ITSActionType.INAT_ITS_REMOVE,
-                destination_site=RemoteSite.INAT,
-                description=(
-                    f"Remove explicitly selected invalid iNaturalist {record.label or 'ITS'} row "
-                    f"{record.remote_uuid or record.remote_id} containing: {invalid_text}"
-                ),
-                destructive=True, source_site=RemoteSite.INAT,
-                source_record_id=live.inat_observation_id,
-                destination_record_id=live.inat_observation_id,
-                source_remote_id=record.remote_id,
-                destination_remote_id=record.remote_id,
-                destination_remote_uuid=record.remote_uuid,
-                destination_binding_id=record.binding_id,
-                source_metadata_fingerprint=record.metadata_fingerprint,
-                destination_preflight_fingerprint=live.inat_values_fingerprint,
-                enabled=bool(record.remote_uuid),
-                disabled_reason="The field-value UUID required for exact removal is unavailable."
-                if not record.remote_uuid else "",
-            ))
+            invalid_text = (
+                record.raw_value
+                or record.raw_sequence
+                or record.normalized_accession
+                or "(empty)"
+            )
+            result.append(
+                ITSActionOption(
+                    action_type=ITSActionType.INAT_ITS_REMOVE,
+                    destination_site=RemoteSite.INAT,
+                    description=(
+                        f"Remove explicitly selected invalid iNaturalist {record.label or 'ITS'} row "
+                        f"{record.remote_uuid or record.remote_id} containing: {invalid_text}"
+                    ),
+                    destructive=True,
+                    source_site=RemoteSite.INAT,
+                    source_record_id=live.inat_observation_id,
+                    destination_record_id=live.inat_observation_id,
+                    source_remote_id=record.remote_id,
+                    destination_remote_id=record.remote_id,
+                    destination_remote_uuid=record.remote_uuid,
+                    destination_binding_id=record.binding_id,
+                    source_metadata_fingerprint=record.metadata_fingerprint,
+                    destination_preflight_fingerprint=live.inat_values_fingerprint,
+                    enabled=bool(record.remote_uuid),
+                    disabled_reason=(
+                        "The field-value UUID required for exact removal is unavailable."
+                        if not record.remote_uuid
+                        else ""
+                    ),
+                )
+            )
         return result
 
     def _mo_to_inat_sequence(
-        self, live: _LiveITSState, mo_row: MOSequenceRecord,
-        destination: Optional[ITSRecordSnapshot], *, manual: bool = False,
+        self,
+        live: _LiveITSState,
+        mo_row: MOSequenceRecord,
+        destination: Optional[ITSRecordSnapshot],
+        *,
+        manual: bool = False,
     ) -> ITSActionOption:
-        action = ITSActionType.INAT_ITS_REPAIR if destination else ITSActionType.INAT_ITS_ADD
+        action = (
+            ITSActionType.INAT_ITS_REPAIR if destination else ITSActionType.INAT_ITS_ADD
+        )
         enabled, reason = True, ""
         if destination is not None and not destination.remote_uuid:
-            enabled, reason = False, "The exact iNaturalist field-value UUID is unavailable."
-        target = "the occupied invalid ITS field row" if destination else "the empty ITS field"
+            enabled, reason = (
+                False,
+                "The exact iNaturalist field-value UUID is unavailable.",
+            )
+        target = (
+            "the occupied invalid ITS field row"
+            if destination
+            else "the empty ITS field"
+        )
         return ITSActionOption(
-            action_type=action, destination_site=RemoteSite.INAT,
+            action_type=action,
+            destination_site=RemoteSite.INAT,
             description=(
                 ("Manual conflict choice: " if manual else "")
                 + f"copy MO sequence {mo_row.sequence_id} bases to iNaturalist {target}"
             ),
             destructive=destination is not None,
-            source_site=RemoteSite.MO, source_record_id=mo_row.observation_id,
+            source_site=RemoteSite.MO,
+            source_record_id=mo_row.observation_id,
             destination_record_id=live.inat_observation_id,
             source_remote_id=str(mo_row.sequence_id),
             destination_remote_id=destination.remote_id if destination else "",
@@ -940,14 +1382,22 @@ class ITSSyncService:
             sequence_fingerprint=mo_row.sequence_fingerprint,
             source_metadata_fingerprint=mo_row.record_fingerprint,
             destination_preflight_fingerprint=live.inat_values_fingerprint,
-            enabled=enabled, disabled_reason=reason,
+            enabled=enabled,
+            disabled_reason=reason,
         )
 
     def _mo_to_inat_accession(
-        self, live: _LiveITSState, mo_row: MOSequenceRecord,
-        destination: Optional[ITSRecordSnapshot], *, genbank_ok: bool, manual: bool = False,
+        self,
+        live: _LiveITSState,
+        mo_row: MOSequenceRecord,
+        destination: Optional[ITSRecordSnapshot],
+        *,
+        genbank_ok: bool,
+        manual: bool = False,
     ) -> ITSActionOption:
-        action = ITSActionType.INAT_ITS_REPAIR if destination else ITSActionType.INAT_ITS_ADD
+        action = (
+            ITSActionType.INAT_ITS_REPAIR if destination else ITSActionType.INAT_ITS_ADD
+        )
         enabled, reason = True, ""
         if not genbank_ok:
             enabled, reason = False, (
@@ -955,53 +1405,85 @@ class ITSSyncService:
                 "accessions may be written to the iNaturalist GenBank field."
             )
         elif destination is not None and not destination.remote_uuid:
-            enabled, reason = False, "The exact iNaturalist field-value UUID is unavailable."
-        target = "the occupied invalid GenBank field row" if destination else "the empty GenBank field"
+            enabled, reason = (
+                False,
+                "The exact iNaturalist field-value UUID is unavailable.",
+            )
+        target = (
+            "the occupied invalid GenBank field row"
+            if destination
+            else "the empty GenBank field"
+        )
         return ITSActionOption(
-            action_type=action, destination_site=RemoteSite.INAT,
+            action_type=action,
+            destination_site=RemoteSite.INAT,
             description=(
                 ("Manual conflict choice: " if manual else "")
                 + f"copy MO accession {mo_row.normalized_accession} ({mo_row.archive or 'unspecified'}) "
                 f"to iNaturalist {target}"
             ),
             destructive=destination is not None,
-            source_site=RemoteSite.MO, source_record_id=mo_row.observation_id,
+            source_site=RemoteSite.MO,
+            source_record_id=mo_row.observation_id,
             destination_record_id=live.inat_observation_id,
             source_remote_id=str(mo_row.sequence_id),
             destination_remote_id=destination.remote_id if destination else "",
             destination_remote_uuid=destination.remote_uuid if destination else "",
             destination_binding_id=live.inat_accession_field_id,
-            normalized_accession=mo_row.normalized_accession, archive=mo_row.archive,
+            normalized_accession=mo_row.normalized_accession,
+            archive=mo_row.archive,
             source_metadata_fingerprint=mo_row.record_fingerprint,
             destination_preflight_fingerprint=live.inat_values_fingerprint,
-            enabled=enabled, disabled_reason=reason,
+            enabled=enabled,
+            disabled_reason=reason,
         )
 
     def _inat_to_mo_sequence(
-        self, profile: ReconciliationProfile, live: _LiveITSState,
-        source: ITSRecordSnapshot, destination: Optional[MOSequenceRecord],
-        *, manual: bool = False,
+        self,
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        source: ITSRecordSnapshot,
+        destination: Optional[MOSequenceRecord],
+        *,
+        manual: bool = False,
     ) -> ITSActionOption:
-        action = ITSActionType.MO_SEQUENCE_REPAIR if destination else ITSActionType.MO_SEQUENCE_ADD
+        action = (
+            ITSActionType.MO_SEQUENCE_REPAIR
+            if destination
+            else ITSActionType.MO_SEQUENCE_ADD
+        )
         enabled, reason = self._mo_write_gate(profile, destination)
         # A bases repair must not silently retain a nonempty-invalid or unproven
         # deposit on the same composite row.
-        if enabled and destination is not None and destination.accession_validation != "empty":
-            if not (destination.has_deposit
-                    and destination.accession_identity in self._inat_accession_identities(live)):
+        if (
+            enabled
+            and destination is not None
+            and destination.accession_validation != "empty"
+        ):
+            if not (
+                destination.has_deposit
+                and destination.accession_identity
+                in self._inat_accession_identities(live)
+            ):
                 enabled, reason = False, (
                     "This MO row carries a mixed, invalid, or unproven deposit; replacing its bases "
                     "would leave conflicting sequence/deposit data. Manual review is required."
                 )
-        target = f"MO sequence row {destination.sequence_id}" if destination else "a new MO sequence"
+        target = (
+            f"MO sequence row {destination.sequence_id}"
+            if destination
+            else "a new MO sequence"
+        )
         return ITSActionOption(
-            action_type=action, destination_site=RemoteSite.MO,
+            action_type=action,
+            destination_site=RemoteSite.MO,
             description=(
                 ("Manual conflict choice: " if manual else "")
                 + f"copy iNaturalist sequence {source.remote_id} bases to {target}"
             ),
             destructive=destination is not None,
-            source_site=RemoteSite.INAT, source_record_id=source.observation_id,
+            source_site=RemoteSite.INAT,
+            source_record_id=source.observation_id,
             destination_record_id=live.mo_observation_id,
             source_remote_id=source.remote_id,
             destination_remote_id=str(destination.sequence_id) if destination else "",
@@ -1009,57 +1491,89 @@ class ITSSyncService:
             sequence_fingerprint=source.sequence_fingerprint,
             source_metadata_fingerprint=source.metadata_fingerprint,
             destination_preflight_fingerprint=live.mo_values_fingerprint,
-            enabled=enabled, disabled_reason=reason,
+            enabled=enabled,
+            disabled_reason=reason,
         )
 
     def _inat_to_mo_accession(
-        self, profile: ReconciliationProfile, live: _LiveITSState,
-        source: ITSRecordSnapshot, destination: Optional[MOSequenceRecord],
-        *, manual: bool = False,
+        self,
+        profile: ReconciliationProfile,
+        live: _LiveITSState,
+        source: ITSRecordSnapshot,
+        destination: Optional[MOSequenceRecord],
+        *,
+        manual: bool = False,
     ) -> ITSActionOption:
-        action = ITSActionType.MO_SEQUENCE_REPAIR if destination else ITSActionType.MO_SEQUENCE_ADD
+        action = (
+            ITSActionType.MO_SEQUENCE_REPAIR
+            if destination
+            else ITSActionType.MO_SEQUENCE_ADD
+        )
         enabled, reason = self._mo_write_gate(profile, destination)
         archive = normalize_archive(source.archive, source.normalized_accession)
         if enabled and not (archive and source.normalized_accession):
-            enabled, reason = False, "Mushroom Observer requires a complete archive-plus-accession deposit."
+            enabled, reason = (
+                False,
+                "Mushroom Observer requires a complete archive-plus-accession deposit.",
+            )
         elif enabled and not is_mo_writable_archive(archive):
             enabled, reason = False, (
                 f"Mushroom Observer does not accept the {archive or 'unspecified'} archive as a deposit."
             )
         # An accession repair must not silently retain nonempty-invalid or
         # unproven bases on the same composite row.
-        if enabled and destination is not None and destination.sequence_validation != "empty":
-            if not (destination.has_bases
-                    and destination.sequence_fingerprint in _sequence_fingerprints(live.inat_records)):
+        if (
+            enabled
+            and destination is not None
+            and destination.sequence_validation != "empty"
+        ):
+            if not (
+                destination.has_bases
+                and destination.sequence_fingerprint
+                in _sequence_fingerprints(live.inat_records)
+            ):
                 enabled, reason = False, (
                     "This MO row carries mixed, malformed, or unproven bases; replacing its deposit "
                     "would leave conflicting sequence/deposit data. Manual review is required."
                 )
-        target = f"MO sequence row {destination.sequence_id}" if destination else "a new MO sequence"
+        target = (
+            f"MO sequence row {destination.sequence_id}"
+            if destination
+            else "a new MO sequence"
+        )
         return ITSActionOption(
-            action_type=action, destination_site=RemoteSite.MO,
+            action_type=action,
+            destination_site=RemoteSite.MO,
             description=(
                 ("Manual conflict choice: " if manual else "")
                 + f"copy iNaturalist accession {source.normalized_accession} to {target} "
                 f"as archive {archive or 'unspecified'}"
             ),
             destructive=destination is not None,
-            source_site=RemoteSite.INAT, source_record_id=source.observation_id,
+            source_site=RemoteSite.INAT,
+            source_record_id=source.observation_id,
             destination_record_id=live.mo_observation_id,
             source_remote_id=source.remote_id,
             destination_remote_id=str(destination.sequence_id) if destination else "",
             destination_binding_id=None,
-            normalized_accession=source.normalized_accession, archive=archive,
+            normalized_accession=source.normalized_accession,
+            archive=archive,
             source_metadata_fingerprint=source.metadata_fingerprint,
             destination_preflight_fingerprint=live.mo_values_fingerprint,
-            enabled=enabled, disabled_reason=reason,
+            enabled=enabled,
+            disabled_reason=reason,
         )
 
     def _mo_write_gate(
-        self, profile: ReconciliationProfile, destination: Optional[MOSequenceRecord],
+        self,
+        profile: ReconciliationProfile,
+        destination: Optional[MOSequenceRecord],
     ) -> tuple[bool, str]:
         if not self.mo_key_provider(profile.profile_id):
-            return False, "Enter a Mushroom Observer API key before selecting this write."
+            return (
+                False,
+                "Enter a Mushroom Observer API key before selecting this write.",
+            )
         if destination is None:
             return True, ""
         if not positive_int(destination.sequence_id):
@@ -1077,16 +1591,26 @@ class ITSSyncService:
     def _eligible_pair(self, profile_id: int, pair_id: int) -> dict[str, Any]:
         pair = self.db.pair_detail(profile_id, pair_id)
         if not pair or pair.get("review_state") != "confirmed" or pair.get("excluded"):
-            raise ITSSyncError("Only a currently confirmed, non-excluded pair can produce ITS actions.")
+            raise ITSSyncError(
+                "Only a currently confirmed, non-excluded pair can produce ITS actions."
+            )
         return pair
 
-    def _require_current_source(self, row: dict[str, Any], pair: dict[str, Any]) -> None:
-        group = self.db.action_group(int(row["profile_id"]), int(row["action_group_id"]))
+    def _require_current_source(
+        self, row: dict[str, Any], pair: dict[str, Any]
+    ) -> None:
+        group = self.db.action_group(
+            int(row["profile_id"]), int(row["action_group_id"])
+        )
         if not group or _pair_fingerprint(pair) != str(group["source_fingerprint"]):
-            raise ITSSyncError("The confirmed pair changed after preview.", "pair_changed")
+            raise ITSSyncError(
+                "The confirmed pair changed after preview.", "pair_changed"
+            )
 
     def _current_source(
-        self, row: dict[str, Any], live: _LiveITSState,
+        self,
+        row: dict[str, Any],
+        live: _LiveITSState,
     ) -> Optional[_WriteSource]:
         desired_hash = str(row["sequence_fingerprint"] or "")
         desired_accession = str(row["normalized_accession"] or "")
@@ -1095,53 +1619,80 @@ class ITSSyncService:
         remote_id = str(row["source_sequence_remote_id"])
 
         def accession_matches(archive: str, accession: str) -> bool:
-            return bool(desired_accession) and archive == desired_archive and accession == desired_accession
+            return (
+                bool(desired_accession)
+                and archive == desired_archive
+                and accession == desired_accession
+            )
 
         if str(row["source_site"]) == "mo":
             for item in live.mo_sequences:
-                if str(item.sequence_id) != remote_id or item.record_fingerprint != metadata:
+                if (
+                    str(item.sequence_id) != remote_id
+                    or item.record_fingerprint != metadata
+                ):
                     continue
                 if desired_hash and item.sequence_fingerprint == desired_hash:
                     return _WriteSource(
-                        raw_sequence=item.raw_bases, normalized_sequence=item.normalized_sequence,
+                        raw_sequence=item.raw_bases,
+                        normalized_sequence=item.normalized_sequence,
                         sequence_fingerprint=item.sequence_fingerprint,
                     )
                 if accession_matches(item.archive, item.normalized_accession):
-                    return _WriteSource(normalized_accession=item.normalized_accession, archive=item.archive)
+                    return _WriteSource(
+                        normalized_accession=item.normalized_accession,
+                        archive=item.archive,
+                    )
             return None
         for item in live.inat_records:
             if item.remote_id != remote_id or item.metadata_fingerprint != metadata:
                 continue
             if desired_hash and item.sequence_fingerprint == desired_hash:
                 return _WriteSource(
-                    raw_sequence=item.raw_sequence, normalized_sequence=item.normalized_sequence,
+                    raw_sequence=item.raw_sequence,
+                    normalized_sequence=item.normalized_sequence,
                     sequence_fingerprint=item.sequence_fingerprint,
                 )
             if accession_matches(item.archive, item.normalized_accession):
-                return _WriteSource(normalized_accession=item.normalized_accession, archive=item.archive)
+                return _WriteSource(
+                    normalized_accession=item.normalized_accession, archive=item.archive
+                )
         return None
 
     @staticmethod
     def _destination_fingerprint(row: dict[str, Any], live: _LiveITSState) -> str:
-        return live.inat_values_fingerprint if str(row["site"]) == "inat" else live.mo_values_fingerprint
+        return (
+            live.inat_values_fingerprint
+            if str(row["site"]) == "inat"
+            else live.mo_values_fingerprint
+        )
 
     def _is_satisfied(self, row: dict[str, Any], live: _LiveITSState) -> bool:
         action = ITSActionType(str(row["action_type"]))
         if action is ITSActionType.INAT_ITS_REMOVE:
             target = str(row["remote_row_uuid"] or row["remote_row_id"])
             return not any(
-                (item.remote_uuid or item.remote_id) == target for item in live.inat_records
+                (item.remote_uuid or item.remote_id) == target
+                for item in live.inat_records
             )
         desired_hash = str(row["sequence_fingerprint"] or "")
         desired_accession = str(row["normalized_accession"] or "")
         desired_archive = str(row["normalized_archive"] or "")
         if str(row["site"]) == "mo":
-            return self._mo_satisfied(row, live, desired_hash, desired_archive, desired_accession)
-        return self._inat_satisfied(row, live, action, desired_hash, desired_archive, desired_accession)
+            return self._mo_satisfied(
+                row, live, desired_hash, desired_archive, desired_accession
+            )
+        return self._inat_satisfied(
+            row, live, action, desired_hash, desired_archive, desired_accession
+        )
 
     def _mo_satisfied(
-        self, row: dict[str, Any], live: _LiveITSState,
-        desired_hash: str, desired_archive: str, desired_accession: str,
+        self,
+        row: dict[str, Any],
+        live: _LiveITSState,
+        desired_hash: str,
+        desired_archive: str,
+        desired_accession: str,
     ) -> bool:
         # An unreadable row could itself be the destination, or could carry the
         # component we believe we retained; neither the "one row" count nor the
@@ -1150,7 +1701,11 @@ class ITSSyncService:
             return False
         composite = live.mo_sequences[0]
         target = str(row["remote_row_id"] or "")
-        if target and str(composite.sequence_id) != target and str(row["action_type"]).endswith("repair"):
+        if (
+            target
+            and str(composite.sequence_id) != target
+            and str(row["action_type"]).endswith("repair")
+        ):
             return False
         # The written component must be present and correct, the whole row must be
         # structurally valid, AND the retained component must still be empty or
@@ -1161,7 +1716,9 @@ class ITSSyncService:
         if not composite.is_valid_row:
             return False
         if desired_hash:
-            if not (composite.has_bases and composite.sequence_fingerprint == desired_hash):
+            if not (
+                composite.has_bases and composite.sequence_fingerprint == desired_hash
+            ):
                 return False
             retained_deposit_ok = (
                 composite.accession_validation == "empty"
@@ -1176,20 +1733,28 @@ class ITSSyncService:
             return False
         retained_bases_ok = (
             composite.sequence_validation == "empty"
-            or composite.sequence_fingerprint in _sequence_fingerprints(live.inat_records)
+            or composite.sequence_fingerprint
+            in _sequence_fingerprints(live.inat_records)
         )
         return retained_bases_ok
 
     def _inat_satisfied(
-        self, row: dict[str, Any], live: _LiveITSState, action: ITSActionType,
-        desired_hash: str, desired_archive: str, desired_accession: str,
+        self,
+        row: dict[str, Any],
+        live: _LiveITSState,
+        action: ITSActionType,
+        desired_hash: str,
+        desired_archive: str,
+        desired_accession: str,
     ) -> bool:
         kind = "sequence" if desired_hash else "accession"
         relevant = [item for item in live.inat_records if item.value_kind == kind]
         if len({item.remote_id for item in relevant}) != 1:
             return False
         if action is ITSActionType.INAT_ITS_REPAIR:
-            candidates = [item for item in relevant if item.remote_id == str(row["remote_row_id"])]
+            candidates = [
+                item for item in relevant if item.remote_id == str(row["remote_row_id"])
+            ]
         else:
             candidates = relevant
 
@@ -1208,14 +1773,22 @@ class ITSSyncService:
 
 
 def _inat_records(
-    raw: dict[str, Any], field_id: int, accession_field_id: Optional[int],
+    raw: dict[str, Any],
+    field_id: int,
+    accession_field_id: Optional[int],
     observation_id: int,
 ) -> tuple[ITSRecordSnapshot, ...]:
     records: list[ITSRecordSnapshot] = []
-    for index, item in enumerate(raw.get("ofvs") or raw.get("observation_field_values") or (), 1):
+    for index, item in enumerate(
+        raw.get("ofvs") or raw.get("observation_field_values") or (), 1
+    ):
         if not isinstance(item, dict):
             continue
-        field = item.get("observation_field") if isinstance(item.get("observation_field"), dict) else {}
+        field = (
+            item.get("observation_field")
+            if isinstance(item.get("observation_field"), dict)
+            else {}
+        )
         binding_id = positive_int(
             item.get("field_id") or item.get("observation_field_id") or field.get("id")
         )
@@ -1238,7 +1811,11 @@ def _inat_records(
                 kind, validation = "invalid", "accession_in_sequence_field"
             elif sequence_like:
                 kind = "invalid"
-                validation = "sequence_too_short" if _sequence_symbol_count(value) < 20 else "malformed_sequence"
+                validation = (
+                    "sequence_too_short"
+                    if _sequence_symbol_count(value) < 20
+                    else "malformed_sequence"
+                )
             else:
                 kind, validation = "invalid", "invalid_sequence_value"
         else:
@@ -1260,21 +1837,46 @@ def _inat_records(
         user = item.get("user") if isinstance(item.get("user"), dict) else {}
         digest = sequence_digest(value)
         metadata = public_fingerprint(
-            "inat", observation_id, row_id, row_uuid, binding_id, kind,
-            digest, archive, accession, validation, positive_int(user.get("id")),
+            "inat",
+            observation_id,
+            row_id,
+            row_uuid,
+            binding_id,
+            kind,
+            digest,
+            archive,
+            accession,
+            validation,
+            positive_int(user.get("id")),
         )
-        records.append(ITSRecordSnapshot(
-            site=RemoteSite.INAT, observation_id=observation_id,
-            remote_id=row_id, remote_uuid=row_uuid, binding_id=binding_id,
-            value_kind=kind, raw_sequence=value if binding_id == field_id else "",
-            raw_value=value,
-            normalized_sequence=normalized, sequence_fingerprint=digest,
-            normalized_accession=accession, archive=archive,
-            label=ITS_FIELD_NAME if binding_id == field_id else ACCESSION_FIELD_NAME,
-            public_metadata=(("added_by_user_id", str(positive_int(user.get("id")) or "unknown")),),
-            metadata_fingerprint=metadata, validation_state=validation,
-            added_by_user_id=positive_int(user.get("id")),
-        ))
+        records.append(
+            ITSRecordSnapshot(
+                site=RemoteSite.INAT,
+                observation_id=observation_id,
+                remote_id=row_id,
+                remote_uuid=row_uuid,
+                binding_id=binding_id,
+                value_kind=kind,
+                raw_sequence=value if binding_id == field_id else "",
+                raw_value=value,
+                normalized_sequence=normalized,
+                sequence_fingerprint=digest,
+                normalized_accession=accession,
+                archive=archive,
+                label=(
+                    ITS_FIELD_NAME if binding_id == field_id else ACCESSION_FIELD_NAME
+                ),
+                public_metadata=(
+                    (
+                        "added_by_user_id",
+                        str(positive_int(user.get("id")) or "unknown"),
+                    ),
+                ),
+                metadata_fingerprint=metadata,
+                validation_state=validation,
+                added_by_user_id=positive_int(user.get("id")),
+            )
+        )
     return tuple(records)
 
 
@@ -1291,9 +1893,13 @@ def _round_coord(value: Optional[float]) -> str:
 
 
 def _specimen_evidence_fingerprint(
-    mo_inv: InventoryObservation, inat_inv: InventoryObservation,
-    mo_hyd: HydratedObservation, inat_hyd: HydratedObservation,
-    mo_loc: str, inat_loc: str, conflicts: Sequence[str],
+    mo_inv: InventoryObservation,
+    inat_inv: InventoryObservation,
+    mo_hyd: HydratedObservation,
+    inat_hyd: HydratedObservation,
+    mo_loc: str,
+    inat_loc: str,
+    conflicts: Sequence[str],
 ) -> str:
     """Non-reversible fingerprint of the normalized specimen evidence itself.
 
@@ -1304,22 +1910,39 @@ def _specimen_evidence_fingerprint(
     """
     parts: list[object] = ["specimen_evidence"]
     for inv, hyd, loc in ((mo_inv, mo_hyd, mo_loc), (inat_inv, inat_hyd, inat_loc)):
-        parts.extend([
-            inv.key.site.value, inv.owner_id, inv.account_id,
-            inv.observed_on, inv.taxon_id, (inv.taxon_name or "").casefold(),
-            inv.fungi_status, int(inv.deleted), inv.availability_state, "|",
-            *sorted(hyd.voucher_identifiers), "|",
-            *sorted(hyd.collection_identifiers), "|",
-            loc, int(hyd.coordinates_available),
-            _round_coord(hyd.latitude), _round_coord(hyd.longitude), _round_coord(hyd.accuracy_m),
-            int(hyd.required_values_available), "||",
-        ])
+        parts.extend(
+            [
+                inv.key.site.value,
+                inv.owner_id,
+                inv.account_id,
+                inv.observed_on,
+                inv.taxon_id,
+                (inv.taxon_name or "").casefold(),
+                inv.fungi_status,
+                int(inv.deleted),
+                inv.availability_state,
+                "|",
+                *sorted(hyd.voucher_identifiers),
+                "|",
+                *sorted(hyd.collection_identifiers),
+                "|",
+                loc,
+                int(hyd.coordinates_available),
+                _round_coord(hyd.latitude),
+                _round_coord(hyd.longitude),
+                _round_coord(hyd.accuracy_m),
+                int(hyd.required_values_available),
+                "||",
+            ]
+        )
     parts.append("conflicts")
     parts.extend(sorted(conflicts))
     return public_fingerprint(*parts)
 
 
-def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -> HydratedObservation:
+def _hydrate_mo_specimen(
+    inventory: InventoryObservation, raw: dict[str, Any]
+) -> HydratedObservation:
     """Parse MO high-detail specimen structures for the shared conflict check.
 
     MO's serializer exposes ``collection_numbers`` as ``{collector, number}``
@@ -1364,8 +1987,11 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
         herbarium = herbarium_raw if isinstance(herbarium_raw, dict) else {}
         code = str(herbarium.get("code") or herbarium.get("name") or "").strip()
         accession = str(
-            record.get("accession_number") or record.get("accession")
-            or record.get("initial_det") or record.get("label") or ""
+            record.get("accession_number")
+            or record.get("accession")
+            or record.get("initial_det")
+            or record.get("label")
+            or ""
         ).strip()
         for candidate in (accession, f"{code} {accession}"):
             normalized = _norm_specimen_id(candidate)
@@ -1384,9 +2010,14 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
             coordinate_source = "explicit_public"
             coordinate_privacy_state = (
                 "private"
-                if any(raw.get(key) for key in (
-                    "gps_hidden", "hidden", "location_hidden",
-                ))
+                if any(
+                    raw.get(key)
+                    for key in (
+                        "gps_hidden",
+                        "hidden",
+                        "location_hidden",
+                    )
+                )
                 else "public"
             )
             for key in ("gps_accuracy", "accuracy", "positional_accuracy"):
@@ -1406,7 +2037,12 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
         location_raw = raw.get("location")
         location = location_raw if isinstance(location_raw, dict) else {}
         bounds: dict[str, float] = {}
-        for key in ("latitude_north", "latitude_south", "longitude_east", "longitude_west"):
+        for key in (
+            "latitude_north",
+            "latitude_south",
+            "longitude_east",
+            "longitude_west",
+        ):
             try:
                 if location.get(key) is not None:
                     bounds[key] = float(location[key])
@@ -1430,7 +2066,9 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
         inventory,
         voucher_identifiers=tuple(sorted(vouchers)),
         collection_identifiers=tuple(sorted(collections)),
-        latitude=latitude, longitude=longitude, accuracy_m=accuracy,
+        latitude=latitude,
+        longitude=longitude,
+        accuracy_m=accuracy,
         coordinates_available=coordinates_available,
         coordinate_privacy_state=coordinate_privacy_state,
         coordinate_source=coordinate_source,
@@ -1449,17 +2087,23 @@ def _hydrate_mo_specimen(inventory: InventoryObservation, raw: dict[str, Any]) -
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     from math import asin, cos, radians, sin, sqrt
+
     phi1, phi2 = radians(lat1), radians(lat2)
     d_phi, d_lambda = radians(lat2 - lat1), radians(lon2 - lon1)
     a = sin(d_phi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(d_lambda / 2) ** 2
     return 6371000.0 * 2 * asin(sqrt(a))
 
 
-def _mo_composites(payload: object, observation_id: int) -> tuple[MOSequenceRecord, ...]:
+def _mo_composites(
+    payload: object, observation_id: int
+) -> tuple[MOSequenceRecord, ...]:
     """Model each MO sequence row as one composite record kept together."""
     records: list[MOSequenceRecord] = []
     for item in results_from_payload(payload):
-        if positive_int(item.get("observation_id") or item.get("observation")) != observation_id:
+        if (
+            positive_int(item.get("observation_id") or item.get("observation"))
+            != observation_id
+        ):
             continue
         locus = str(item.get("locus") or "").strip()
         if "its" not in locus.casefold():
@@ -1467,7 +2111,9 @@ def _mo_composites(payload: object, observation_id: int) -> tuple[MOSequenceReco
         sequence_id = positive_int(item.get("id"))
         if not sequence_id:
             continue
-        bases = str(item.get("bases") or item.get("sequence") or item.get("dna_sequence") or "")
+        bases = str(
+            item.get("bases") or item.get("sequence") or item.get("dna_sequence") or ""
+        )
         normalized = normalize_sequence(bases)
         digest = sequence_digest(bases)
         accession_raw = str(item.get("accession") or "").strip()
@@ -1489,9 +2135,15 @@ def _mo_composites(payload: object, observation_id: int) -> tuple[MOSequenceReco
         notes_fingerprint = public_fingerprint(notes)
 
         if bases:
-            sequence_validation = "valid" if normalized else (
-                "sequence_too_short" if _looks_like_sequence(bases) and _sequence_symbol_count(bases) < 20
-                else "malformed_sequence"
+            sequence_validation = (
+                "valid"
+                if normalized
+                else (
+                    "sequence_too_short"
+                    if _looks_like_sequence(bases)
+                    and _sequence_symbol_count(bases) < 20
+                    else "malformed_sequence"
+                )
             )
         else:
             sequence_validation = "empty"
@@ -1505,7 +2157,8 @@ def _mo_composites(payload: object, observation_id: int) -> tuple[MOSequenceReco
                 accession_validation = "incomplete_deposit"
             elif archive_raw and not accession:
                 accession_validation = (
-                    "accession_contains_sequence" if _looks_like_sequence(accession_raw)
+                    "accession_contains_sequence"
+                    if _looks_like_sequence(accession_raw)
                     else "incomplete_deposit"
                 )
             elif _looks_like_sequence(accession_raw):
@@ -1515,29 +2168,53 @@ def _mo_composites(payload: object, observation_id: int) -> tuple[MOSequenceReco
         else:
             accession_validation = "empty"
         record_fingerprint = public_fingerprint(
-            "mo", observation_id, sequence_id, locus, digest, sequence_validation,
-            archive, accession, accession_validation, notes_fingerprint,
-            creator_id, created_at, updated_at,
+            "mo",
+            observation_id,
+            sequence_id,
+            locus,
+            digest,
+            sequence_validation,
+            archive,
+            accession,
+            accession_validation,
+            notes_fingerprint,
+            creator_id,
+            created_at,
+            updated_at,
         )
         public_metadata = tuple(
-            (key, str(value)) for key, value in (
+            (key, str(value))
+            for key, value in (
                 ("locus", locus or "unspecified"),
                 ("archive", archive or "not specified"),
                 ("creator_user_id", creator_id or "unknown"),
                 ("created_at", created_at or "unknown"),
                 ("updated_at", updated_at or "unknown"),
                 ("notes_fingerprint", notes_fingerprint[:12]),
-            ) if str(value)
+            )
+            if str(value)
         )
-        records.append(MOSequenceRecord(
-            observation_id=observation_id, sequence_id=sequence_id, locus=locus,
-            raw_bases=bases, normalized_sequence=normalized, sequence_fingerprint=digest,
-            archive=archive, normalized_accession=accession, raw_accession=accession_raw,
-            creator_user_id=creator_id,
-            created_at=created_at, updated_at=updated_at, notes_fingerprint=notes_fingerprint,
-            sequence_validation=sequence_validation, accession_validation=accession_validation,
-            record_fingerprint=record_fingerprint, public_metadata=public_metadata,
-        ))
+        records.append(
+            MOSequenceRecord(
+                observation_id=observation_id,
+                sequence_id=sequence_id,
+                locus=locus,
+                raw_bases=bases,
+                normalized_sequence=normalized,
+                sequence_fingerprint=digest,
+                archive=archive,
+                normalized_accession=accession,
+                raw_accession=accession_raw,
+                creator_user_id=creator_id,
+                created_at=created_at,
+                updated_at=updated_at,
+                notes_fingerprint=notes_fingerprint,
+                sequence_validation=sequence_validation,
+                accession_validation=accession_validation,
+                record_fingerprint=record_fingerprint,
+                public_metadata=public_metadata,
+            )
+        )
     return tuple(records)
 
 
@@ -1552,47 +2229,63 @@ def _mo_unreadable_rows(payload: object, observation_id: int) -> int:
     """
     unreadable = 0
     for item in results_from_payload(payload):
-        if positive_int(item.get("observation_id") or item.get("observation")) != observation_id:
+        if (
+            positive_int(item.get("observation_id") or item.get("observation"))
+            != observation_id
+        ):
             continue
         if not positive_int(item.get("id")) or not str(item.get("locus") or "").strip():
             unreadable += 1
     return unreadable
 
 
-def _mo_display_records(composites: Sequence[MOSequenceRecord]) -> tuple[ITSRecordSnapshot, ...]:
+def _mo_display_records(
+    composites: Sequence[MOSequenceRecord],
+) -> tuple[ITSRecordSnapshot, ...]:
     """Derive memory-only display snapshots; writes still use the composite rows."""
     records: list[ITSRecordSnapshot] = []
     for composite in composites:
         if composite.sequence_validation != "empty":
-            records.append(ITSRecordSnapshot(
-                site=RemoteSite.MO, observation_id=composite.observation_id,
-                remote_id=str(composite.sequence_id),
-                value_kind="sequence" if composite.has_bases else "invalid",
-                raw_sequence=composite.raw_bases, raw_value=composite.raw_bases,
-                normalized_sequence=composite.normalized_sequence,
-                sequence_fingerprint=composite.sequence_fingerprint, archive=composite.archive,
-                label=composite.locus, public_metadata=composite.public_metadata,
-                metadata_fingerprint=composite.record_fingerprint,
-                validation_state=composite.sequence_validation,
-                added_by_user_id=composite.creator_user_id,
-            ))
+            records.append(
+                ITSRecordSnapshot(
+                    site=RemoteSite.MO,
+                    observation_id=composite.observation_id,
+                    remote_id=str(composite.sequence_id),
+                    value_kind="sequence" if composite.has_bases else "invalid",
+                    raw_sequence=composite.raw_bases,
+                    raw_value=composite.raw_bases,
+                    normalized_sequence=composite.normalized_sequence,
+                    sequence_fingerprint=composite.sequence_fingerprint,
+                    archive=composite.archive,
+                    label=composite.locus,
+                    public_metadata=composite.public_metadata,
+                    metadata_fingerprint=composite.record_fingerprint,
+                    validation_state=composite.sequence_validation,
+                    added_by_user_id=composite.creator_user_id,
+                )
+            )
         if composite.accession_validation != "empty":
-            records.append(ITSRecordSnapshot(
-                site=RemoteSite.MO, observation_id=composite.observation_id,
-                remote_id=str(composite.sequence_id),
-                value_kind="accession" if composite.has_deposit else "invalid",
-                normalized_accession=composite.normalized_accession, archive=composite.archive,
-                # Show the exact raw MO accession text (memory only), never just
-                # the archive name, so a malformed value is visible.
-                raw_value=(
-                    composite.raw_accession
-                    or f"{composite.archive} {composite.normalized_accession}".strip()
-                ),
-                label=composite.locus, public_metadata=composite.public_metadata,
-                metadata_fingerprint=composite.record_fingerprint,
-                validation_state=composite.accession_validation,
-                added_by_user_id=composite.creator_user_id,
-            ))
+            records.append(
+                ITSRecordSnapshot(
+                    site=RemoteSite.MO,
+                    observation_id=composite.observation_id,
+                    remote_id=str(composite.sequence_id),
+                    value_kind="accession" if composite.has_deposit else "invalid",
+                    normalized_accession=composite.normalized_accession,
+                    archive=composite.archive,
+                    # Show the exact raw MO accession text (memory only), never just
+                    # the archive name, so a malformed value is visible.
+                    raw_value=(
+                        composite.raw_accession
+                        or f"{composite.archive} {composite.normalized_accession}".strip()
+                    ),
+                    label=composite.locus,
+                    public_metadata=composite.public_metadata,
+                    metadata_fingerprint=composite.record_fingerprint,
+                    validation_state=composite.accession_validation,
+                    added_by_user_id=composite.creator_user_id,
+                )
+            )
     return tuple(records)
 
 
@@ -1607,7 +2300,8 @@ def _comparison_states(live: _LiveITSState) -> tuple[str, ...]:
     inat_acc = _valid_kind(live.inat_records, "accession")
     mo_acc = [item for item in live.mo_sequences if item.has_deposit]
     inat_sequence_rows = {
-        item.remote_id for item in live.inat_records
+        item.remote_id
+        for item in live.inat_records
         if item.binding_id == live.inat_field_id
     }
     if len(inat_sequence_rows) > 1 or len(live.mo_sequences) > 1:
@@ -1618,9 +2312,14 @@ def _comparison_states(live: _LiveITSState) -> tuple[str, ...]:
         if inat_seq_hashes.intersection(mo_seq_hashes):
             exact = any(
                 left.normalized_sequence == right.normalized_sequence
-                for left in inat_seq for right in mo_seq
+                for left in inat_seq
+                for right in mo_seq
             )
-            states.append("same_normalized_sequence" if exact else "reverse_complement_equivalent_sequence")
+            states.append(
+                "same_normalized_sequence"
+                if exact
+                else "reverse_complement_equivalent_sequence"
+            )
         else:
             states.append("different_sequences")
     elif mo_seq:
@@ -1631,30 +2330,51 @@ def _comparison_states(live: _LiveITSState) -> tuple[str, ...]:
     inat_identities = {(item.archive, item.normalized_accession) for item in inat_acc}
     if inat_acc and mo_acc:
         states.append(
-            "same_accession" if mo_identities.intersection(inat_identities)
+            "same_accession"
+            if mo_identities.intersection(inat_identities)
             else "conflicting_accessions"
         )
     elif mo_acc:
         states.append("accession_present_only_on_mo")
     elif inat_acc:
         states.append("accession_present_only_on_inaturalist")
-    invalid = [
-        item.validation_state for item in live.inat_records if item.validation_state != "valid"
-    ] + [
-        item.sequence_validation for item in live.mo_sequences
-        if item.sequence_validation not in {"valid", "empty"}
-    ] + [
-        item.accession_validation for item in live.mo_sequences
-        if item.accession_validation not in {"valid", "empty"}
-    ]
-    if any(value in {
-        "sequence_too_short", "malformed_sequence", "invalid_sequence_value",
-    } for value in invalid):
+    invalid = (
+        [
+            item.validation_state
+            for item in live.inat_records
+            if item.validation_state != "valid"
+        ]
+        + [
+            item.sequence_validation
+            for item in live.mo_sequences
+            if item.sequence_validation not in {"valid", "empty"}
+        ]
+        + [
+            item.accession_validation
+            for item in live.mo_sequences
+            if item.accession_validation not in {"valid", "empty"}
+        ]
+    )
+    if any(
+        value
+        in {
+            "sequence_too_short",
+            "malformed_sequence",
+            "invalid_sequence_value",
+        }
+        for value in invalid
+    ):
         states.append("sequence_too_short_or_malformed")
-    if any(value in {
-        "invalid_accession", "accession_in_sequence_field", "accession_contains_sequence",
-        "non_genbank_accession",
-    } for value in invalid):
+    if any(
+        value
+        in {
+            "invalid_accession",
+            "accession_in_sequence_field",
+            "accession_contains_sequence",
+            "non_genbank_accession",
+        }
+        for value in invalid
+    ):
         states.append("invalid_accession_or_sequence_text")
     if live.specimen_conflict and inat_seq_hashes.intersection(mo_seq_hashes):
         states.append("sequence_equivalence_with_specimen_conflict")
@@ -1662,9 +2382,14 @@ def _comparison_states(live: _LiveITSState) -> tuple[str, ...]:
 
 
 def _valid_kind(
-    records: Sequence[ITSRecordSnapshot], kind: str,
+    records: Sequence[ITSRecordSnapshot],
+    kind: str,
 ) -> tuple[ITSRecordSnapshot, ...]:
-    return tuple(item for item in records if item.value_kind == kind and item.validation_state == "valid")
+    return tuple(
+        item
+        for item in records
+        if item.value_kind == kind and item.validation_state == "valid"
+    )
 
 
 def _sequence_fingerprints(records: Sequence[ITSRecordSnapshot]) -> set[str]:
@@ -1674,8 +2399,10 @@ def _sequence_fingerprints(records: Sequence[ITSRecordSnapshot]) -> set[str]:
 def _accessions(records: Sequence[ITSRecordSnapshot]) -> set[tuple[str, str]]:
     """Archive-qualified identities of valid iNaturalist accession values."""
     return {
-        (item.archive, item.normalized_accession) for item in records
-        if item.value_kind == "accession" and item.validation_state == "valid"
+        (item.archive, item.normalized_accession)
+        for item in records
+        if item.value_kind == "accession"
+        and item.validation_state == "valid"
         and item.normalized_accession
     }
 
@@ -1687,7 +2414,8 @@ def _mo_sequence_fingerprints(records: Sequence[MOSequenceRecord]) -> set[str]:
 def _mo_accessions(records: Sequence[MOSequenceRecord]) -> set[tuple[str, str]]:
     """Archive-qualified identities of valid MO deposits."""
     return {
-        item.accession_identity for item in records
+        item.accession_identity
+        for item in records
         if item.has_deposit and item.accession_identity is not None
     }
 
@@ -1717,8 +2445,12 @@ def _sequence_symbol_count(value: str) -> int:
 
 def _pair_fingerprint(pair: dict[str, Any]) -> str:
     return public_fingerprint(
-        "pair", pair.get("pair_id"), pair.get("updated_at"), pair.get("review_state"),
-        pair.get("link_state"), pair.get("confirmed_by"),
+        "pair",
+        pair.get("pair_id"),
+        pair.get("updated_at"),
+        pair.get("review_state"),
+        pair.get("link_state"),
+        pair.get("confirmed_by"),
     )
 
 
@@ -1728,8 +2460,13 @@ def _inat_record_fingerprint(raw: dict[str, Any]) -> str:
     taxon_raw = raw.get("taxon")
     taxon = taxon_raw if isinstance(taxon_raw, dict) else {}
     return public_fingerprint(
-        raw.get("id"), raw.get("uuid"), user.get("id"), raw.get("observed_on"),
-        raw.get("updated_at"), taxon.get("id"), taxon.get("ancestry"),
+        raw.get("id"),
+        raw.get("uuid"),
+        user.get("id"),
+        raw.get("observed_on"),
+        raw.get("updated_at"),
+        taxon.get("id"),
+        taxon.get("ancestry"),
     )
 
 

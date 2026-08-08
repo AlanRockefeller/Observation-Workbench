@@ -1,4 +1,5 @@
 """Safe, read-only observation information panel."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,7 +12,9 @@ from PySide6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
 from observation_workbench.models import StudyObservation
 
 if TYPE_CHECKING:
-    from observation_workbench.services.identify_action_presentation import IdentifyActionPresentation
+    from observation_workbench.services.identify_action_presentation import (
+        IdentifyActionPresentation,
+    )
 
 
 class IdentifyInfoTab(QScrollArea):
@@ -28,8 +31,7 @@ class IdentifyInfoTab(QScrollArea):
 
     def set_observation(self, observation: StudyObservation) -> None:
         reset_scroll = (
-            self._observation is None
-            or self._observation.obs_id != observation.obs_id
+            self._observation is None or self._observation.obs_id != observation.obs_id
         )
         self._observation = observation
         self._render()
@@ -64,14 +66,18 @@ class IdentifyInfoTab(QScrollArea):
         self._add_value("Created date", observation.created_at)
         self._add_value("Place", observation.place_guess)
         self._add_value("Coordinates", _coordinates(observation))
-        self._add_value("Positional accuracy", _positional_accuracy(observation.positional_accuracy))
+        self._add_value(
+            "Positional accuracy", _positional_accuracy(observation.positional_accuracy)
+        )
         self._add_value("Captive/Cultivated", _captive_status(observation.captive))
         self._add_value("Quality grade", observation.quality_grade)
         self._add_value("Observation taxon", _taxon_name(observation.taxon))
         self._add_value("Community taxon", _taxon_name(observation.community_taxon))
         self._add_value("Description", observation.description)
         self._add_value("Provisional species", observation.provisional_species_name)
-        self._add_value("DNA Barcode ITS", _dna_barcode_summary(observation.dna_barcode_its))
+        self._add_value(
+            "DNA Barcode ITS", _dna_barcode_summary(observation.dna_barcode_its)
+        )
         self._add_observation_link(observation.obs_id)
 
         self._add_heading("Identifications")
@@ -89,8 +95,13 @@ class IdentifyInfoTab(QScrollArea):
                 suffix = " (withdrawn)" if is_withdrawn else ""
                 if is_current_user:
                     suffix = " (your current ID)"
-                taxon = _taxon_name(getattr(identification, "taxon", None)) or "Unknown taxon"
-                created_at = _display_timestamp(getattr(identification, "created_at", ""))
+                taxon = (
+                    _taxon_name(getattr(identification, "taxon", None))
+                    or "Unknown taxon"
+                )
+                created_at = _display_timestamp(
+                    getattr(identification, "created_at", "")
+                )
                 body = getattr(identification, "body", "") or ""
                 detail_parts = [taxon]
                 identification_context = _identification_context(identification)
@@ -104,7 +115,8 @@ class IdentifyInfoTab(QScrollArea):
 
         self._add_heading("Comments")
         visible_comments = [
-            comment for comment in observation.comments
+            comment
+            for comment in observation.comments
             if not bool(getattr(comment, "hidden", False))
         ]
         if not visible_comments:
@@ -165,9 +177,7 @@ class IdentifyInfoTab(QScrollArea):
     def _add_observation_link(self, observation_id: int) -> None:
         safe_id = int(observation_id)
         url = f"https://www.inaturalist.org/observations/{safe_id}"
-        label = QLabel(
-            f'<a href="{url}">Open observation {safe_id} in browser</a>'
-        )
+        label = QLabel(f'<a href="{url}">Open observation {safe_id} in browser</a>')
         label.setTextFormat(Qt.TextFormat.RichText)
         label.setOpenExternalLinks(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)

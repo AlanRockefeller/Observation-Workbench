@@ -53,7 +53,9 @@ class ProvisionalNameSourceTests(unittest.TestCase):
     def test_different_provisional_name_does_not_match(self) -> None:
         obs = self._obs("Hygrocybe sp. 'flavescens-PNW06'")
 
-        self.assertFalse(observation_matches_source_provisional_name(obs, "Hygrocybe sp. 'other'"))
+        self.assertFalse(
+            observation_matches_source_provisional_name(obs, "Hygrocybe sp. 'other'")
+        )
 
     def test_blank_source_provisional_name_never_matches(self) -> None:
         obs = self._obs("Hygrocybe sp. 'flavescens-PNW06'")
@@ -184,7 +186,9 @@ class BulkDisagreeSetupDialogTests(unittest.TestCase):
 
     def test_strict_ancestor_target_enables_plan(self) -> None:
         dlg = self._dialog()
-        dlg._source_taxon = StudyTaxon(taxon_id=20, name="Genus species", ancestry="1/10")
+        dlg._source_taxon = StudyTaxon(
+            taxon_id=20, name="Genus species", ancestry="1/10"
+        )
         dlg._target_taxon_id = 10
         dlg._target_taxon_name = "Genus"
 
@@ -195,7 +199,9 @@ class BulkDisagreeSetupDialogTests(unittest.TestCase):
 
     def test_non_ancestor_target_enables_plan_with_warning(self) -> None:
         dlg = self._dialog()
-        dlg._source_taxon = StudyTaxon(taxon_id=20, name="Genus species", ancestry="1/10")
+        dlg._source_taxon = StudyTaxon(
+            taxon_id=20, name="Genus species", ancestry="1/10"
+        )
         dlg._target_taxon_id = 99
         dlg._target_taxon_name = "Other species"
 
@@ -209,7 +215,9 @@ class BulkDisagreeSetupDialogTests(unittest.TestCase):
 
     def test_same_source_and_target_is_rejected(self) -> None:
         dlg = self._dialog()
-        dlg._source_taxon = StudyTaxon(taxon_id=20, name="Genus species", ancestry="1/10")
+        dlg._source_taxon = StudyTaxon(
+            taxon_id=20, name="Genus species", ancestry="1/10"
+        )
         dlg._target_taxon_id = 20
         dlg._target_taxon_name = "Genus species"
 
@@ -250,7 +258,9 @@ class BulkDisagreeSetupDialogTests(unittest.TestCase):
             dlg.source_provisional_name(), "Hygrocybe sp. 'flavescens-PNW06'"
         )
         self.assertTrue(dlg._plan_btn.isEnabled())
-        self.assertIn("provisional species name", dlg._relationship_label.text().casefold())
+        self.assertIn(
+            "provisional species name", dlg._relationship_label.text().casefold()
+        )
 
     def test_resolved_source_taxon_defaults_into_target(self) -> None:
         dlg = self._dialog()
@@ -302,13 +312,17 @@ class BulkDisagreeAutocompleteTests(unittest.TestCase):
 
         self.assertEqual(
             results,
-            [[
-                ("Psathyrella", "Psathyrella — Genus", 1, "genus"),
-                ("Psathyrella", "Psathyrella — Section", 2, "section"),
-            ]],
+            [
+                [
+                    ("Psathyrella", "Psathyrella — Genus", 1, "genus"),
+                    ("Psathyrella", "Psathyrella — Section", 2, "section"),
+                ]
+            ],
         )
 
-    def test_alternate_identification_defaults_to_target_taxon_and_blank_comment(self) -> None:
+    def test_alternate_identification_defaults_to_target_taxon_and_blank_comment(
+        self,
+    ) -> None:
         candidate = type(
             "Candidate",
             (),
@@ -359,8 +373,12 @@ class GalleryImageWorkerTests(unittest.TestCase):
         )
         loaded = []
         failed = []
-        worker.signals.loaded.connect(lambda obs_id, photo_id, data: loaded.append((obs_id, photo_id, data)))
-        worker.signals.failed.connect(lambda obs_id, photo_id, msg: failed.append((obs_id, photo_id, msg)))
+        worker.signals.loaded.connect(
+            lambda obs_id, photo_id, data: loaded.append((obs_id, photo_id, data))
+        )
+        worker.signals.failed.connect(
+            lambda obs_id, photo_id, msg: failed.append((obs_id, photo_id, msg))
+        )
 
         worker.run()
 

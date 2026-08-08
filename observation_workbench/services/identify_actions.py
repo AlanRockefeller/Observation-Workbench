@@ -5,6 +5,7 @@ serializes unsafe requests, and requires an explicit per-action or
 current-account batch authorization before any queued request can leave the
 machine.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +20,11 @@ from uuid import UUID
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 
-from observation_workbench.api.client import INatAPIError, INatClient, UnsafeWriteOutcomeUnknown
+from observation_workbench.api.client import (
+    INatAPIError,
+    INatClient,
+    UnsafeWriteOutcomeUnknown,
+)
 from observation_workbench.storage.cache_db import (
     CacheDB,
     IdentifyEnqueueResult,
@@ -285,11 +290,15 @@ class _UUIDResolutionWorker(QRunnable):
             )
             observation = _first_v2_resource(raw)
             if not isinstance(observation, dict):
-                raise ValueError("v2 observation identity response had no observation record")
+                raise ValueError(
+                    "v2 observation identity response had no observation record"
+                )
             response_id = _as_positive_int(observation.get("id"))
             response_uuid = _normalise_uuid(observation.get("uuid"))
             if response_id != self._observation_id or not response_uuid:
-                raise ValueError("v2 observation identity response did not match the requested observation")
+                raise ValueError(
+                    "v2 observation identity response did not match the requested observation"
+                )
             result = ObservationUUIDResolution(
                 self._request_id,
                 self._observation_id,
@@ -341,7 +350,9 @@ class IdentifyActionManager(QObject):
         self._uuid_request_number = 0
         self._active_action_id: int | None = None
 
-        self._migrated_manual_retry_count = self._db.migrate_legacy_manual_retry_queued_actions()
+        self._migrated_manual_retry_count = (
+            self._db.migrate_legacy_manual_retry_queued_actions()
+        )
         recovered = self._db.recover_identify_submitting_actions()
         if self._migrated_manual_retry_count:
             log.info(
@@ -349,7 +360,9 @@ class IdentifyActionManager(QObject):
                 self._migrated_manual_retry_count,
             )
         if recovered:
-            log.info("Recovered %s interrupted Identify write(s) as ambiguous", recovered)
+            log.info(
+                "Recovered %s interrupted Identify write(s) as ambiguous", recovered
+            )
         self._emit_summary()
 
     # ------------------------------------------------------------------
@@ -433,7 +446,9 @@ class IdentifyActionManager(QObject):
             # failed_terminal, cancelled, tracking_cancelled, or a legacy state:
             # no actionable identification remains.
             disposition = "needs_retry"
-        return ExistingIdentification(action_id=action_id, state=state, disposition=disposition)
+        return ExistingIdentification(
+            action_id=action_id, state=state, disposition=disposition
+        )
 
     def queue_comment(
         self,
@@ -465,7 +480,9 @@ class IdentifyActionManager(QObject):
         desired_state: bool,
     ) -> IdentifyEnqueueResult:
         if action_type not in {"reviewed", "favorite"}:
-            raise ValueError("Desired-state actions are limited to reviewed and favorite")
+            raise ValueError(
+                "Desired-state actions are limited to reviewed and favorite"
+            )
         action = self._new_action(
             account_login=account_login,
             observation_id=observation_id,
@@ -551,7 +568,9 @@ class IdentifyActionManager(QObject):
     def actions_for_observation(self, observation_id: int) -> list[dict[str, Any]]:
         return [
             dict(action)
-            for action in self._db.get_identify_actions_for_observation(int(observation_id))
+            for action in self._db.get_identify_actions_for_observation(
+                int(observation_id)
+            )
         ]
 
     def action_summary(self) -> IdentifyActionSummary:
@@ -677,7 +696,9 @@ class IdentifyActionManager(QObject):
         queue = self.queue_summary()
         if queue.eligible_for_current_account:
             return True, queue.current_login
-        return False, queue.other_account_logins[0] if queue.other_account_logins else ""
+        return False, (
+            queue.other_account_logins[0] if queue.other_account_logins else ""
+        )
 
     def can_request_dispatch(self, action_id: int) -> tuple[bool, str]:
         """Validate a selected row before granting its one-action permission."""
@@ -746,7 +767,9 @@ class IdentifyActionManager(QObject):
             next_state = "tracking_cancelled"
         else:
             return False
-        changed = self._db.transition_identify_action(int(action_id), (state,), next_state)
+        changed = self._db.transition_identify_action(
+            int(action_id), (state,), next_state
+        )
         if changed:
             self._dispatch_authorized_action_ids.discard(int(action_id))
             self._emit_action_changed(action_id)
@@ -761,7 +784,9 @@ class IdentifyActionManager(QObject):
         if action is None or action["state"] not in VERIFYABLE_STATES:
             return False
         token, login, fingerprint = self._auth_context()
-        cached_identity = self._cached_identity(fingerprint, login, action["account_login"])
+        cached_identity = self._cached_identity(
+            fingerprint, login, action["account_login"]
+        )
         self._start_action_worker(
             action,
             token,
@@ -794,7 +819,9 @@ class IdentifyActionManager(QObject):
             self._emit_summary()
         return changed
 
-    def retry_anyway(self, action_id: int, duplicate_risk_confirmed: bool) -> int | None:
+    def retry_anyway(
+        self, action_id: int, duplicate_risk_confirmed: bool
+    ) -> int | None:
         """Create an acknowledged, linked retry without dispatching it.
 
         The source remains ambiguous so its potentially successful unsafe write
@@ -832,7 +859,9 @@ class IdentifyActionManager(QObject):
         """
         numeric_id = _as_positive_int(observation_id)
         if not numeric_id:
-            raise ValueError("Observation UUID resolution requires a positive numeric ID")
+            raise ValueError(
+                "Observation UUID resolution requires a positive numeric ID"
+            )
         self._uuid_request_number += 1
         request_number = self._uuid_request_number
         supplied_uuid = _normalise_uuid(observation_uuid)
@@ -876,7 +905,9 @@ class IdentifyActionManager(QObject):
         # account's selected action or batch-resume authorization.
         self._dispatch_authorized_action_ids.clear()
         self._paused = True
-        self.paused.emit("Authentication changed; queued Identify actions remain paused.")
+        self.paused.emit(
+            "Authentication changed; queued Identify actions remain paused."
+        )
         self.authentication_context_changed.emit()
 
     def prepare_shutdown(self) -> None:
@@ -912,7 +943,11 @@ class IdentifyActionManager(QObject):
             self._finish_authorized_dispatch_batch()
             return
         action = next(
-            (candidate for candidate in queued if int(candidate["local_action_id"]) in authorized),
+            (
+                candidate
+                for candidate in queued
+                if int(candidate["local_action_id"]) in authorized
+            ),
             None,
         )
         if action is None:
@@ -938,12 +973,18 @@ class IdentifyActionManager(QObject):
             return
 
         token, login, fingerprint = self._auth_context()
-        if not token or not login or login.casefold() != str(action["account_login"]).casefold():
+        if (
+            not token
+            or not login
+            or login.casefold() != str(action["account_login"]).casefold()
+        ):
             self.pause(
                 "Authenticate as the account that owns the authorized queued action before submitting."
             )
             return
-        cached_identity = self._cached_identity(fingerprint, login, action["account_login"])
+        cached_identity = self._cached_identity(
+            fingerprint, login, action["account_login"]
+        )
         if not self._db.transition_identify_action(
             action_id,
             ("queued",),
@@ -966,7 +1007,9 @@ class IdentifyActionManager(QObject):
             return
         self._emit_action_changed(action_id)
         self._active_action_id = action_id
-        self._start_action_worker(current, token, fingerprint, cached_identity, verify_only=False)
+        self._start_action_worker(
+            current, token, fingerprint, cached_identity, verify_only=False
+        )
 
     def _finish_authorized_dispatch_batch(self) -> None:
         """Return to paused after a selected action or batch snapshot drains."""
@@ -1061,9 +1104,14 @@ class IdentifyActionManager(QObject):
                 "failed_retryable",
                 **transition_values,
             )
-            if _is_auth_error(result.exception) or result.diagnostic == "account_mismatch":
+            if (
+                _is_auth_error(result.exception)
+                or result.diagnostic == "account_mismatch"
+            ):
                 self._identity_cache = None
-                self.pause("Authenticate again before retrying the queued Identify action.")
+                self.pause(
+                    "Authenticate again before retrying the queued Identify action."
+                )
         elif result.outcome is ActionOutcome.WRITE_OUTCOME_UNKNOWN:
             changed = self._db.transition_identify_action(
                 action_id,
@@ -1072,7 +1120,9 @@ class IdentifyActionManager(QObject):
                 outcome_unknown=1,
                 **transition_values,
             )
-            self.pause("An unsafe Identify write may have reached iNaturalist; it will not be retried automatically.")
+            self.pause(
+                "An unsafe Identify write may have reached iNaturalist; it will not be retried automatically."
+            )
         elif result.outcome is ActionOutcome.WRITE_DEFINITELY_REJECTED:
             if result.diagnostic == "local_write_failure":
                 # The request was never built, so no credential refresh or
@@ -1091,7 +1141,9 @@ class IdentifyActionManager(QObject):
             )
             if _is_auth_error(result.exception):
                 self._identity_cache = None
-                self.pause("Authenticate again before retrying the rejected Identify action.")
+                self.pause(
+                    "Authenticate again before retrying the rejected Identify action."
+                )
         else:
             verification = result.verification or VerificationResult(
                 VerificationStatus.READ_FAILED,
@@ -1146,7 +1198,10 @@ class IdentifyActionManager(QObject):
                 str(action["state"]),
                 **values,
             )
-            if _is_auth_error(result.exception) or result.diagnostic == "account_mismatch":
+            if (
+                _is_auth_error(result.exception)
+                or result.diagnostic == "account_mismatch"
+            ):
                 self._identity_cache = None
                 self.pause("Authenticate again before verifying the Identify action.")
         else:
@@ -1193,9 +1248,12 @@ class IdentifyActionManager(QObject):
                 response_received=result.write_response_received,
                 response_metadata=result.response_metadata,
             ),
-            "server_object_id": result.server_object_id or str(action.get("server_object_id") or ""),
-            "write_response_id": result.server_object_id or str(action.get("write_response_id") or ""),
-            "write_response_uuid": result.server_object_uuid or str(action.get("write_response_uuid") or ""),
+            "server_object_id": result.server_object_id
+            or str(action.get("server_object_id") or ""),
+            "write_response_id": result.server_object_id
+            or str(action.get("write_response_id") or ""),
+            "write_response_uuid": result.server_object_uuid
+            or str(action.get("write_response_uuid") or ""),
         }
         if result.phase is ActionPhase.VERIFICATION_READ:
             values["verification_attempt_count"] = (
@@ -1221,7 +1279,9 @@ class IdentifyActionManager(QObject):
         identity = cached_identity
         if identity is None:
             try:
-                identity = _extract_account_identity(self._client.get_current_user_v2(token))
+                identity = _extract_account_identity(
+                    self._client.get_current_user_v2(token)
+                )
             except Exception as exc:
                 log.debug(
                     "Identify action %s account preflight failed (%s: %s)",
@@ -1369,7 +1429,9 @@ class IdentifyActionManager(QObject):
             taxon_id = int(payload["taxon_id"])
             body = str(payload.get("body") or "")
             raw_disagreement = payload.get("disagreement")
-            disagreement = bool(raw_disagreement) if raw_disagreement is not None else None
+            disagreement = (
+                bool(raw_disagreement) if raw_disagreement is not None else None
+            )
             return lambda: self._client.create_identification_v2(
                 token, observation_uuid, taxon_id, body, disagreement
             )
@@ -1378,10 +1440,14 @@ class IdentifyActionManager(QObject):
             return lambda: self._client.create_comment_v2(token, observation_uuid, body)
         if kind == "reviewed":
             desired_state = bool(action["desired_state"])
-            return lambda: self._client.set_reviewed_v2(token, observation_uuid, desired_state)
+            return lambda: self._client.set_reviewed_v2(
+                token, observation_uuid, desired_state
+            )
         if kind == "favorite":
             desired_state = bool(action["desired_state"])
-            return lambda: self._client.set_favorite_v2(token, observation_uuid, desired_state)
+            return lambda: self._client.set_favorite_v2(
+                token, observation_uuid, desired_state
+            )
         if kind == "quality_metric":
             metric = str(payload["metric"])
             vote = str(payload["vote"])
@@ -1399,26 +1465,41 @@ class IdentifyActionManager(QObject):
         server_uuid: str = "",
     ) -> VerificationResult:
         try:
-            raw = self._client.get_observation_v2(str(action["observation_uuid"]), token)
+            raw = self._client.get_observation_v2(
+                str(action["observation_uuid"]), token
+            )
             observation = _first_v2_resource(raw)
             if not isinstance(observation, dict):
-                return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_observation")
+                return VerificationResult(
+                    VerificationStatus.INSUFFICIENT_FIELDS, "missing_observation"
+                )
             if not _observation_matches_action(observation, action):
-                return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "observation_identity_missing_or_mismatched")
+                return VerificationResult(
+                    VerificationStatus.INSUFFICIENT_FIELDS,
+                    "observation_identity_missing_or_mismatched",
+                )
             kind = str(action["action_type"])
             if kind == "identification":
-                return _verify_identification(action, observation, identity, server_id, server_uuid)
+                return _verify_identification(
+                    action, observation, identity, server_id, server_uuid
+                )
             if kind == "comment":
-                return _verify_comment(action, observation, identity, server_id, server_uuid)
+                return _verify_comment(
+                    action, observation, identity, server_id, server_uuid
+                )
             if kind == "reviewed":
                 return _verify_reviewed(action, observation, identity)
             if kind == "favorite":
                 return _verify_favorite(action, observation, identity)
             if kind == "quality_metric":
                 return _verify_quality_metric(action, observation, identity)
-            return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "unknown_action_type")
+            return VerificationResult(
+                VerificationStatus.INSUFFICIENT_FIELDS, "unknown_action_type"
+            )
         except Exception as exc:
-            return VerificationResult(VerificationStatus.READ_FAILED, _safe_exception_diagnostic(exc))
+            return VerificationResult(
+                VerificationStatus.READ_FAILED, _safe_exception_diagnostic(exc)
+            )
 
     # ------------------------------------------------------------------
     # Safe cache, signal, and data helpers
@@ -1429,7 +1510,9 @@ class IdentifyActionManager(QObject):
         observation_id = int(values["observation_id"])
         observation_uuid = _normalise_uuid(values["observation_uuid"])
         if not observation_uuid:
-            raise ValueError("Identify actions require a valid non-empty observation UUID")
+            raise ValueError(
+                "Identify actions require a valid non-empty observation UUID"
+            )
         action_type = str(values["action_type"])
         payload = values["payload"]
         desired_state = values["desired_state"]
@@ -1563,14 +1646,18 @@ class IdentifyActionManager(QObject):
             # queued result reaches the UI event loop.
             return
 
-    def _queue_immediate_uuid_resolution(self, result: ObservationUUIDResolution) -> None:
+    def _queue_immediate_uuid_resolution(
+        self, result: ObservationUUIDResolution
+    ) -> None:
         """Queue even supplied UUIDs so callers receive the ID before its signal."""
         QTimer.singleShot(
             0,
             lambda resolution=result: self._emit_immediate_uuid_resolution(resolution),
         )
 
-    def _emit_immediate_uuid_resolution(self, result: ObservationUUIDResolution) -> None:
+    def _emit_immediate_uuid_resolution(
+        self, result: ObservationUUIDResolution
+    ) -> None:
         try:
             if self._shutting_down:
                 self.observation_uuid_resolved.emit(
@@ -1599,28 +1686,41 @@ def _verify_identification(
     if records is None:
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, diagnostic)
     if not present:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_identifications")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_identifications"
+        )
     payload = _action_payload(action)
     target_taxon = _as_positive_int(payload.get("taxon_id"))
     target_body = str(payload.get("body") or "")
     if not target_taxon:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "invalid_payload")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "invalid_payload"
+        )
     if server_id or server_uuid:
         matching = [
-            record for record in records
+            record
+            for record in records
             if _record_identifier_matches(record, server_id, server_uuid)
         ]
         if not matching:
-            return VerificationResult(VerificationStatus.NOT_FOUND, "returned_identification_not_found")
-        return _match_identification_record(matching[0], identity, target_taxon, target_body)
+            return VerificationResult(
+                VerificationStatus.NOT_FOUND, "returned_identification_not_found"
+            )
+        return _match_identification_record(
+            matching[0], identity, target_taxon, target_body
+        )
 
     attempt_started_at = _as_timestamp(action.get("attempt_started_at"))
     if attempt_started_at is None:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_attempt_timestamp")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_attempt_timestamp"
+        )
     saw_old_match = False
     unreadable = ""
     for record in records:
-        candidate = _match_identification_record(record, identity, target_taxon, target_body)
+        candidate = _match_identification_record(
+            record, identity, target_taxon, target_body
+        )
         if candidate.status is VerificationStatus.INSUFFICIENT_FIELDS:
             # One unreadable sibling -- an identification whose author was
             # suspended, so the API sends `user: null` -- must not hide our own
@@ -1642,7 +1742,11 @@ def _verify_identification(
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
     return VerificationResult(
         VerificationStatus.NOT_FOUND,
-        "only_preexisting_matching_identification" if saw_old_match else "matching_identification_not_found",
+        (
+            "only_preexisting_matching_identification"
+            if saw_old_match
+            else "matching_identification_not_found"
+        ),
     )
 
 
@@ -1656,26 +1760,40 @@ def _match_identification_record(
     if user is None:
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, diagnostic)
     if not _identity_matches(user, identity):
-        return VerificationResult(VerificationStatus.MISMATCHED, "identification_user_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "identification_user_mismatch"
+        )
     if "taxon_id" not in record or not isinstance(record.get("taxon"), dict):
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_identification_taxon")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_identification_taxon"
+        )
     taxon_id = _as_positive_int(record.get("taxon_id"))
     nested_taxon_id = _as_positive_int(record["taxon"].get("id"))
     if not taxon_id or not nested_taxon_id:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "invalid_identification_taxon")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "invalid_identification_taxon"
+        )
     if taxon_id != nested_taxon_id or taxon_id != target_taxon:
-        return VerificationResult(VerificationStatus.MISMATCHED, "identification_taxon_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "identification_taxon_mismatch"
+        )
     if "body" not in record:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_identification_body")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_identification_body"
+        )
     if str(record.get("body") or "") != target_body:
-        return VerificationResult(VerificationStatus.MISMATCHED, "identification_body_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "identification_body_mismatch"
+        )
     if record.get("current") is not True:
         # ``current`` is a supersession flag, not evidence that this action's
         # write failed: iNaturalist clears it as soon as the same account posts
         # a finer identification.  The record's existence still proves the
         # write reached the server, and reporting it as missing would invite a
         # duplicate resubmission -- exactly what this journal exists to prevent.
-        return VerificationResult(VerificationStatus.CONFIRMED, "identification_superseded")
+        return VerificationResult(
+            VerificationStatus.CONFIRMED, "identification_superseded"
+        )
     return VerificationResult(VerificationStatus.CONFIRMED)
 
 
@@ -1690,20 +1808,27 @@ def _verify_comment(
     if records is None:
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, diagnostic)
     if not present:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_comments")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_comments"
+        )
     target_body = str(_action_payload(action).get("body") or "")
     if server_id or server_uuid:
         matching = [
-            record for record in records
+            record
+            for record in records
             if _record_identifier_matches(record, server_id, server_uuid)
         ]
         if not matching:
-            return VerificationResult(VerificationStatus.NOT_FOUND, "returned_comment_not_found")
+            return VerificationResult(
+                VerificationStatus.NOT_FOUND, "returned_comment_not_found"
+            )
         return _match_comment_record(matching[0], identity, target_body)
 
     attempt_started_at = _as_timestamp(action.get("attempt_started_at"))
     if attempt_started_at is None:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_attempt_timestamp")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_attempt_timestamp"
+        )
     saw_old_match = False
     unreadable = ""
     for record in records:
@@ -1726,7 +1851,11 @@ def _verify_comment(
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
     return VerificationResult(
         VerificationStatus.NOT_FOUND,
-        "only_preexisting_matching_comment" if saw_old_match else "matching_comment_not_found",
+        (
+            "only_preexisting_matching_comment"
+            if saw_old_match
+            else "matching_comment_not_found"
+        ),
     )
 
 
@@ -1739,11 +1868,17 @@ def _match_comment_record(
     if user is None:
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, diagnostic)
     if not _identity_matches(user, identity):
-        return VerificationResult(VerificationStatus.MISMATCHED, "comment_user_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "comment_user_mismatch"
+        )
     if "body" not in record or "created_at" not in record or "hidden" not in record:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_comment_fields")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_comment_fields"
+        )
     if str(record.get("body") or "") != target_body:
-        return VerificationResult(VerificationStatus.MISMATCHED, "comment_body_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "comment_body_mismatch"
+        )
     # A deleted comment simply stops appearing in the observation's `comments`
     # array; the v2 Comment schema has no `deleted_at`, so there is nothing to
     # test for here beyond moderator hiding.  Hiding happens *after* a
@@ -1764,7 +1899,9 @@ def _verify_reviewed(
     raw = observation.get("reviewed_by")
     present = "reviewed_by" in observation and raw is not None
     if present and not isinstance(raw, list):
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "invalid_reviewed_by")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "invalid_reviewed_by"
+        )
     reviewer_ids: set[int] = set()
     unreadable = ""
     for value in (raw if isinstance(raw, list) else []):
@@ -1777,7 +1914,9 @@ def _verify_reviewed(
         # Presence is conclusive whatever else the array contains.
         if desired:
             return VerificationResult(VerificationStatus.CONFIRMED)
-        return VerificationResult(VerificationStatus.MISMATCHED, "reviewed_state_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "reviewed_state_mismatch"
+        )
     if unreadable:
         # An entry we could not read may be ours, so absence is not established.
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
@@ -1786,7 +1925,9 @@ def _verify_reviewed(
         # satisfies just as well as an empty one.
         return VerificationResult(VerificationStatus.CONFIRMED)
     if not present:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_reviewed_by")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_reviewed_by"
+        )
     return VerificationResult(VerificationStatus.MISMATCHED, "reviewed_state_mismatch")
 
 
@@ -1811,14 +1952,18 @@ def _verify_favorite(
     if identity.user_id in favorite_user_ids:
         if desired:
             return VerificationResult(VerificationStatus.CONFIRMED)
-        return VerificationResult(VerificationStatus.MISMATCHED, "favorite_state_mismatch")
+        return VerificationResult(
+            VerificationStatus.MISMATCHED, "favorite_state_mismatch"
+        )
     if unreadable:
         # One of the records we could not read may be ours.
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
     if not desired:
         return VerificationResult(VerificationStatus.CONFIRMED)
     if not present:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_faves")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "missing_faves"
+        )
     return VerificationResult(VerificationStatus.MISMATCHED, "favorite_state_mismatch")
 
 
@@ -1837,7 +1982,9 @@ def _verify_quality_metric(
     metric = str(payload.get("metric") or "")
     vote = str(payload.get("vote") or "")
     if metric not in {"wild"} or vote not in {"agree", "disagree", "remove"}:
-        return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "invalid_payload")
+        return VerificationResult(
+            VerificationStatus.INSUFFICIENT_FIELDS, "invalid_payload"
+        )
     records, diagnostic, present = _records(observation, "quality_metrics")
     if records is None:
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, diagnostic)
@@ -1866,10 +2013,14 @@ def _verify_quality_metric(
 
     if vote == "remove":
         if matching_agree_values:
-            return VerificationResult(VerificationStatus.MISMATCHED, "quality_metric_vote_still_present")
+            return VerificationResult(
+                VerificationStatus.MISMATCHED, "quality_metric_vote_still_present"
+            )
         if unreadable:
             # A vote on this metric we could not attribute may be ours.
-            return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
+            return VerificationResult(
+                VerificationStatus.INSUFFICIENT_FIELDS, unreadable
+            )
         # Removal is proven by absence, which an omitted array satisfies.
         return VerificationResult(VerificationStatus.CONFIRMED)
 
@@ -1880,9 +2031,15 @@ def _verify_quality_metric(
         return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, unreadable)
     if not matching_agree_values:
         if not present:
-            return VerificationResult(VerificationStatus.INSUFFICIENT_FIELDS, "missing_quality_metrics")
-        return VerificationResult(VerificationStatus.NOT_FOUND, "quality_metric_vote_not_found")
-    return VerificationResult(VerificationStatus.MISMATCHED, "quality_metric_agree_mismatch")
+            return VerificationResult(
+                VerificationStatus.INSUFFICIENT_FIELDS, "missing_quality_metrics"
+            )
+        return VerificationResult(
+            VerificationStatus.NOT_FOUND, "quality_metric_vote_not_found"
+        )
+    return VerificationResult(
+        VerificationStatus.MISMATCHED, "quality_metric_agree_mismatch"
+    )
 
 
 def _records(
@@ -1930,22 +2087,21 @@ def _identity_matches(actual: AccountIdentity, expected: AccountIdentity) -> boo
     return (
         actual.user_id == expected.user_id
         and actual.login.casefold() == expected.login.casefold()
-        and (
-            not actual.uuid
-            or not expected.uuid
-            or actual.uuid == expected.uuid
-        )
+        and (not actual.uuid or not expected.uuid or actual.uuid == expected.uuid)
     )
 
 
-def _observation_matches_action(observation: dict[str, Any], action: dict[str, Any]) -> bool:
-    return (
-        _as_positive_int(observation.get("id")) == int(action["observation_id"])
-        and _normalise_uuid(observation.get("uuid")) == str(action["observation_uuid"])
-    )
+def _observation_matches_action(
+    observation: dict[str, Any], action: dict[str, Any]
+) -> bool:
+    return _as_positive_int(observation.get("id")) == int(
+        action["observation_id"]
+    ) and _normalise_uuid(observation.get("uuid")) == str(action["observation_uuid"])
 
 
-def _record_identifier_matches(record: dict[str, Any], server_id: str, server_uuid: str) -> bool:
+def _record_identifier_matches(
+    record: dict[str, Any], server_id: str, server_uuid: str
+) -> bool:
     if server_id and str(record.get("id") or "") == server_id:
         return True
     return bool(server_uuid and _normalise_uuid(record.get("uuid")) == server_uuid)
@@ -2026,7 +2182,9 @@ def _journal_action_is_executable(action: dict[str, Any]) -> bool:
                 payload.get("body", ""), str
             )
         if kind == "comment":
-            return isinstance(payload.get("body"), str) and bool(payload["body"].strip())
+            return isinstance(payload.get("body"), str) and bool(
+                payload["body"].strip()
+            )
         if kind == "quality_metric":
             # desired_state must remain unset: the tri-state operation lives
             # entirely in the payload, never in reviewed/favorite's boolean.
@@ -2037,7 +2195,10 @@ def _journal_action_is_executable(action: dict[str, Any]) -> bool:
                 "disagree",
                 "remove",
             }
-        return kind in {"reviewed", "favorite"} and _coerce_desired_state(action.get("desired_state")) is not None
+        return (
+            kind in {"reviewed", "favorite"}
+            and _coerce_desired_state(action.get("desired_state")) is not None
+        )
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
 
@@ -2111,7 +2272,9 @@ def _safe_exception_diagnostic(exc: BaseException) -> str:
             return "observation_or_resource_unavailable"
         if exc.status_code == 409:
             return "server_conflict_requires_review"
-        if exc.status_code == 429 or (exc.status_code is not None and exc.status_code >= 500):
+        if exc.status_code == 429 or (
+            exc.status_code is not None and exc.status_code >= 500
+        ):
             return "temporary_server_or_rate_limit_problem"
         if exc.status_code is not None:
             return f"http_{exc.status_code}"
@@ -2134,10 +2297,7 @@ def _bounded_diagnostic_value(value: Any, *, depth: int = 0) -> Any:
             for key, item in list(value.items())[:8]
         }
     if isinstance(value, (list, tuple)):
-        return [
-            _bounded_diagnostic_value(item, depth=depth + 1)
-            for item in value[:8]
-        ]
+        return [_bounded_diagnostic_value(item, depth=depth + 1) for item in value[:8]]
     return str(value)[:160]
 
 
@@ -2191,6 +2351,9 @@ def _diagnostic_json(
 
 def _verification_diagnostic_json(verification: VerificationResult) -> str:
     return _bounded_diagnostic_json(
-        {"status": verification.status.value, "diagnostic": verification.diagnostic[:160]},
+        {
+            "status": verification.status.value,
+            "diagnostic": verification.diagnostic[:160],
+        },
         limit=800,
     )

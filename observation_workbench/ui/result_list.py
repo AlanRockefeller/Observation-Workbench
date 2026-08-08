@@ -6,18 +6,33 @@ Uses QListWidget with a custom QStyledItemDelegate. All layout metrics
 are derived from QFontMetrics so the row scales correctly at any text size.
 Thumbnails load asynchronously and are stored as item data roles.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import (
-    QObject, QPoint, QRect, QRunnable, QSize, QThreadPool, Qt, Signal, Slot,
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QSize,
+    QThreadPool,
+    Qt,
+    Signal,
+    Slot,
 )
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QListWidget, QListWidgetItem,
-    QStyle, QStyledItemDelegate, QStyleOptionViewItem, QVBoxLayout, QWidget,
+    QApplication,
+    QListWidget,
+    QListWidgetItem,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.api.client import INatClient
@@ -30,13 +45,14 @@ THUMB_SIZE = 60
 
 _OBS_ROLE = Qt.ItemDataRole.UserRole
 
-_PAD = 6   # pixels of padding around thumbnail and at row edges
-_GAP = 2   # vertical gap between text lines
+_PAD = 6  # pixels of padding around thumbnail and at row edges
+_GAP = 2  # vertical gap between text lines
 
 
 # ---------------------------------------------------------------------------
 # Background thumbnail loader (unchanged)
 # ---------------------------------------------------------------------------
+
 
 class _ThumbSignals(QObject):
     loaded = Signal(int, QPixmap)  # obs_id, pixmap
@@ -77,7 +93,8 @@ class _ThumbWorker(QRunnable):
             img.loadFromData(cached)
             if not img.isNull():
                 thumb = img.scaled(
-                    THUMB_SIZE, THUMB_SIZE,
+                    THUMB_SIZE,
+                    THUMB_SIZE,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -90,6 +107,7 @@ class _ThumbWorker(QRunnable):
 # Delegate
 # ---------------------------------------------------------------------------
 
+
 class ResultItemDelegate(QStyledItemDelegate):
     """
     Draws each row: thumbnail on the left, text block on the right.
@@ -99,7 +117,9 @@ class ResultItemDelegate(QStyledItemDelegate):
     ElideRight if they would overflow the available width.
     """
 
-    def __init__(self, font_scale: float = 1.0, parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self, font_scale: float = 1.0, parent: Optional[QObject] = None
+    ) -> None:
         super().__init__(parent)
         self._font_scale = font_scale
         self._thumbnails: Dict[int, QPixmap] = {}  # obs_id → pixmap
@@ -196,7 +216,7 @@ class ResultItemDelegate(QStyledItemDelegate):
 
         title_f, meta_f, status_f = self._make_fonts()
         title_fm = QFontMetrics(title_f)
-        meta_fm  = QFontMetrics(meta_f)
+        meta_fm = QFontMetrics(meta_f)
         status_fm = QFontMetrics(status_f)
 
         # --- Thumbnail (top-aligned to row top + padding) ---
@@ -204,7 +224,8 @@ class ResultItemDelegate(QStyledItemDelegate):
         pixmap: Optional[QPixmap] = self._thumbnails.get(obs.obs_id)
         if pixmap and not pixmap.isNull():
             scaled = pixmap.scaled(
-                THUMB_SIZE, THUMB_SIZE,
+                THUMB_SIZE,
+                THUMB_SIZE,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -277,6 +298,7 @@ class ResultItemDelegate(QStyledItemDelegate):
 # Result list widget
 # ---------------------------------------------------------------------------
 
+
 class ResultList(QWidget):
     """
     Left panel showing all loaded observations.
@@ -323,13 +345,13 @@ class ResultList(QWidget):
         count = self._list.count()
         if count == 0:
             return
-            
+
         viewport_rect = self._list.viewport().rect()
         cx = viewport_rect.width() // 2
         bottom_y = viewport_rect.bottom()
-        
+
         bottom_index = self._list.indexAt(QPoint(cx, bottom_y))
-        
+
         if not bottom_index.isValid():
             last_item = self._list.item(count - 1)
             if last_item:
@@ -342,7 +364,7 @@ class ResultList(QWidget):
                 return
         else:
             last_visible_row = bottom_index.row()
-            
+
         if count - 1 - last_visible_row <= 15:
             self.near_bottom_reached.emit(count)
 

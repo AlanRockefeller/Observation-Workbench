@@ -3,6 +3,7 @@
 This module deliberately has no database, network, or UI dependencies. Every
 irreversible boundary calls the same validator over structured evidence rows.
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -14,21 +15,24 @@ from .types import ConsolidationEvidenceEdge, RemoteSite
 MemberKey = tuple[RemoteSite, int]
 CanonicalAnchorSignature = tuple[str, str]
 
-STRONG_EVIDENCE_TYPES = frozenset({
-    "authoritative_link_mo_to_inat",
-    "authoritative_link_inat_to_mo",
-    "exact_voucher",
-    "exact_collection_number",
-    "native_media_identity",
-})
-CORROBORATING_EVIDENCE_TYPES = frozenset({
-    "exact_date_close_coordinates",
-})
+STRONG_EVIDENCE_TYPES = frozenset(
+    {
+        "authoritative_link_mo_to_inat",
+        "authoritative_link_inat_to_mo",
+        "exact_voucher",
+        "exact_collection_number",
+        "native_media_identity",
+    }
+)
+CORROBORATING_EVIDENCE_TYPES = frozenset(
+    {
+        "exact_date_close_coordinates",
+    }
+)
 EVIDENCE_STRENGTH_BY_TYPE = {
     **{evidence_type: "strong" for evidence_type in STRONG_EVIDENCE_TYPES},
     **{
-        evidence_type: "corroborating"
-        for evidence_type in CORROBORATING_EVIDENCE_TYPES
+        evidence_type: "corroborating" for evidence_type in CORROBORATING_EVIDENCE_TYPES
     },
 }
 
@@ -76,7 +80,8 @@ def canonical_strong_anchor_signatures(
         and {
             (edge.left_site, edge.left_observation_id),
             (edge.right_site, edge.right_observation_id),
-        } == canonical_pair
+        }
+        == canonical_pair
     )
 
 
@@ -141,8 +146,7 @@ def validate_consolidation_graph(
                 continue
             seen.add(node)
             queue.extend(
-                neighbor for neighbor, _edge in adjacency[node]
-                if neighbor not in seen
+                neighbor for neighbor, _edge in adjacency[node] if neighbor not in seen
             )
         if seen != nodes:
             missing = sorted(
@@ -155,10 +159,12 @@ def validate_consolidation_graph(
             )
 
     canonical = {
-        key for key in (
+        key
+        for key in (
             (RemoteSite.MO, canonical_mo_id),
             (RemoteSite.INAT, canonical_inat_id),
-        ) if key[1] is not None
+        )
+        if key[1] is not None
     }
     if not canonical:
         return ConsolidationGraphValidation(True, (), ())
@@ -169,10 +175,7 @@ def validate_consolidation_graph(
     if canonical_mo_id is not None and canonical_inat_id is not None:
         mo_key = (RemoteSite.MO, canonical_mo_id)
         inat_key = (RemoteSite.INAT, canonical_inat_id)
-        direct = [
-            edge for neighbor, edge in adjacency[mo_key]
-            if neighbor == inat_key
-        ]
+        direct = [edge for neighbor, edge in adjacency[mo_key] if neighbor == inat_key]
         if not direct:
             return _invalid(
                 "The selected canonical MO and iNaturalist records do not have a "
@@ -247,7 +250,8 @@ def _strong_anchored_path(
         canonical=target[0],
         hops=tuple(hops),
         strong_anchor_index=next(
-            index for index, hop in enumerate(hops)
+            index
+            for index, hop in enumerate(hops)
             if hop.edge.evidence_strength == "strong"
         ),
     )

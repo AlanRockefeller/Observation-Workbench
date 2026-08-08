@@ -2,6 +2,7 @@
 Persistent application settings using QSettings (INI format).
 Provides typed accessors for all user-configurable values.
 """
+
 from __future__ import annotations
 
 import json
@@ -64,11 +65,16 @@ class AppSettings:
         if self._s.status() != QSettings.Status.NoError:
             log.warning(
                 "Could not fully migrate legacy settings from %s (status=%s)",
-                legacy.fileName(), self._s.status(),
+                legacy.fileName(),
+                self._s.status(),
             )
             return
-        log.info("Migrated %d settings from %s to %s",
-                 len(keys), legacy.fileName(), self._s.fileName())
+        log.info(
+            "Migrated %d settings from %s to %s",
+            len(keys),
+            legacy.fileName(),
+            self._s.fileName(),
+        )
 
     def _migrate_legacy_cache_dir(self) -> None:
         """Move ~/.cache/inat_study to ~/.cache/observation_workbench, once.
@@ -89,7 +95,8 @@ class AppSettings:
                 "Both the legacy cache directory (%s) and the current one (%s) exist; "
                 "using the current one and leaving the legacy data in place. "
                 "Merge or delete it by hand if you want the old cache back.",
-                legacy, current,
+                legacy,
+                current,
             )
             return
         try:
@@ -98,7 +105,9 @@ class AppSettings:
         except OSError as exc:
             # Cross-device or permission failure: keep using the old location
             # rather than silently starting from an empty cache and journal.
-            log.warning("Could not migrate cache directory %s -> %s: %s", legacy, current, exc)
+            log.warning(
+                "Could not migrate cache directory %s -> %s: %s", legacy, current, exc
+            )
             self._s.setValue("cache/dir", str(legacy))
             self._s.sync()
             return
@@ -227,7 +236,9 @@ class AppSettings:
 
     @bulk_agree_source_mode.setter
     def bulk_agree_source_mode(self, v: str) -> None:
-        self._s.setValue("bulk_agree/source_mode", v if v in ("url", "current") else "url")
+        self._s.setValue(
+            "bulk_agree/source_mode", v if v in ("url", "current") else "url"
+        )
 
     @property
     def bulk_agree_require_dna_barcode_its(self) -> bool:
@@ -348,7 +359,9 @@ class AppSettings:
 
     @property
     def bulk_disagree_require_source_taxon_match(self) -> bool:
-        return self._s.value("bulk_disagree/require_source_taxon_match", True, type=bool)
+        return self._s.value(
+            "bulk_disagree/require_source_taxon_match", True, type=bool
+        )
 
     @bulk_disagree_require_source_taxon_match.setter
     def bulk_disagree_require_source_taxon_match(self, v: bool) -> None:

@@ -5,6 +5,7 @@ calls. Logging is intentionally metadata-only: query values,
 redirects, response bodies, notes, coordinates, and field values never reach
 the log.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,8 +47,13 @@ class ReconciliationCancelled(RuntimeError):
 
 class MOAPIError(RuntimeError):
     def __init__(
-        self, endpoint: str, status_code: Optional[int], message: str, *,
-        response_received: bool = False, outcome_unknown: bool = False,
+        self,
+        endpoint: str,
+        status_code: Optional[int],
+        message: str,
+        *,
+        response_received: bool = False,
+        outcome_unknown: bool = False,
         error_code: str = "",
     ) -> None:
         super().__init__(message)
@@ -102,9 +108,11 @@ class MOResponse(dict):
 class MOWriteOutcomeUnknown(MOAPIError):
     def __init__(self, endpoint: str, method: str, cause: Exception) -> None:
         super().__init__(
-            endpoint, None,
+            endpoint,
+            None,
             f"Mushroom Observer {method} result is unknown after a transport interruption.",
-            outcome_unknown=True, error_code="unsafe_transport_interruption",
+            outcome_unknown=True,
+            error_code="unsafe_transport_interruption",
         )
         self.__cause__ = cause
 
@@ -151,7 +159,9 @@ class MOClient:
             raise ReconciliationCancelled("Reconciliation scan cancelled")
 
     def download_image(
-        self, url: str, cancelled: Optional[Callable[[], bool]] = None,
+        self,
+        url: str,
+        cancelled: Optional[Callable[[], bool]] = None,
     ) -> bytes:
         """Read one MO image, SERIALIZED and spaced, and return its bytes.
 
@@ -181,7 +191,8 @@ class MOClient:
                     response = self._image_client.get(url)
                     if response.status_code in MO_RETRYABLE_STATUSES:
                         raise MOAPIError(
-                            "image", response.status_code,
+                            "image",
+                            response.status_code,
                             f"Mushroom Observer image server returned {response.status_code}",
                             response_received=True,
                         )
@@ -209,8 +220,12 @@ class MOClient:
             )
 
     def _get(
-        self, endpoint: str, params: dict[str, Any], cancelled: Callable[[], bool],
-        *, accept_help_error: bool = False,
+        self,
+        endpoint: str,
+        params: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        accept_help_error: bool = False,
     ) -> dict[str, Any]:
         """Read one MO endpoint, RETRYING transient transport failures.
 
@@ -236,7 +251,10 @@ class MOClient:
             attempt += 1
             try:
                 return self._get_once(
-                    endpoint, params, cancelled, accept_help_error=accept_help_error,
+                    endpoint,
+                    params,
+                    cancelled,
+                    accept_help_error=accept_help_error,
                 )
             except MOAPIError as exc:
                 if attempt > MO_READ_ATTEMPTS or not _is_transient_read_failure(exc):
@@ -247,18 +265,27 @@ class MOClient:
                 delay = MO_RETRY_BACKOFF_S * attempt
                 log.warning(
                     "MO GET /%s transient failure (%s); retry %d of %d in %.0fs",
-                    endpoint, exc.status_code or "no-response", attempt,
-                    MO_READ_ATTEMPTS, delay,
+                    endpoint,
+                    exc.status_code or "no-response",
+                    attempt,
+                    MO_READ_ATTEMPTS,
+                    delay,
                 )
                 deadline = time.monotonic() + delay
                 while time.monotonic() < deadline:
                     if cancelled():
-                        raise ReconciliationCancelled("Reconciliation scan cancelled") from exc
+                        raise ReconciliationCancelled(
+                            "Reconciliation scan cancelled"
+                        ) from exc
                     time.sleep(0.2)
 
     def _get_once(
-        self, endpoint: str, params: dict[str, Any], cancelled: Callable[[], bool],
-        *, accept_help_error: bool = False,
+        self,
+        endpoint: str,
+        params: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        accept_help_error: bool = False,
     ) -> dict[str, Any]:
         with self._lock:
             self._wait(cancelled)
@@ -268,56 +295,88 @@ class MOClient:
             status: Optional[int] = None
             response_received = False
             try:
-                response = self._client.get(f"/{endpoint}", params={"format": "json", **params})
+                response = self._client.get(
+                    f"/{endpoint}", params={"format": "json", **params}
+                )
                 response_received = True
                 status = response.status_code
                 elapsed = time.monotonic() - started
                 try:
                     payload = response.json()
                 except ValueError as exc:
-                    raise MOAPIError(endpoint, status, "Mushroom Observer returned invalid JSON") from exc
+                    raise MOAPIError(
+                        endpoint, status, "Mushroom Observer returned invalid JSON"
+                    ) from exc
                 runtime = _runtime(payload)
                 self._last_runtime = max(0.0, runtime)
                 log.info("MO GET /%s status=%s time=%.3fs", endpoint, status, elapsed)
-                if response.is_error and not (accept_help_error and _is_help_payload(payload)):
-                    raise MOAPIError(endpoint, status, _sanitized_error(payload, status))
+                if response.is_error and not (
+                    accept_help_error and _is_help_payload(payload)
+                ):
+                    raise MOAPIError(
+                        endpoint, status, _sanitized_error(payload, status)
+                    )
                 # MO returns HTTP 200 even for a fatal error (already established
                 # for writes in _write; reads have the same convention but were
                 # never checked for it here, so a rejected/misnamed filter param
                 # silently returned an empty result set instead of raising —
                 # discovered live via a hardcoded 'limit' param _batched sent to
                 # several endpoints that do not accept it).
-                if _has_fatal_error(payload) and not (accept_help_error and _is_help_payload(payload)):
+                if _has_fatal_error(payload) and not (
+                    accept_help_error and _is_help_payload(payload)
+                ):
                     # The MO error CODE is carried through (the human-readable
                     # details are not — they echo request values). Callers need
                     # it to tell a negative result apart from a real failure:
                     # 'this name does not exist' is FATAL to MO but an ordinary
                     # answer to us (see resolve_user).
                     raise MOAPIError(
-                        endpoint, status, _sanitized_error(payload, status),
-                        response_received=True, error_code=_first_error_code(payload),
+                        endpoint,
+                        status,
+                        _sanitized_error(payload, status),
+                        response_received=True,
+                        error_code=_first_error_code(payload),
                     )
                 if not isinstance(payload, dict):
-                    raise MOAPIError(endpoint, status, "Mushroom Observer returned an unexpected response")
+                    raise MOAPIError(
+                        endpoint,
+                        status,
+                        "Mushroom Observer returned an unexpected response",
+                    )
                 if cancelled():
                     raise ReconciliationCancelled("Reconciliation scan cancelled")
                 return payload
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 self._last_finished = time.monotonic()
-                log.warning("MO GET /%s status=%s failed=%s", endpoint, status, type(exc).__name__)
-                raise MOAPIError(endpoint, status, f"Mushroom Observer request failed: {type(exc).__name__}") from exc
+                log.warning(
+                    "MO GET /%s status=%s failed=%s",
+                    endpoint,
+                    status,
+                    type(exc).__name__,
+                )
+                raise MOAPIError(
+                    endpoint,
+                    status,
+                    f"Mushroom Observer request failed: {type(exc).__name__}",
+                ) from exc
             finally:
                 if response_received:
                     # Even invalid JSON consumed a completed MO request and
                     # must start the conservative spacing interval.
                     self._last_finished = time.monotonic()
 
-    def discover_observation_capabilities(self, cancelled: Callable[[], bool]) -> dict[str, bool]:
-        payload = self._get("observations", {"help": 1}, cancelled, accept_help_error=True)
+    def discover_observation_capabilities(
+        self, cancelled: Callable[[], bool]
+    ) -> dict[str, bool]:
+        payload = self._get(
+            "observations", {"help": 1}, cancelled, accept_help_error=True
+        )
         flattened = str(payload).casefold()
         return {"updated_at": "updated_at" in flattened}
 
-    def resolve_user(self, login: str, cancelled: Callable[[], bool]) -> Optional[dict[str, Any]]:
+    def resolve_user(
+        self, login: str, cancelled: Callable[[], bool]
+    ) -> Optional[dict[str, Any]]:
         """Resolve one MO account by its login name.
 
         /api2/users accepts ONLY ``created_at``, ``id`` and ``updated_at``
@@ -356,7 +415,12 @@ class MOClient:
         return None
 
     def observations_page(
-        self, user_id: int, page: int, cancelled: Callable[[], bool], *, updated_at: str = "",
+        self,
+        user_id: int,
+        page: int,
+        cancelled: Callable[[], bool],
+        *,
+        updated_at: str = "",
     ) -> dict[str, Any]:
         """Read one page of an MO account's observations.
 
@@ -376,12 +440,23 @@ class MOClient:
             params["updated_at"] = updated_at
         return self._get("observations", params, cancelled)
 
-    def observation(self, observation_id: int, cancelled: Callable[[], bool], *, detail: str = "high") -> dict[str, Any]:
-        return self._get("observations", {"id": int(observation_id), "detail": detail}, cancelled)
+    def observation(
+        self,
+        observation_id: int,
+        cancelled: Callable[[], bool],
+        *,
+        detail: str = "high",
+    ) -> dict[str, Any]:
+        return self._get(
+            "observations", {"id": int(observation_id), "detail": detail}, cancelled
+        )
 
     def observations(
-        self, observation_ids: Iterable[int], cancelled: Callable[[], bool],
-        *, detail: str = "high",
+        self,
+        observation_ids: Iterable[int],
+        cancelled: Callable[[], bool],
+        *,
+        detail: str = "high",
     ) -> dict[str, Any]:
         """Read many observations by id, batched — the plural of ``observation``.
 
@@ -396,18 +471,26 @@ class MOClient:
         from ``results``, so callers must key off each returned row's id.
         """
         return self._batched(
-            "observations", "id", observation_ids, cancelled,
-            batch_size=100, detail=detail,
+            "observations",
+            "id",
+            observation_ids,
+            cancelled,
+            batch_size=100,
+            detail=detail,
         )
 
     def names(
-        self, ids: Iterable[int], cancelled: Callable[[], bool],
+        self,
+        ids: Iterable[int],
+        cancelled: Callable[[], bool],
         progress: Optional[Callable[[int, int], None]] = None,
     ) -> dict[str, Any]:
         return self._batched("names", "id", ids, cancelled, progress=progress)
 
     def sequences(
-        self, observer_id: int, observation_ids: Iterable[int],
+        self,
+        observer_id: int,
+        observation_ids: Iterable[int],
         cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         """Read the sequences attached to one account's observations.
@@ -437,11 +520,13 @@ class MOClient:
         """
         wanted = {int(value) for value in observation_ids}
         rows = self._paged(
-            "sequences", {"observer": int(observer_id)}, cancelled, detail="high",
+            "sequences",
+            {"observer": int(observer_id)},
+            cancelled,
+            detail="high",
         )
         matched = [
-            row for row in rows
-            if _positive_int(row.get("observation_id")) in wanted
+            row for row in rows if _positive_int(row.get("observation_id")) in wanted
         ]
         return {"results": matched, "total_results": len(matched)}
 
@@ -449,18 +534,28 @@ class MOClient:
         return self._get("external_sites", {"detail": "low"}, cancelled)
 
     def external_links(
-        self, observation_ids: Iterable[int], cancelled: Callable[[], bool],
+        self,
+        observation_ids: Iterable[int],
+        cancelled: Callable[[], bool],
         progress: Optional[Callable[[int, int], None]] = None,
     ) -> dict[str, Any]:
         return self._batched(
-            "external_links", "observation", observation_ids, cancelled, progress=progress,
+            "external_links",
+            "observation",
+            observation_ids,
+            cancelled,
+            progress=progress,
         )
 
-    def images(self, image_ids: Iterable[int], cancelled: Callable[[], bool]) -> dict[str, Any]:
+    def images(
+        self, image_ids: Iterable[int], cancelled: Callable[[], bool]
+    ) -> dict[str, Any]:
         return self._batched("images", "id", image_ids, cancelled)
 
     def images_for_observation(
-        self, observation_id: int, cancelled: Callable[[], bool],
+        self,
+        observation_id: int,
+        cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         """Enumerate one observation's images with license and copyright holder.
 
@@ -475,11 +570,15 @@ class MOClient:
         )
 
     def authenticated_user_id(
-        self, api_key: str, expected_user_id: int, cancelled: Callable[[], bool],
+        self,
+        api_key: str,
+        expected_user_id: int,
+        cancelled: Callable[[], bool],
     ) -> Optional[int]:
         """Resolve an API key without exposing it outside this client call."""
         payload = self._get(
-            "users", {"api_key": api_key, "id": int(expected_user_id), "detail": "low"},
+            "users",
+            {"api_key": api_key, "id": int(expected_user_id), "detail": "low"},
             cancelled,
         )
         try:
@@ -489,61 +588,99 @@ class MOClient:
         return value if value > 0 else None
 
     def create_external_link(
-        self, api_key: str, observation_id: int, external_site_id: int, url: str,
+        self,
+        api_key: str,
+        observation_id: int,
+        external_site_id: int,
+        url: str,
         cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         return self._write(
-            "POST", "external_links",
-            {"api_key": api_key, "observation": int(observation_id),
-             "external_site": int(external_site_id), "url": url},
+            "POST",
+            "external_links",
+            {
+                "api_key": api_key,
+                "observation": int(observation_id),
+                "external_site": int(external_site_id),
+                "url": url,
+            },
             cancelled,
         )
 
     def update_external_link(
-        self, api_key: str, link_id: int, url: str, cancelled: Callable[[], bool],
+        self,
+        api_key: str,
+        link_id: int,
+        url: str,
+        cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         return self._write(
-            "PATCH", "external_links",
+            "PATCH",
+            "external_links",
             {"api_key": api_key, "id": int(link_id), "set_url": url},
             cancelled,
         )
 
     def delete_external_link(
-        self, api_key: str, link_id: int, cancelled: Callable[[], bool],
+        self,
+        api_key: str,
+        link_id: int,
+        cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         return self._write(
-            "DELETE", "external_links", {"api_key": api_key, "id": int(link_id)},
+            "DELETE",
+            "external_links",
+            {"api_key": api_key, "id": int(link_id)},
             cancelled,
         )
 
     def create_sequence(
-        self, api_key: str, observation_id: int, locus: str,
-        cancelled: Callable[[], bool], *, bases: str = "", archive: str = "",
-        accession: str = "", notes: str = "",
+        self,
+        api_key: str,
+        observation_id: int,
+        locus: str,
+        cancelled: Callable[[], bool],
+        *,
+        bases: str = "",
+        archive: str = "",
+        accession: str = "",
+        notes: str = "",
     ) -> dict[str, Any]:
         """Create one sequence using API2's documented SequenceAPI fields."""
         data: dict[str, Any] = {
-            "api_key": api_key, "observation": int(observation_id), "locus": locus,
+            "api_key": api_key,
+            "observation": int(observation_id),
+            "locus": locus,
         }
         for key, value in (
-            ("bases", bases), ("archive", archive),
-            ("accession", accession), ("notes", notes),
+            ("bases", bases),
+            ("archive", archive),
+            ("accession", accession),
+            ("notes", notes),
         ):
             if value:
                 data[key] = value
         return self._write("POST", "sequences", data, cancelled)
 
     def update_sequence(
-        self, api_key: str, sequence_id: int, cancelled: Callable[[], bool], *,
-        locus: Optional[str] = None, bases: Optional[str] = None,
-        archive: Optional[str] = None, accession: Optional[str] = None,
+        self,
+        api_key: str,
+        sequence_id: int,
+        cancelled: Callable[[], bool],
+        *,
+        locus: Optional[str] = None,
+        bases: Optional[str] = None,
+        archive: Optional[str] = None,
+        accession: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> dict[str, Any]:
         """Patch one exact sequence using only supported ``set_*`` fields."""
         data: dict[str, Any] = {"api_key": api_key, "id": int(sequence_id)}
         for key, value in (
-            ("set_locus", locus), ("set_bases", bases),
-            ("set_archive", archive), ("set_accession", accession),
+            ("set_locus", locus),
+            ("set_bases", bases),
+            ("set_archive", archive),
+            ("set_accession", accession),
             ("set_notes", notes),
         ):
             if value is not None:
@@ -551,11 +688,21 @@ class MOClient:
         return self._write("PATCH", "sequences", data, cancelled)
 
     def create_observation(
-        self, api_key: str, cancelled: Callable[[], bool], *,
-        date: str, name: str, location: str = "", notes: str = "",
-        latitude: Optional[float] = None, longitude: Optional[float] = None,
-        gps_hidden: Optional[bool] = None, has_specimen: Optional[bool] = None,
-        collection_number: str = "", accession_number: str = "", herbarium: str = "",
+        self,
+        api_key: str,
+        cancelled: Callable[[], bool],
+        *,
+        date: str,
+        name: str,
+        location: str = "",
+        notes: str = "",
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        gps_hidden: Optional[bool] = None,
+        has_specimen: Optional[bool] = None,
+        collection_number: str = "",
+        accession_number: str = "",
+        herbarium: str = "",
     ) -> dict[str, Any]:
         """Gate 2A: ``POST /api2/observations`` — create a brand-new MO observation.
 
@@ -574,7 +721,9 @@ class MOClient:
         is responsible for disclosing that to the user before writing it.
         """
         data: dict[str, Any] = {
-            "api_key": api_key, "date": date, "name": name,
+            "api_key": api_key,
+            "date": date,
+            "name": name,
         }
         if location:
             data["location"] = location
@@ -597,7 +746,11 @@ class MOClient:
         return self._write("POST", "observations", data, cancelled)
 
     def find_observation_by_marker(
-        self, api_key: str, marker: str, cancelled: Callable[[], bool], *,
+        self,
+        api_key: str,
+        marker: str,
+        cancelled: Callable[[], bool],
+        *,
         user_id: Optional[int] = None,
     ) -> dict[str, Any]:
         """Gate 2A: locate a just-created (or lost-response) observation by its
@@ -622,15 +775,27 @@ class MOClient:
         (typically ``outcome_unknown``) and is never retried automatically —
         callers must not treat a search failure as proof of anything.
         """
-        params: dict[str, Any] = {"api_key": api_key, "notes_has": marker, "detail": "low"}
+        params: dict[str, Any] = {
+            "api_key": api_key,
+            "notes_has": marker,
+            "detail": "low",
+        }
         if user_id is not None:
             params["user"] = int(user_id)
         return self._get("observations", params, cancelled)
 
     def create_image(
-        self, api_key: str, observation_id: int, image_bytes: bytes, *,
-        filename: str, content_type: str, license_id: int, copyright_holder: str,
-        cancelled: Callable[[], bool], md5sum: str = "",
+        self,
+        api_key: str,
+        observation_id: int,
+        image_bytes: bytes,
+        *,
+        filename: str,
+        content_type: str,
+        license_id: int,
+        copyright_holder: str,
+        cancelled: Callable[[], bool],
+        md5sum: str = "",
     ) -> dict[str, Any]:
         """Gate 2A: ``POST /api2/images`` with attach-at-create via ``observations``.
 
@@ -645,7 +810,9 @@ class MOClient:
         """
         if not image_bytes:
             raise MOAPIError(
-                "images", None, "Refusing to upload an empty photo body.",
+                "images",
+                None,
+                "Refusing to upload an empty photo body.",
                 error_code="empty_photo_body",
             )
         data: dict[str, Any] = {
@@ -657,13 +824,21 @@ class MOClient:
         if md5sum:
             data["md5sum"] = md5sum
         return self._write(
-            "POST", "images", data, cancelled,
+            "POST",
+            "images",
+            data,
+            cancelled,
             files={"upload": (filename, image_bytes, content_type)},
         )
 
     def _write(
-        self, method: str, endpoint: str, data: dict[str, Any],
-        cancelled: Callable[[], bool], *, files: Optional[dict[str, Any]] = None,
+        self,
+        method: str,
+        endpoint: str,
+        data: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        files: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Submit one unsafe API2 request exactly once, then return for verification."""
         with self._lock:
@@ -674,7 +849,10 @@ class MOClient:
             status: Optional[int] = None
             try:
                 response = self._client.request(
-                    method, f"/{endpoint}", data={"format": "json", **data}, files=files,
+                    method,
+                    f"/{endpoint}",
+                    data={"format": "json", **data},
+                    files=files,
                 )
                 status = response.status_code
                 elapsed = time.monotonic() - started
@@ -682,19 +860,33 @@ class MOClient:
                     payload = response.json()
                 except ValueError as exc:
                     self._last_finished = time.monotonic()
-                    log.info("MO %s /%s status=%s time=%.3fs", method, endpoint, status, elapsed)
+                    log.info(
+                        "MO %s /%s status=%s time=%.3fs",
+                        method,
+                        endpoint,
+                        status,
+                        elapsed,
+                    )
                     raise MOAPIError(
-                        endpoint, status, "Mushroom Observer returned invalid JSON after a write.",
-                        response_received=True, outcome_unknown=True,
+                        endpoint,
+                        status,
+                        "Mushroom Observer returned invalid JSON after a write.",
+                        response_received=True,
+                        outcome_unknown=True,
                         error_code="invalid_write_response",
                     ) from exc
                 self._last_runtime = max(0.0, _runtime(payload))
                 self._last_finished = time.monotonic()
-                log.info("MO %s /%s status=%s time=%.3fs", method, endpoint, status, elapsed)
+                log.info(
+                    "MO %s /%s status=%s time=%.3fs", method, endpoint, status, elapsed
+                )
                 if not isinstance(payload, dict):
                     raise MOAPIError(
-                        endpoint, status, "Mushroom Observer returned an unexpected write response.",
-                        response_received=True, outcome_unknown=True,
+                        endpoint,
+                        status,
+                        "Mushroom Observer returned an unexpected write response.",
+                        response_received=True,
+                        outcome_unknown=True,
                         error_code="unexpected_write_response",
                     )
                 # Only a FATAL entry is a rejection. MO returns advisory,
@@ -714,24 +906,41 @@ class MOClient:
                         and status not in {400, 401, 403, 404, 409, 422}
                     )
                     raise MOAPIError(
-                        endpoint, status, "Mushroom Observer rejected the reconciliation action.",
-                        response_received=True, outcome_unknown=uncertain_status,
+                        endpoint,
+                        status,
+                        "Mushroom Observer rejected the reconciliation action.",
+                        response_received=True,
+                        outcome_unknown=uncertain_status,
                         error_code=code or f"http_{status}",
                     )
                 return MOResponse(
                     payload,
                     MOResponseMetadata(
-                        endpoint=endpoint, method=method, status_code=int(status),
+                        endpoint=endpoint,
+                        method=method,
+                        status_code=int(status),
                     ),
                 )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 self._last_finished = time.monotonic()
-                log.warning("MO %s /%s status=%s failed=%s", method, endpoint, status, type(exc).__name__)
+                log.warning(
+                    "MO %s /%s status=%s failed=%s",
+                    method,
+                    endpoint,
+                    status,
+                    type(exc).__name__,
+                )
                 raise MOWriteOutcomeUnknown(endpoint, method, exc) from exc
 
     def _batched(
-        self, endpoint: str, key: str, values: Iterable[int], cancelled: Callable[[], bool],
-        batch_size: int = 100, *, detail: str = "low",
+        self,
+        endpoint: str,
+        key: str,
+        values: Iterable[int],
+        cancelled: Callable[[], bool],
+        batch_size: int = 100,
+        *,
+        detail: str = "low",
         progress: Optional[Callable[[int, int], None]] = None,
     ) -> dict[str, Any]:
         """Read many ids in batches.
@@ -744,15 +953,21 @@ class MOClient:
         ids = [int(value) for value in values]
         combined: list[dict[str, Any]] = []
         for start in range(0, len(ids), batch_size):
-            batch = ",".join(str(value) for value in ids[start:start + batch_size])
-            combined.extend(self._paged(endpoint, {key: batch}, cancelled, detail=detail))
+            batch = ",".join(str(value) for value in ids[start : start + batch_size])
+            combined.extend(
+                self._paged(endpoint, {key: batch}, cancelled, detail=detail)
+            )
             if progress is not None:
                 progress(min(start + batch_size, len(ids)), len(ids))
         return {"results": combined, "total_results": len(combined)}
 
     def _paged(
-        self, endpoint: str, params: dict[str, Any], cancelled: Callable[[], bool],
-        *, detail: str = "low",
+        self,
+        endpoint: str,
+        params: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        detail: str = "low",
     ) -> list[dict[str, Any]]:
         """Read every page of one filtered query, newest MO paging conventions.
 
@@ -776,7 +991,9 @@ class MOClient:
             if cancelled():
                 raise ReconciliationCancelled("Reconciliation scan cancelled")
             payload = self._get(
-                endpoint, {**params, "detail": detail, "page": page}, cancelled,
+                endpoint,
+                {**params, "detail": detail, "page": page},
+                cancelled,
             )
             rows = _results(payload)
             signature = tuple(str(item.get("id") or item) for item in rows)
@@ -797,7 +1014,9 @@ def _runtime(payload: object) -> float:
     for container in (payload, payload.get("meta"), payload.get("response")):
         if isinstance(container, dict):
             try:
-                return float(container.get("run_time") or container.get("runtime") or 0.0)
+                return float(
+                    container.get("run_time") or container.get("runtime") or 0.0
+                )
             except (TypeError, ValueError):
                 pass
     return 0.0
@@ -832,7 +1051,15 @@ def _positive_int(value: object) -> Optional[int]:
 def _results(payload: object) -> list[dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
-    for key in ("results", "observations", "users", "external_links", "sequences", "images", "names"):
+    for key in (
+        "results",
+        "observations",
+        "users",
+        "external_links",
+        "sequences",
+        "images",
+        "names",
+    ):
         value = payload.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]

@@ -1,14 +1,26 @@
 """
 Settings dialog: cache size, memory limit, prefetch radius, cache directory.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox,
-    QVBoxLayout, QWidget,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QDoubleSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.storage.settings import AppSettings

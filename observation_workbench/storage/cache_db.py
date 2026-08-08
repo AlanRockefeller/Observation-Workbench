@@ -7,14 +7,17 @@ Tables:
 
 Performance: WAL journal mode + synchronous=NORMAL to avoid UI stutters.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
 from dataclasses import dataclass
+
 try:
     import sqlite3
+
     sqlite3.connect(":memory:").close()  # verify it actually works
 except Exception:
     # Fallback for conda environments with broken _sqlite3.so
@@ -388,7 +391,10 @@ def _validate_identify_payload(action_type: str, payload: Any) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Identify action payload must be a JSON object")
     if action_type == "identification":
-        if set(payload) - {"taxon_id", "body", "disagreement"} or "taxon_id" not in payload:
+        if (
+            set(payload) - {"taxon_id", "body", "disagreement"}
+            or "taxon_id" not in payload
+        ):
             raise ValueError(
                 "Identification payload must contain taxon_id and optional body/disagreement"
             )
@@ -396,7 +402,9 @@ def _validate_identify_payload(action_type: str, payload: Any) -> None:
             if int(payload["taxon_id"]) <= 0:
                 raise ValueError
         except (TypeError, ValueError) as exc:
-            raise ValueError("Identification taxon_id must be a positive integer") from exc
+            raise ValueError(
+                "Identification taxon_id must be a positive integer"
+            ) from exc
         if "body" in payload and not isinstance(payload["body"], str):
             raise ValueError("Identification body must be text")
         if "disagreement" in payload and not isinstance(payload["disagreement"], bool):
@@ -410,11 +418,17 @@ def _validate_identify_payload(action_type: str, payload: Any) -> None:
         return
     if action_type == "quality_metric":
         if set(payload) != {"metric", "vote"}:
-            raise ValueError("Quality metric payload must contain exactly metric and vote")
+            raise ValueError(
+                "Quality metric payload must contain exactly metric and vote"
+            )
         if payload.get("metric") not in QUALITY_METRICS:
-            raise ValueError("Quality metric payload metric must be 'wild' in this gate")
+            raise ValueError(
+                "Quality metric payload metric must be 'wild' in this gate"
+            )
         if payload.get("vote") not in QUALITY_METRIC_VOTES:
-            raise ValueError("Quality metric payload vote must be agree, disagree, or remove")
+            raise ValueError(
+                "Quality metric payload vote must be agree, disagree, or remove"
+            )
         return
     if payload:
         raise ValueError(f"{action_type} actions do not accept a payload")
@@ -438,7 +452,9 @@ def _validate_identify_states(states: Iterable[str]) -> None:
 def _validate_identify_transition_values(values: Dict[str, Any]) -> None:
     unexpected = set(values) - _IDENTIFY_MUTABLE_COLUMNS
     if unexpected:
-        raise ValueError(f"Unsupported Identify journal update columns: {sorted(unexpected)}")
+        raise ValueError(
+            f"Unsupported Identify journal update columns: {sorted(unexpected)}"
+        )
     for key, value in values.items():
         if key in {"attempt_count", "verification_attempt_count", "manual_retry_count"}:
             if not isinstance(value, int) or value < 0:
@@ -447,7 +463,12 @@ def _validate_identify_transition_values(values: Dict[str, Any]) -> None:
             if value not in {0, 1, False, True}:
                 raise ValueError("outcome_unknown must be boolean")
         elif key == "last_operation_phase":
-            if value not in {"", "account_preflight", "unsafe_write", "verification_read"}:
+            if value not in {
+                "",
+                "account_preflight",
+                "unsafe_write",
+                "verification_read",
+            }:
                 raise ValueError("Unsupported Identify operation phase")
         elif key in {"last_error_json", "verification_diagnostic"}:
             limit = 2000 if key == "last_error_json" else 800
@@ -539,7 +560,9 @@ class CacheDB:
             if name in columns:
                 continue
             try:
-                conn.execute(f"ALTER TABLE identify_actions ADD COLUMN {name} {definition}")
+                conn.execute(
+                    f"ALTER TABLE identify_actions ADD COLUMN {name} {definition}"
+                )
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc):
                     raise
@@ -638,7 +661,9 @@ class CacheDB:
                 f"SELECT {columns} FROM identify_actions"
             )
             conn.execute("DROP TABLE identify_actions")
-            conn.execute("ALTER TABLE identify_actions_rebuild RENAME TO identify_actions")
+            conn.execute(
+                "ALTER TABLE identify_actions_rebuild RENAME TO identify_actions"
+            )
             # Dropping the table dropped its indexes with it.
             for statement in _IDENTIFY_INDEX_STATEMENTS:
                 conn.execute(statement)
@@ -646,7 +671,9 @@ class CacheDB:
         except Exception:
             conn.rollback()
             raise
-        log.info("Rebuilt identify_actions with state and action_type CHECK constraints")
+        log.info(
+            "Rebuilt identify_actions with state and action_type CHECK constraints"
+        )
 
     @staticmethod
     def _identify_table_needs_constraints(conn: sqlite3.Connection) -> bool:
@@ -740,7 +767,9 @@ class CacheDB:
             return None
         age = time.time() - row["cached_at"]
         if age > QUERY_CACHE_TTL:
-            conn.execute("DELETE FROM taxon_summary_cache WHERE cache_key=?", (cache_key,))
+            conn.execute(
+                "DELETE FROM taxon_summary_cache WHERE cache_key=?", (cache_key,)
+            )
             conn.commit()
             return None
         return json.loads(row["data"])
@@ -778,7 +807,9 @@ class CacheDB:
     def get_total_image_cache_size(self) -> int:
         """Return total bytes of tracked image files."""
         conn = self._conn()
-        row = conn.execute("SELECT COALESCE(SUM(file_size),0) as total FROM image_access_log").fetchone()
+        row = conn.execute(
+            "SELECT COALESCE(SUM(file_size),0) as total FROM image_access_log"
+        ).fetchone()
         return int(row["total"])
 
     def get_lru_images(self, limit: int = 100) -> List[Dict]:
@@ -821,7 +852,9 @@ class CacheDB:
         """Atomically deduplicate a durable identification or comment action."""
         prepared = _validate_identify_action(action)
         if prepared["action_type"] not in {"identification", "comment"}:
-            raise ValueError("This enqueue method accepts identification or comment actions only")
+            raise ValueError(
+                "This enqueue method accepts identification or comment actions only"
+            )
 
         conn = self._conn()
         now = time.time()
@@ -837,7 +870,9 @@ class CacheDB:
             ).fetchone()
             if row is not None:
                 conn.commit()
-                return IdentifyEnqueueResult(duplicate_action_id=int(row["local_action_id"]))
+                return IdentifyEnqueueResult(
+                    duplicate_action_id=int(row["local_action_id"])
+                )
             cursor = self._insert_identify_action(conn, prepared, now)
             conn.commit()
             return IdentifyEnqueueResult(inserted_action_id=int(cursor.lastrowid))
@@ -866,7 +901,9 @@ class CacheDB:
         """
         prepared = _validate_identify_action(action)
         if prepared["action_type"] not in {"reviewed", "favorite"}:
-            raise ValueError("This enqueue method accepts reviewed or favorite actions only")
+            raise ValueError(
+                "This enqueue method accepts reviewed or favorite actions only"
+            )
 
         conn = self._conn()
         now = time.time()
@@ -1032,7 +1069,9 @@ class CacheDB:
             ),
         )
 
-    def get_identify_actions(self, states: Optional[Tuple[str, ...]] = None) -> List[Dict]:
+    def get_identify_actions(
+        self, states: Optional[Tuple[str, ...]] = None
+    ) -> List[Dict]:
         """Return all actions, or only the explicitly supplied non-empty states."""
         if states is not None:
             states = tuple(states)
@@ -1306,7 +1345,11 @@ class CacheDB:
             conn.execute(
                 "UPDATE identify_actions SET manual_retry_count=?, outcome_unknown=1, "
                 "updated_at=? WHERE local_action_id=? AND state='ambiguous'",
-                (int(row["manual_retry_count"] or 0) + 1, now, int(row["local_action_id"])),
+                (
+                    int(row["manual_retry_count"] or 0) + 1,
+                    now,
+                    int(row["local_action_id"]),
+                ),
             )
             conn.commit()
             return int(cursor.lastrowid)
@@ -1340,7 +1383,9 @@ class CacheDB:
 
     def get_all_bulk_agree_skips(self) -> List[int]:
         conn = self._conn()
-        rows = conn.execute("SELECT obs_id FROM bulk_agree_skip ORDER BY skipped_at DESC").fetchall()
+        rows = conn.execute(
+            "SELECT obs_id FROM bulk_agree_skip ORDER BY skipped_at DESC"
+        ).fetchall()
         return [r["obs_id"] for r in rows]
 
     # ------------------------------------------------------------------
@@ -1369,7 +1414,9 @@ class CacheDB:
 
     def get_all_bulk_disagree_skips(self) -> List[int]:
         conn = self._conn()
-        rows = conn.execute("SELECT obs_id FROM bulk_disagree_skip ORDER BY skipped_at DESC").fetchall()
+        rows = conn.execute(
+            "SELECT obs_id FROM bulk_disagree_skip ORDER BY skipped_at DESC"
+        ).fetchall()
         return [r["obs_id"] for r in rows]
 
     def clear_all_caches(self) -> None:

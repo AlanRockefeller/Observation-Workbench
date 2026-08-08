@@ -4,6 +4,7 @@ Workers decode bytes to :class:`QImage`; only the GUI-thread handler creates
 QPixmaps.  Per-photo retry state prevents a missing original rendition from
 being requested whenever a cached fallback re-enters a prefetch radius.
 """
+
 from __future__ import annotations
 
 import logging
@@ -165,7 +166,11 @@ class _ImageWorker(QRunnable):
         try:
             self.signals.terminal.emit(result)
         except RuntimeError as exc:
-            log.debug("Dropped terminal image result for photo %d: %s", self._request.photo_id, exc)
+            log.debug(
+                "Dropped terminal image result for photo %d: %s",
+                self._request.photo_id,
+                exc,
+            )
 
     def _load(self) -> _ImageTerminalResult:
         if self._is_cancelled():
@@ -283,7 +288,9 @@ class ImagePrefetcher(QObject):
     image_ready_detailed = Signal(int, int, int, int, str, QPixmap)
     image_failed = Signal(int, str, str)
     image_failed_detailed = Signal(object)
-    request_state_changed = Signal(int, object)  # active count, immutable photo-ID tuple
+    request_state_changed = Signal(
+        int, object
+    )  # active count, immutable photo-ID tuple
     image_diagnostics_changed = Signal(int)
 
     def __init__(
@@ -600,9 +607,7 @@ class ImagePrefetcher(QObject):
     ) -> bool:
         existing_token = self._request_for_photo.get(photo.photo_id)
         existing_request = (
-            self._in_flight.get(existing_token)
-            if existing_token is not None
-            else None
+            self._in_flight.get(existing_token) if existing_token is not None else None
         )
         if existing_token is not None and existing_request is None:
             # Heal a stale reverse index defensively instead of allowing it to
@@ -615,8 +620,7 @@ class ImagePrefetcher(QObject):
                 and existing_request.request_mode == ImageRequestMode.EXPLICIT_RETRY
             )
             explicit_supersede = (
-                request_mode == ImageRequestMode.EXPLICIT_RETRY
-                and not already_retrying
+                request_mode == ImageRequestMode.EXPLICIT_RETRY and not already_retrying
             )
             focus_promotion = (
                 background_cap_exempt
@@ -632,7 +636,9 @@ class ImagePrefetcher(QObject):
         # request.  A worker may just have populated the shared disk cache; if
         # that makes a retry unnecessary, its pending terminal result remains
         # authoritative and will still publish image/request state.
-        candidates, previous_loaded_size = self._eligible_candidates(photo, state, request_mode)
+        candidates, previous_loaded_size = self._eligible_candidates(
+            photo, state, request_mode
+        )
         if not candidates:
             return False
         warming_memory_cache = bool(
@@ -641,8 +647,15 @@ class ImagePrefetcher(QObject):
         )
         if existing_token is not None and existing_request is not None:
             self._supersede_request(existing_token, existing_request)
-        counts_against_cap = request_mode == ImageRequestMode.BACKGROUND_PREFETCH and not background_cap_exempt
-        if counts_against_cap and self._background_prefetch_in_flight >= _MAX_CONCURRENT_BACKGROUND_PREFETCH:
+        counts_against_cap = (
+            request_mode == ImageRequestMode.BACKGROUND_PREFETCH
+            and not background_cap_exempt
+        )
+        if (
+            counts_against_cap
+            and self._background_prefetch_in_flight
+            >= _MAX_CONCURRENT_BACKGROUND_PREFETCH
+        ):
             # Defer this neighbor's original-size fetch; prefetch_identify_position
             # re-issues it on the next navigation step, so this is a soft skip,
             # not a failure, and keeps the media budget bounded for a wide radius.
@@ -655,7 +668,8 @@ class ImagePrefetcher(QObject):
             previous_loaded_size = None
         effective_mode = (
             ImageRequestMode.ORIGINAL_UPGRADE
-            if previous_loaded_size is not None and request_mode != ImageRequestMode.EXPLICIT_RETRY
+            if previous_loaded_size is not None
+            and request_mode != ImageRequestMode.EXPLICIT_RETRY
             else request_mode
         )
 
@@ -671,9 +685,7 @@ class ImagePrefetcher(QObject):
             previous_loaded_size=previous_loaded_size,
             counts_against_background_cap=counts_against_cap,
             focus_exempt=background_cap_exempt,
-            started_at=(
-                time.monotonic() if log.isEnabledFor(logging.DEBUG) else 0.0
-            ),
+            started_at=(time.monotonic() if log.isEnabledFor(logging.DEBUG) else 0.0),
         )
         if counts_against_cap:
             self._background_prefetch_in_flight += 1
@@ -751,7 +763,9 @@ class ImagePrefetcher(QObject):
         cached_size = cached[1] if cached is not None else None
         if cached_size is not None:
             state.loaded_size = _better_size(state.loaded_size, cached_size)
-        elif state.loaded_size is not None and not self._disk_cache.has(photo.photo_id, state.loaded_size):
+        elif state.loaded_size is not None and not self._disk_cache.has(
+            photo.photo_id, state.loaded_size
+        ):
             state.loaded_size = None
 
         # A known disk rendition that has fallen out of the memory LRU should
@@ -808,7 +822,9 @@ class ImagePrefetcher(QObject):
         if self._request_for_photo.get(request.photo_id) == request.token:
             self._request_for_photo.pop(request.photo_id, None)
         if request.counts_against_background_cap:
-            self._background_prefetch_in_flight = max(0, self._background_prefetch_in_flight - 1)
+            self._background_prefetch_in_flight = max(
+                0, self._background_prefetch_in_flight - 1
+            )
         if result.cancelled:
             self._emit_request_state()
             if (
@@ -832,7 +848,11 @@ class ImagePrefetcher(QObject):
         state = self._state_for(request.photo_id, create=True)
         assert state is not None
         now = time.monotonic()
-        if result.image is not None and not result.image.isNull() and result.loaded_size:
+        if (
+            result.image is not None
+            and not result.image.isNull()
+            and result.loaded_size
+        ):
             self._accept_success(request, result, state, now)
         else:
             self._accept_failure(request, result.attempts, state, now)
@@ -925,7 +945,9 @@ class ImagePrefetcher(QObject):
 
     def _evict_photo_states(self) -> None:
         blocked = 0
-        while len(self._photo_states) > _MAX_PHOTO_STATES and blocked < len(self._photo_states):
+        while len(self._photo_states) > _MAX_PHOTO_STATES and blocked < len(
+            self._photo_states
+        ):
             photo_id, _state = next(iter(self._photo_states.items()))
             if photo_id in self._request_for_photo:
                 self._photo_states.move_to_end(photo_id)
@@ -991,7 +1013,11 @@ def _better_size(current: str | None, candidate: str) -> str:
     if current is None:
         return candidate
     try:
-        return candidate if _SIZE_ORDER.index(candidate) < _SIZE_ORDER.index(current) else current
+        return (
+            candidate
+            if _SIZE_ORDER.index(candidate) < _SIZE_ORDER.index(current)
+            else current
+        )
     except ValueError:
         return candidate
 

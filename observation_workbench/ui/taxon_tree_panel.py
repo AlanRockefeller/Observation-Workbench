@@ -17,17 +17,30 @@ How to extend for compare mode:
   - Add columns: User A count, User B count, overlap, disagreement %
   - The tree structure already supports multi-column display via QTreeWidget
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Callable, List, Optional
 
 from PySide6.QtCore import (
-    QObject, QRunnable, QThreadPool, Qt, Signal, Slot,
+    QObject,
+    QRunnable,
+    QThreadPool,
+    Qt,
+    Signal,
+    Slot,
 )
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLabel, QProgressBar, QPushButton,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -43,6 +56,7 @@ class _CountItem(QTreeWidgetItem):
                 pass
         return super().__lt__(other)
 
+
 from observation_workbench.api.client import INatClient
 from observation_workbench.models import TaxonSummary
 from observation_workbench.services.taxon_summary import TaxonSummaryService
@@ -57,7 +71,9 @@ class _SummarySignals(QObject):
 
 
 class _SummaryWorker(QRunnable):
-    def __init__(self, service: TaxonSummaryService, kwargs: dict, generation: int, get_gen) -> None:
+    def __init__(
+        self, service: TaxonSummaryService, kwargs: dict, generation: int, get_gen
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self.service = service
@@ -90,8 +106,8 @@ class TaxonTreePanel(QWidget):
     Emits taxon_selected(taxon_id, taxon_name) when user clicks a taxon.
     """
 
-    taxon_selected = Signal(int, str)   # taxon_id, display_name
-    summary_finished = Signal()         # emitted on success or error
+    taxon_selected = Signal(int, str)  # taxon_id, display_name
+    summary_finished = Signal()  # emitted on success or error
 
     def __init__(
         self,
@@ -132,7 +148,9 @@ class TaxonTreePanel(QWidget):
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Taxon", "Count"])
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
         self._tree.setRootIsDecorated(False)
         self._tree.setAlternatingRowColors(True)
         self._tree.setSortingEnabled(True)
@@ -159,8 +177,11 @@ class TaxonTreePanel(QWidget):
         self._progress.setVisible(True)
         self._refresh_btn.setEnabled(False)
         self._current_kwargs = dict(
-            username=username, taxon_id=taxon_id,
-            place_id=place_id, d1=d1, d2=d2,
+            username=username,
+            taxon_id=taxon_id,
+            place_id=place_id,
+            d1=d1,
+            d2=d2,
         )
         self._start_worker(self._current_kwargs, gen)
 
@@ -189,8 +210,18 @@ class TaxonTreePanel(QWidget):
         )
         sigs = worker.signals
         self._live_summary_signals.add(sigs)
-        sigs.finished.connect(lambda r, s=sigs, g=gen: (self._live_summary_signals.discard(s), self._on_summary_loaded(r, g)))
-        sigs.error.connect(lambda e, s=sigs, g=gen: (self._live_summary_signals.discard(s), self._on_summary_error(e, g)))
+        sigs.finished.connect(
+            lambda r, s=sigs, g=gen: (
+                self._live_summary_signals.discard(s),
+                self._on_summary_loaded(r, g),
+            )
+        )
+        sigs.error.connect(
+            lambda e, s=sigs, g=gen: (
+                self._live_summary_signals.discard(s),
+                self._on_summary_error(e, g),
+            )
+        )
         self._pool.start(worker)
 
     def _on_summary_loaded(self, summary: TaxonSummary, generation: int) -> None:
@@ -213,20 +244,22 @@ class TaxonTreePanel(QWidget):
     def _populate(self, summary: TaxonSummary) -> None:
         self._tree.clear()
         for tc in summary.counts:
-            item = _CountItem([
-                tc.taxon.display_name,
-                str(tc.count),
-            ])
+            item = _CountItem(
+                [
+                    tc.taxon.display_name,
+                    str(tc.count),
+                ]
+            )
             item.setData(0, Qt.ItemDataRole.UserRole, tc.taxon.taxon_id)
             item.setData(0, Qt.ItemDataRole.UserRole + 1, tc.taxon.display_name)
             # Right-align the count column
-            item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item.setTextAlignment(
+                1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self._tree.addTopLevelItem(item)
 
         n = self._tree.topLevelItemCount()
-        self._status_label.setText(
-            f"{n} taxa · {summary.total} observations"
-        )
+        self._status_label.setText(f"{n} taxa · {summary.total} observations")
 
     def cancel_pending(self) -> None:
         """Cancel any in-flight summary fetch and reset UI to waiting state."""

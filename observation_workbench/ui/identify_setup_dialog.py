@@ -1,4 +1,5 @@
 """Lifecycle-safe planning dialog for a read-only Identify session."""
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from observation_workbench.api.client import INatClient
-from observation_workbench.api.observation_url import ObservationURLParseError, parse_observations_url
+from observation_workbench.api.observation_url import (
+    ObservationURLParseError,
+    parse_observations_url,
+)
 from observation_workbench.services.identify_session import (
     IdentifyQueryPlan,
     IdentifySession,
@@ -94,7 +98,9 @@ class IdentifySetupDialog(QDialog):
         # shouldn't compete with the count preview / session build for the
         # shared client's 1 req/s budget; default to the same client so
         # existing callers that don't pass one keep working unchanged.
-        self._metadata_client = metadata_client if metadata_client is not None else client
+        self._metadata_client = (
+            metadata_client if metadata_client is not None else client
+        )
         self._api_token = api_token
         self._dialog_state = "open"
         self._parse_generation = 0
@@ -135,7 +141,9 @@ class IdentifySetupDialog(QDialog):
         url_row.addWidget(self._parse_button)
         outer.addLayout(url_row)
 
-        self._summary = QLabel("Paste an iNaturalist observations or Identify URL.", self)
+        self._summary = QLabel(
+            "Paste an iNaturalist observations or Identify URL.", self
+        )
         self._summary.setWordWrap(True)
         outer.addWidget(self._summary)
 
@@ -338,7 +346,9 @@ class IdentifySetupDialog(QDialog):
             return
         menu = QMenu(self)
         retry_action = menu.addAction("Retry friendly-name resolution")
-        retry_action.triggered.connect(lambda: self._start_row_resolution(row, explicit=True))
+        retry_action.triggered.connect(
+            lambda: self._start_row_resolution(row, explicit=True)
+        )
         menu.exec(self._table.viewport().mapToGlobal(position))
 
     def _on_url_edited(self, text: str) -> None:
@@ -416,7 +426,11 @@ class IdentifySetupDialog(QDialog):
         def success(raw: object) -> None:
             if not is_current():
                 return
-            total = raw.get("total_results", "Unknown") if isinstance(raw, dict) else "Unknown"
+            total = (
+                raw.get("total_results", "Unknown")
+                if isinstance(raw, dict)
+                else "Unknown"
+            )
             self._count_label.setText(str(total))
 
         def failure(exc: Exception) -> None:
@@ -639,7 +653,9 @@ class IdentifySetupDialog(QDialog):
         row = self._find_row_by_token(subscriber.row_token)
         if row is None or not self._subscriber_is_current(subscriber):
             return
-        keys = [(subscriber.entity_kind, entity_id) for entity_id in subscriber.entity_ids]
+        keys = [
+            (subscriber.entity_kind, entity_id) for entity_id in subscriber.entity_ids
+        ]
         errors = [self._name_errors[key] for key in keys if key in self._name_errors]
         if errors:
             error = errors[0]
@@ -747,7 +763,9 @@ class IdentifySetupDialog(QDialog):
         )
         self._execute_button.setEnabled(enabled)
         if requires_auth and not self._api_token:
-            self._execute_button.setToolTip("Authentication is required for reviewed filtering.")
+            self._execute_button.setToolTip(
+                "Authentication is required for reviewed filtering."
+            )
         else:
             self._execute_button.setToolTip("")
 
@@ -766,7 +784,9 @@ class IdentifySetupDialog(QDialog):
         self._execution_active = False
 
 
-def _resolution_target(parameter_name: str, api_value: str) -> tuple[str | None, tuple[int, ...]]:
+def _resolution_target(
+    parameter_name: str, api_value: str
+) -> tuple[str | None, tuple[int, ...]]:
     normalized_name = parameter_name.strip().casefold()
     if normalized_name == "place_id":
         value = api_value.strip()

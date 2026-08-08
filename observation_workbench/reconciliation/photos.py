@@ -21,6 +21,7 @@ Three findings from the Gate 1E-A live proof constrain this module
   license on upload and this app never re-licenses a photo. The source license
   is carried for display only.
 """
+
 from __future__ import annotations
 
 import logging
@@ -34,22 +35,39 @@ from observation_workbench.api.auth import AuthState
 from observation_workbench.api.client import INatAPIError, INatClient
 from .db import ReconciliationDB
 from .inat_reader import INatReconciliationReader
-from .mo_client import MOAPIError, MOClient, ReconciliationCancelled, results_from_payload
+from .mo_client import (
+    MOAPIError,
+    MOClient,
+    ReconciliationCancelled,
+    results_from_payload,
+)
 from .mo_parsing import (
-    MO_FETCHABLE_IMAGE_SIZES, MO_LARGEST_FETCHABLE_SIZE,
-    mo_best_downloadable_size, mo_image_size, mo_image_url,
-    mo_observation_photo_count, parse_mo_observation, positive_int,
+    MO_FETCHABLE_IMAGE_SIZES,
+    MO_LARGEST_FETCHABLE_SIZE,
+    mo_best_downloadable_size,
+    mo_image_size,
+    mo_image_url,
+    mo_observation_photo_count,
+    parse_mo_observation,
+    positive_int,
 )
 from .normalization import public_fingerprint
 from .photo_license import (
-    map_mo_license_to_inat, normalized_pixel_fingerprint, photo_byte_fingerprint,
-    photo_md5, pixel_fingerprints_match,
+    map_mo_license_to_inat,
+    normalized_pixel_fingerprint,
+    photo_byte_fingerprint,
+    photo_md5,
+    pixel_fingerprints_match,
 )
 from .specimen_state import evaluate_specimen_state
 from .types import (
-    PhotoActionOption, PhotoActionType, PhotoComparisonPreview,
+    PhotoActionOption,
+    PhotoActionType,
+    PhotoComparisonPreview,
     PhotoIdentityPreview,
-    PhotoRecordSnapshot, ReconciliationProfile, RemoteSite,
+    PhotoRecordSnapshot,
+    ReconciliationProfile,
+    RemoteSite,
 )
 
 log = logging.getLogger(__name__)
@@ -105,7 +123,12 @@ class _DestinationScan:
         if not pixels:
             return ""
         return next(
-            (pid for pid, fp in self.fingerprints if pixel_fingerprints_match(pixels, fp)), ""
+            (
+                pid
+                for pid, fp in self.fingerprints
+                if pixel_fingerprints_match(pixels, fp)
+            ),
+            "",
         )
 
 
@@ -140,8 +163,12 @@ class PhotoSyncService:
     """Read-only pair review plus single-write transfer for confirmed pairs."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
     ) -> None:
@@ -156,7 +183,9 @@ class PhotoSyncService:
     # Preview ----------------------------------------------------------
 
     def prepare_identity_preview(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> PhotoIdentityPreview:
         """Read both complete photo sets without authorizing any write.
@@ -199,18 +228,14 @@ class PhotoSyncService:
                 "inat_read_failed",
             )
         mo_raw = _first_result(
-            self.mo_client.observation(
-                mo_observation_id, cancelled, detail="high"
-            )
+            self.mo_client.observation(mo_observation_id, cancelled, detail="high")
         )
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_observation_id:
             raise PhotoSyncError(
                 "The Mushroom Observer observation could not be read for photo review.",
                 "mo_read_failed",
             )
-        mo_payload = self.mo_client.images_for_observation(
-            mo_observation_id, cancelled
-        )
+        mo_payload = self.mo_client.images_for_observation(mo_observation_id, cancelled)
         mo_photos = _mo_photo_snapshots(mo_payload, mo_observation_id)
         inat_photos = _inat_photo_snapshots(inat_raw, inat_observation_id)
         warnings: list[str] = []
@@ -242,7 +267,9 @@ class PhotoSyncService:
         )
 
     def prepare_preview(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> PhotoComparisonPreview:
         pair = self._eligible_pair(profile_id, pair_id)
@@ -256,9 +283,12 @@ class PhotoSyncService:
         scan = self._destination_pixel_fingerprints(live, cancelled)
         options = self._options(profile_id, live, warnings, digests, scan)
         if not options and not warnings:
-            warnings.append("No photo on Mushroom Observer needs transferring to iNaturalist.")
+            warnings.append(
+                "No photo on Mushroom Observer needs transferring to iNaturalist."
+            )
         return PhotoComparisonPreview(
-            profile_id=profile_id, pair_id=pair_id,
+            profile_id=profile_id,
+            pair_id=pair_id,
             auth_generation=live.auth_generation,
             mo_key_generation=live.mo_key_generation,
             source_fingerprint=_pair_fingerprint(pair),
@@ -269,11 +299,14 @@ class PhotoSyncService:
             mo_record_fingerprint=live.mo_record_fingerprint,
             source_photos=live.source_photos,
             destination_photos=live.destination_photos,
-            options=tuple(options), warnings=tuple(warnings),
+            options=tuple(options),
+            warnings=tuple(warnings),
         )
 
     def _destination_pixel_fingerprints(
-        self, live: _LivePhotoState, cancelled: Callable[[], bool],
+        self,
+        live: _LivePhotoState,
+        cancelled: Callable[[], bool],
     ) -> _DestinationScan:
         """The third duplicate signal: what is ALREADY on the destination.
 
@@ -318,7 +351,10 @@ class PhotoSyncService:
         return _DestinationScan(tuple(fingerprints), tuple(unchecked))
 
     def _preview_digests(
-        self, live: _LivePhotoState, warnings: list[str], cancelled: Callable[[], bool],
+        self,
+        live: _LivePhotoState,
+        warnings: list[str],
+        cancelled: Callable[[], bool],
     ) -> dict[str, tuple[str, str]]:
         """Download each candidate image during the preview and digest it twice.
 
@@ -347,14 +383,20 @@ class PhotoSyncService:
             try:
                 data = self._download(photo)
                 digests[photo.photo_id] = (
-                    photo_byte_fingerprint(data), normalized_pixel_fingerprint(data)
+                    photo_byte_fingerprint(data),
+                    normalized_pixel_fingerprint(data),
                 )
             except PhotoSyncError as exc:
-                warnings.append(f"Image {photo.photo_id} could not be fingerprinted: {exc}")
+                warnings.append(
+                    f"Image {photo.photo_id} could not be fingerprinted: {exc}"
+                )
         return digests
 
     def _options(
-        self, profile_id: int, live: _LivePhotoState, warnings: list[str],
+        self,
+        profile_id: int,
+        live: _LivePhotoState,
+        warnings: list[str],
         digests: dict[str, tuple[str, str]],
         scan: _DestinationScan,
     ) -> list[PhotoActionOption]:
@@ -378,7 +420,8 @@ class PhotoSyncService:
         if not scan.complete:
             warnings.append(
                 "Photo transfer is blocked because these photos already on the iNaturalist "
-                "observation could not be compared: " + "; ".join(scan.unchecked)
+                "observation could not be compared: "
+                + "; ".join(scan.unchecked)
                 + ". Until every existing photo can be checked, a transfer could silently "
                 "duplicate one of them."
             )
@@ -418,7 +461,9 @@ class PhotoSyncService:
             # match; a missing login and a missing holder are unproven claims,
             # not absent objections, so each refuses on its own.
             holder_differs = not (
-                holder and account_holder and holder.casefold() == account_holder.casefold()
+                holder
+                and account_holder
+                and holder.casefold() == account_holder.casefold()
             )
             verdict = map_mo_license_to_inat(photo.license_label)
             digest, pixels = digests.get(photo.photo_id, ("", ""))
@@ -496,7 +541,8 @@ class PhotoSyncService:
                 )
             option = PhotoActionOption(
                 action_type=PhotoActionType.INAT_PHOTO_ATTACH,
-                source_site=RemoteSite.MO, destination_site=RemoteSite.INAT,
+                source_site=RemoteSite.MO,
+                destination_site=RemoteSite.INAT,
                 source_photo_id=photo.photo_id,
                 source_record_id=live.mo_observation_id,
                 destination_record_id=live.inat_observation_id,
@@ -508,7 +554,8 @@ class PhotoSyncService:
                     f"The Mushroom Observer license is '{photo.license_label or 'unknown'}'"
                     + (
                         f" (equivalent to {verdict.inat_license_code})."
-                        if verdict.inat_license_code else "."
+                        if verdict.inat_license_code
+                        else "."
                     )
                 ),
                 source_copyright_holder=holder,
@@ -518,7 +565,8 @@ class PhotoSyncService:
                     f"Attach Mushroom Observer image {photo.photo_id} to iNaturalist "
                     f"observation {live.inat_observation_id}"
                 ),
-                enabled=not disabled_reason, disabled_reason=disabled_reason,
+                enabled=not disabled_reason,
+                disabled_reason=disabled_reason,
             )
             if disabled_reason:
                 warnings.append(f"Image {photo.photo_id}: {disabled_reason}")
@@ -529,11 +577,16 @@ class PhotoSyncService:
     # Execution --------------------------------------------------------
 
     def execute_group(
-        self, profile_id: int, group_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        group_id: int,
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> list[PhotoActionResult]:
         rows = self.db.action_group_rows(profile_id, group_id)
-        if len(rows) != 1 or not _is_photo_action(rows[0].get("action_type") if rows else None):
+        if len(rows) != 1 or not _is_photo_action(
+            rows[0].get("action_type") if rows else None
+        ):
             raise PhotoSyncError(
                 "A photo journal group must contain exactly one individually reviewed action.",
                 "invalid_photo_group",
@@ -545,14 +598,20 @@ class PhotoSyncService:
         if state == "succeeded":
             return []
         if state != "pending":
-            return [PhotoActionResult(
-                int(row["action_id"]), state,
-                "This photo action is terminal; create a fresh comparison for another transfer.",
-            )]
+            return [
+                PhotoActionResult(
+                    int(row["action_id"]),
+                    state,
+                    "This photo action is terminal; create a fresh comparison for another transfer.",
+                )
+            ]
         return [self._execute(row, cancelled, progress)]
 
     def verify_unknown(
-        self, profile_id: int, action_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        action_id: int,
+        cancelled: Callable[[], bool],
     ) -> PhotoActionResult:
         """Resolve a lost response WITHOUT re-uploading.
 
@@ -561,9 +620,14 @@ class PhotoSyncService:
         """
         row = self.db.action(profile_id, action_id)
         if not row or not _is_photo_action(row.get("action_type")):
-            raise PhotoSyncError("The selected journal row is not a photo action.", "invalid_photo_action")
+            raise PhotoSyncError(
+                "The selected journal row is not a photo action.",
+                "invalid_photo_action",
+            )
         if str(row["state"]) != "outcome_unknown":
-            return PhotoActionResult(action_id, str(row["state"]), "No unknown outcome remains to verify.")
+            return PhotoActionResult(
+                action_id, str(row["state"]), "No unknown outcome remains to verify."
+            )
         pair = self._pair_from_journal(profile_id, row)
         profile = self.db.profile(profile_id)
         planned = str(row["planned_observation_photo_uuid"])
@@ -571,24 +635,36 @@ class PhotoSyncService:
             live = self._await_attachment(profile, pair, planned, cancelled)
         except Exception:
             return PhotoActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "Destination reread is still unavailable; the upload was not retried.",
             )
         if planned and planned in live.destination_observation_photo_uuids:
             landed = next(
-                (p for p in live.destination_photos if p.observation_photo_uuid == planned), None
+                (
+                    p
+                    for p in live.destination_photos
+                    if p.observation_photo_uuid == planned
+                ),
+                None,
             )
             self.db.finish_action(
-                profile_id, action_id, "succeeded", phase="verification",
+                profile_id,
+                action_id,
+                "succeeded",
+                phase="verification",
                 verification_state="verified_after_unknown",
             )
             self.db.finish_photo_transfer(
-                profile_id, action_id, "succeeded",
+                profile_id,
+                action_id,
+                "succeeded",
                 destination_photo_id=landed.photo_id if landed else "",
                 destination_license_code=landed.license_label if landed else "",
             )
             return PhotoActionResult(
-                action_id, "succeeded",
+                action_id,
+                "succeeded",
                 "Verified the prior upload landed; it was not sent again.",
             )
         # Deliberately NOT resolved to "failed". This path has no response in
@@ -598,18 +674,25 @@ class PhotoSyncService:
         # duplicate could never be deleted. It stays unknown until the photo
         # appears or the operator resolves it deliberately.
         self.db.finish_action(
-            profile_id, action_id, "outcome_unknown", phase="verification",
-            error_code="not_yet_visible", verification_state="changed_not_proven",
+            profile_id,
+            action_id,
+            "outcome_unknown",
+            phase="verification",
+            error_code="not_yet_visible",
+            verification_state="changed_not_proven",
         )
         return PhotoActionResult(
-            action_id, "outcome_unknown",
+            action_id,
+            "outcome_unknown",
             "The uploaded photo is still not visible on the iNaturalist observation. This does "
             "not prove it was rejected — check the observation on iNaturalist before retrying, "
             "because a second upload would create a duplicate that cannot be deleted.",
         )
 
     def _execute(
-        self, row: dict[str, Any], cancelled: Callable[[], bool],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> PhotoActionResult:
         profile_id = int(row["profile_id"])
@@ -628,16 +711,24 @@ class PhotoSyncService:
             # backstop independent of whichever caller reached ``_execute``
             # (Gate 2A's ``execute_group``, or a direct resume/verify call).
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="preview",
+                profile_id,
+                action_id,
+                "failed",
+                phase="preview",
                 error_code="unsupported_photo_direction",
             )
             return PhotoActionResult(
-                action_id, "failed",
+                action_id,
+                "failed",
                 f"'{action_type}' has no supported photo-transfer executor; no network request was made.",
             )
         if not self.db.claim_action(profile_id, action_id, "resource_preflight"):
             current = self.db.action(profile_id, action_id) or row
-            return PhotoActionResult(action_id, str(current["state"]), "The photo action is no longer pending.")
+            return PhotoActionResult(
+                action_id,
+                str(current["state"]),
+                "The photo action is no longer pending.",
+            )
         write_started = False
         try:
             if cancelled():
@@ -657,12 +748,17 @@ class PhotoSyncService:
             # Already landed (e.g. a resumed crash): never upload a second copy.
             if planned in live.destination_observation_photo_uuids:
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
                     verification_state="already_correct",
                 )
                 self.db.finish_photo_transfer(profile_id, action_id, "succeeded")
                 return PhotoActionResult(
-                    action_id, "succeeded", "The photo is already attached; no upload was sent."
+                    action_id,
+                    "succeeded",
+                    "The photo is already attached; no upload was sent.",
                 )
             self._require_unchanged_context(row, live)
 
@@ -718,15 +814,23 @@ class PhotoSyncService:
             self._require_unchanged_context(row, live)
             if planned in live.destination_observation_photo_uuids:
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
                     verification_state="already_correct",
                 )
                 self.db.finish_photo_transfer(
-                    profile_id, action_id, "succeeded",
-                    byte_fingerprint=fingerprint, md5=digest,
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
                 )
                 return PhotoActionResult(
-                    action_id, "succeeded", "The photo is already attached; no upload was sent."
+                    action_id,
+                    "succeeded",
+                    "The photo is already attached; no upload was sent.",
                 )
             # Re-run the duplicate signals against the just-read destination:
             # the same photo may have arrived by another route while we
@@ -764,15 +868,23 @@ class PhotoSyncService:
             self._require_unchanged_context(row, settled)
             if planned in settled.destination_observation_photo_uuids:
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
                     verification_state="already_correct",
                 )
                 self.db.finish_photo_transfer(
-                    profile_id, action_id, "succeeded",
-                    byte_fingerprint=fingerprint, md5=digest,
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
                 )
                 return PhotoActionResult(
-                    action_id, "succeeded", "The photo is already attached; no upload was sent."
+                    action_id,
+                    "succeeded",
+                    "The photo is already attached; no upload was sent.",
                 )
             live = settled
             if cancelled():
@@ -785,7 +897,9 @@ class PhotoSyncService:
                     "write_boundary_lost",
                 )
             write_started = True
-            progress(f"Photo action {action_id}: uploading one explicitly confirmed photo")
+            progress(
+                f"Photo action {action_id}: uploading one explicitly confirmed photo"
+            )
             write_error: Optional[Exception] = None
             http_status: Optional[int] = None
             try:
@@ -801,34 +915,55 @@ class PhotoSyncService:
                 verified = self._await_attachment(profile, pair, planned)
             except Exception:
                 self.db.finish_action(
-                    profile_id, action_id, "outcome_unknown", phase="verification",
-                    error_code="verification_unavailable", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    phase="verification",
+                    error_code="verification_unavailable",
+                    http_status=http_status,
                     verification_state="unavailable",
                 )
                 self.db.finish_photo_transfer(
-                    profile_id, action_id, "outcome_unknown",
-                    byte_fingerprint=fingerprint, md5=digest,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
                 )
                 return PhotoActionResult(
-                    action_id, "outcome_unknown",
+                    action_id,
+                    "outcome_unknown",
                     "The upload may have been submitted, but destination verification is unavailable.",
                 )
             if planned in verified.destination_observation_photo_uuids:
                 landed = next(
-                    (p for p in verified.destination_photos if p.observation_photo_uuid == planned),
+                    (
+                        p
+                        for p in verified.destination_photos
+                        if p.observation_photo_uuid == planned
+                    ),
                     None,
                 )
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
-                    http_status=http_status, verification_state="verified_final_state",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
+                    http_status=http_status,
+                    verification_state="verified_final_state",
                 )
                 self.db.finish_photo_transfer(
-                    profile_id, action_id, "succeeded",
+                    profile_id,
+                    action_id,
+                    "succeeded",
                     destination_photo_id=landed.photo_id if landed else "",
-                    byte_fingerprint=fingerprint, md5=digest,
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
                     destination_license_code=landed.license_label if landed else "",
                 )
-                return PhotoActionResult(action_id, "succeeded", "Verified the attached iNaturalist photo.")
+                return PhotoActionResult(
+                    action_id, "succeeded", "Verified the attached iNaturalist photo."
+                )
             # "Failed" is only safe when the server positively REJECTED the
             # request before accepting it: a definite client-error status with a
             # response in hand. Everything else -- lost transport, 5xx, or simply
@@ -844,85 +979,125 @@ class PhotoSyncService:
             )
             if definitely_rejected:
                 self.db.finish_action(
-                    profile_id, action_id, "failed", phase="verification",
-                    error_code="verified_not_applied", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "failed",
+                    phase="verification",
+                    error_code="verified_not_applied",
+                    http_status=http_status,
                     verification_state="verified_not_applied",
                 )
                 self.db.finish_photo_transfer(
-                    profile_id, action_id, "failed",
-                    byte_fingerprint=fingerprint, md5=digest,
+                    profile_id,
+                    action_id,
+                    "failed",
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
                 )
                 return PhotoActionResult(
-                    action_id, "failed",
+                    action_id,
+                    "failed",
                     f"iNaturalist rejected the upload (HTTP {http_status}); nothing was attached.",
                 )
             code = (
                 "write_outcome_unknown"
-                if write_error is not None and bool(getattr(write_error, "outcome_unknown", False))
+                if write_error is not None
+                and bool(getattr(write_error, "outcome_unknown", False))
                 else "changed_not_proven"
             )
             self.db.finish_action(
-                profile_id, action_id, "outcome_unknown", phase="verification",
-                error_code=code, http_status=http_status,
+                profile_id,
+                action_id,
+                "outcome_unknown",
+                phase="verification",
+                error_code=code,
+                http_status=http_status,
                 verification_state="changed_not_proven",
             )
             self.db.finish_photo_transfer(
-                profile_id, action_id, "outcome_unknown",
-                byte_fingerprint=fingerprint, md5=digest,
+                profile_id,
+                action_id,
+                "outcome_unknown",
+                byte_fingerprint=fingerprint,
+                md5=digest,
             )
             return PhotoActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "The upload result could not be proven within the verification window. "
                 "Verify it before any retry — re-uploading would create a duplicate photo "
                 "that cannot be deleted.",
             )
         except ReconciliationCancelled:
             self.db.finish_action(
-                profile_id, action_id, "cancelled", phase="resource_preflight",
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="resource_preflight",
                 error_code="user_cancelled",
             )
             self.db.finish_photo_transfer(profile_id, action_id, "failed")
-            return PhotoActionResult(action_id, "cancelled", "Cancelled before a photo was uploaded.")
+            return PhotoActionResult(
+                action_id, "cancelled", "Cancelled before a photo was uploaded."
+            )
         except PhotoSyncError as exc:
             self.db.finish_action(
-                profile_id, action_id,
+                profile_id,
+                action_id,
                 "outcome_unknown" if write_started else "failed",
                 phase="verification" if write_started else "resource_preflight",
                 error_code=exc.code,
             )
             self.db.finish_photo_transfer(
-                profile_id, action_id, "outcome_unknown" if write_started else "failed",
+                profile_id,
+                action_id,
+                "outcome_unknown" if write_started else "failed",
             )
             if write_started:
                 return PhotoActionResult(
-                    action_id, "outcome_unknown",
-                    "An upload may have been submitted; verify before any retry. " + str(exc),
+                    action_id,
+                    "outcome_unknown",
+                    "An upload may have been submitted; verify before any retry. "
+                    + str(exc),
                 )
             return PhotoActionResult(action_id, "failed", str(exc))
         except Exception:
             terminal = "outcome_unknown" if write_started else "failed"
             self.db.finish_action(
-                profile_id, action_id, terminal,
+                profile_id,
+                action_id,
+                terminal,
                 phase="verification" if write_started else "resource_preflight",
-                error_code="local_journal_failure" if write_started else "preflight_failed",
+                error_code=(
+                    "local_journal_failure" if write_started else "preflight_failed"
+                ),
             )
             self.db.finish_photo_transfer(profile_id, action_id, terminal)
             return PhotoActionResult(
-                action_id, terminal,
-                "The upload outcome must be verified before any retry."
-                if write_started else "Photo preflight failed before an upload was sent.",
+                action_id,
+                terminal,
+                (
+                    "The upload outcome must be verified before any retry."
+                    if write_started
+                    else "Photo preflight failed before an upload was sent."
+                ),
             )
 
     def _write(
-        self, live: _LivePhotoState, source: PhotoRecordSnapshot,
-        image_bytes: bytes, planned_uuid: str,
+        self,
+        live: _LivePhotoState,
+        source: PhotoRecordSnapshot,
+        image_bytes: bytes,
+        planned_uuid: str,
     ) -> object:
         """The single multipart upload+attach call. Never the two-call path."""
         auth = self._recheck_credentials(live)
         filename = _safe_filename(source)
         return self.inat_client.create_observation_photo_v2(
-            auth.api_token, live.inat_observation_uuid,
-            image_bytes=image_bytes, filename=filename,
+            auth.api_token,
+            live.inat_observation_uuid,
+            image_bytes=image_bytes,
+            filename=filename,
             content_type=_content_type(filename),
             client_uuid=planned_uuid,
         )
@@ -955,7 +1130,9 @@ class PhotoSyncService:
                     "source_download_failed",
                 ) from retry_exc
         if not data:
-            raise PhotoSyncError("The Mushroom Observer image was empty.", "source_empty")
+            raise PhotoSyncError(
+                "The Mushroom Observer image was empty.", "source_empty"
+            )
         if len(data) > MAX_PHOTO_BYTES:
             raise PhotoSyncError(
                 f"The source image is larger than the {MAX_PHOTO_BYTES // (1024 * 1024)} MB transfer limit.",
@@ -966,8 +1143,12 @@ class PhotoSyncService:
     # Reads ------------------------------------------------------------
 
     def _refresh(
-        self, profile: ReconciliationProfile, pair: dict[str, Any],
-        cancelled: Callable[[], bool], *, verification_only: bool = False,
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        verification_only: bool = False,
     ) -> _LivePhotoState:
         if cancelled():
             raise ReconciliationCancelled("Photo comparison cancelled")
@@ -1006,10 +1187,14 @@ class PhotoSyncService:
         # which is also where destination ownership is proven. Uploading into
         # somebody else's observation must be impossible.
         detail = _first_result(
-            self.inat_client.get_reconciliation_detail(inat_observation_id, token, deep=False)
+            self.inat_client.get_reconciliation_detail(
+                inat_observation_id, token, deep=False
+            )
         )
         if not detail or positive_int(detail.get("id")) != inat_observation_id:
-            raise PhotoSyncError("The iNaturalist observation is unavailable.", "inat_unavailable")
+            raise PhotoSyncError(
+                "The iNaturalist observation is unavailable.", "inat_unavailable"
+            )
         inat_uuid = str(detail.get("uuid") or "").strip()
         owner_raw = detail.get("user")
         owner = owner_raw if isinstance(owner_raw, dict) else {}
@@ -1022,7 +1207,9 @@ class PhotoSyncService:
         inat_raw = self.inat_client.get_observation_photos_v2(inat_uuid, token)
         inat_obs = _first_result(inat_raw)
         if not inat_obs:
-            raise PhotoSyncError("The iNaturalist observation could not be reread.", "inat_read_failed")
+            raise PhotoSyncError(
+                "The iNaturalist observation could not be reread.", "inat_read_failed"
+            )
         destination = _inat_photo_snapshots(inat_obs, inat_observation_id)
 
         source: tuple[PhotoRecordSnapshot, ...] = ()
@@ -1030,9 +1217,14 @@ class PhotoSyncService:
         specimen_conflict = ""
         specimen_warnings: tuple[str, ...] = ()
         if not verification_only:
-            mo_raw = _first_result(self.mo_client.observation(mo_observation_id, cancelled, detail="high"))
+            mo_raw = _first_result(
+                self.mo_client.observation(mo_observation_id, cancelled, detail="high")
+            )
             if not mo_raw or positive_int(mo_raw.get("id")) != mo_observation_id:
-                raise PhotoSyncError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+                raise PhotoSyncError(
+                    "The Mushroom Observer observation is unavailable.",
+                    "mo_unavailable",
+                )
             mo_observation = parse_mo_observation(mo_raw, profile.mo_user_id)
             if mo_observation.owner_id != profile.mo_user_id:
                 raise PhotoSyncError(
@@ -1046,12 +1238,21 @@ class PhotoSyncService:
             # unlike Gate 1D nothing is tolerated here -- including coordinates.
             reader = INatReconciliationReader(self.inat_client)
             specimen_conflict, _evidence, warnings = evaluate_specimen_state(
-                self.db, profile, pair, detail, mo_raw, reader,
-                mo_client=self.mo_client, cancelled=cancelled, include_coordinates=True,
+                self.db,
+                profile,
+                pair,
+                detail,
+                mo_raw,
+                reader,
+                mo_client=self.mo_client,
+                cancelled=cancelled,
+                include_coordinates=True,
             )
             specimen_warnings = tuple(warnings)
 
-            mo_payload = self.mo_client.images_for_observation(mo_observation_id, cancelled)
+            mo_payload = self.mo_client.images_for_observation(
+                mo_observation_id, cancelled
+            )
             source = _mo_photo_snapshots(mo_payload, mo_observation_id)
             # Fail CLOSED on ownership: only an image positively owned by the
             # profile's Mushroom Observer account is transferable. An image whose
@@ -1085,15 +1286,22 @@ class PhotoSyncService:
             source_photos=source,
             destination_photos=destination,
             destination_observation_photo_uuids=frozenset(
-                p.observation_photo_uuid for p in destination if p.observation_photo_uuid
+                p.observation_photo_uuid
+                for p in destination
+                if p.observation_photo_uuid
             ),
             specimen_conflict=specimen_conflict,
             specimen_warnings=specimen_warnings,
         )
 
     def _require_not_duplicate(
-        self, profile_id: int, action_id: int, live: _LivePhotoState,
-        image_bytes: bytes, fingerprint: str, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        action_id: int,
+        live: _LivePhotoState,
+        image_bytes: bytes,
+        fingerprint: str,
+        cancelled: Callable[[], bool],
     ) -> None:
         """Last-moment duplicate check against the freshly read destination.
 
@@ -1101,7 +1309,8 @@ class PhotoSyncService:
         destination photo aborts the transfer rather than being skipped.
         """
         known = self.db.transferred_photo_digests(
-            profile_id, destination_observation_id=live.inat_observation_id,
+            profile_id,
+            destination_observation_id=live.inat_observation_id,
             exclude_action_id=action_id,
         )
         if fingerprint and fingerprint in known:
@@ -1134,7 +1343,10 @@ class PhotoSyncService:
             )
 
     def _await_attachment(
-        self, profile: ReconciliationProfile, pair: dict[str, Any], planned_uuid: str,
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
+        planned_uuid: str,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> _LivePhotoState:
         """Re-read the destination until the attachment appears, or the window ends.
@@ -1152,7 +1364,9 @@ class PhotoSyncService:
             live = self._refresh(profile, pair, lambda: False, verification_only=True)
         return live
 
-    def _require_authenticated_account(self, profile: ReconciliationProfile, token: str) -> None:
+    def _require_authenticated_account(
+        self, profile: ReconciliationProfile, token: str
+    ) -> None:
         current = _first_result(self.inat_client.get_current_user_v2(token))
         if positive_int(current.get("id") if current else None) != profile.inat_user_id:
             raise PhotoSyncError(
@@ -1172,7 +1386,8 @@ class PhotoSyncService:
             return _key_marker(self.mo_key_provider(profile_id))
         except Exception as exc:
             raise PhotoSyncError(
-                "The Mushroom Observer credential state could not be read.", "mo_key_unavailable",
+                "The Mushroom Observer credential state could not be read.",
+                "mo_key_unavailable",
             ) from exc
 
     def _recheck_credentials(self, live: _LivePhotoState) -> AuthState:
@@ -1192,21 +1407,33 @@ class PhotoSyncService:
             or self.auth_generation_provider() != live.auth_generation
             or public_fingerprint(auth.api_token) != live.inat_token_marker
         ):
-            raise PhotoSyncError("iNaturalist authentication changed after preflight.", "inat_auth_changed")
+            raise PhotoSyncError(
+                "iNaturalist authentication changed after preflight.",
+                "inat_auth_changed",
+            )
         if (
             self.mo_key_generation_provider() != live.mo_key_generation
             or self._mo_key_marker(live.profile_id) != live.mo_key_marker
         ):
             raise PhotoSyncError(
-                "The Mushroom Observer API key changed after preflight.", "mo_key_changed",
+                "The Mushroom Observer API key changed after preflight.",
+                "mo_key_changed",
             )
         return auth
 
-    def _require_unchanged_context(self, row: dict[str, Any], live: _LivePhotoState) -> None:
+    def _require_unchanged_context(
+        self, row: dict[str, Any], live: _LivePhotoState
+    ) -> None:
         if str(row["preview_inat_record_fingerprint"]) != live.inat_record_fingerprint:
-            raise PhotoSyncError("The iNaturalist observation's photos changed after preview.", "inat_record_changed")
+            raise PhotoSyncError(
+                "The iNaturalist observation's photos changed after preview.",
+                "inat_record_changed",
+            )
         if str(row["preview_mo_record_fingerprint"]) != live.mo_record_fingerprint:
-            raise PhotoSyncError("The Mushroom Observer observation's images changed after preview.", "mo_record_changed")
+            raise PhotoSyncError(
+                "The Mushroom Observer observation's images changed after preview.",
+                "mo_record_changed",
+            )
 
     def _account_holder(self, profile_id: int) -> str:
         try:
@@ -1224,11 +1451,16 @@ class PhotoSyncService:
             )
         return pair
 
-    def _require_current_source(self, row: dict[str, Any], pair: dict[str, Any]) -> None:
+    def _require_current_source(
+        self, row: dict[str, Any], pair: dict[str, Any]
+    ) -> None:
         profile_id = int(row["profile_id"])
         group = self.db.action_group(profile_id, int(row["action_group_id"]))
         if not group:
-            raise PhotoSyncError("The confirmed pair changed after the photo was reviewed.", "pair_changed")
+            raise PhotoSyncError(
+                "The confirmed pair changed after the photo was reviewed.",
+                "pair_changed",
+            )
         if str(group.get("source_kind")) == "creation":
             # Gate 2A (section 10): a creation-saga group's own
             # source_fingerprint is the SOURCE RECORD fingerprint captured at
@@ -1246,12 +1478,17 @@ class PhotoSyncService:
             # and not-excluded before this method is ever reached, so no
             # separate provisional/confirmed distinction is needed here --
             # every photo item is population, never a bootstrap step.
-            ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
+            ledger = self.db.creation_ledger_for_group(
+                profile_id, int(row["action_group_id"])
+            )
             if not ledger or int(ledger.get("profile_id") or 0) != profile_id:
-                raise PhotoSyncError("The creation ledger row is missing.", "source_missing")
+                raise PhotoSyncError(
+                    "The creation ledger row is missing.", "source_missing"
+                )
             if int(row.get("pair_id") or -1) != int(ledger.get("pair_id") or -2):
                 raise PhotoSyncError(
-                    "The action's pair does not match the creation ledger's pair.", "pair_changed",
+                    "The action's pair does not match the creation ledger's pair.",
+                    "pair_changed",
                 )
             mo_id = int(row["mo_observation_id"])
             inat_id = int(row["inat_observation_id"])
@@ -1262,7 +1499,8 @@ class PhotoSyncService:
                 or int(group.get("inat_observation_id") or 0) != inat_id
             ):
                 raise PhotoSyncError(
-                    "The confirmed pair changed after the photo was reviewed.", "pair_changed",
+                    "The confirmed pair changed after the photo was reviewed.",
+                    "pair_changed",
                 )
             # Round-3 finding 8: pair+group id agreement alone is broader
             # than necessary — it says nothing about whether THIS action is
@@ -1281,35 +1519,56 @@ class PhotoSyncService:
             item = self.db.creation_item_for_action(profile_id, action_id)
             if not item or str(item.get("item_type")) != "photo":
                 raise PhotoSyncError(
-                    "This action is not linked to a reviewed photo item.", "creation_item_missing",
+                    "This action is not linked to a reviewed photo item.",
+                    "creation_item_missing",
                 )
             if int(item.get("attempt_id") or -1) != int(ledger.get("attempt_id") or -2):
                 raise PhotoSyncError(
-                    "This action does not belong to the current creation attempt.", "attempt_mismatch",
+                    "This action does not belong to the current creation attempt.",
+                    "attempt_mismatch",
                 )
             identity_destination = ledger.get("destination_observation_id")
-            if identity_destination is not None and int(identity_destination) != inat_id:
+            if (
+                identity_destination is not None
+                and int(identity_destination) != inat_id
+            ):
                 raise PhotoSyncError(
                     "The action's destination does not match the creation identity's recorded "
-                    "destination.", "pair_changed",
+                    "destination.",
+                    "pair_changed",
                 )
-            transfer = self.db.connection().execute(
-                "SELECT action_id FROM sync_photo_transfers WHERE profile_id=? AND source_site=? "
-                "AND source_photo_id=? AND destination_site='inat' AND destination_observation_id=?",
-                (profile_id, str(row.get("source_site") or ""), str(row.get("source_photo_id") or ""), inat_id),
-            ).fetchone()
+            transfer = (
+                self.db.connection()
+                .execute(
+                    "SELECT action_id FROM sync_photo_transfers WHERE profile_id=? AND source_site=? "
+                    "AND source_photo_id=? AND destination_site='inat' AND destination_observation_id=?",
+                    (
+                        profile_id,
+                        str(row.get("source_site") or ""),
+                        str(row.get("source_photo_id") or ""),
+                        inat_id,
+                    ),
+                )
+                .fetchone()
+            )
             if not transfer or int(transfer["action_id"] or -1) != action_id:
                 raise PhotoSyncError(
-                    "This action does not match its own transfer-ledger row.", "transfer_mismatch",
+                    "This action does not match its own transfer-ledger row.",
+                    "transfer_mismatch",
                 )
             return
         # The reviewed pair version lives on the action GROUP, not on the action
         # row; comparing against a missing action column would silently compare
         # the current fingerprint to itself and never fire.
         if _pair_fingerprint(pair) != str(group["source_fingerprint"]):
-            raise PhotoSyncError("The confirmed pair changed after the photo was reviewed.", "pair_changed")
+            raise PhotoSyncError(
+                "The confirmed pair changed after the photo was reviewed.",
+                "pair_changed",
+            )
 
-    def _pair_from_journal(self, profile_id: int, row: dict[str, Any]) -> dict[str, Any]:
+    def _pair_from_journal(
+        self, profile_id: int, row: dict[str, Any]
+    ) -> dict[str, Any]:
         """Build a pair view from immutable journaled IDs, not current eligibility.
 
         Recovering the outcome of a write that was already submitted must stay
@@ -1332,7 +1591,8 @@ class PhotoSyncService:
 
 
 def _mo_photo_snapshots(
-    payload: object, observation_id: int,
+    payload: object,
+    observation_id: int,
 ) -> tuple[PhotoRecordSnapshot, ...]:
     snapshots: list[PhotoRecordSnapshot] = []
     for raw in results_from_payload(payload):
@@ -1341,15 +1601,17 @@ def _mo_photo_snapshots(
             continue
         owner_raw = raw.get("owner")
         owner = owner_raw if isinstance(owner_raw, dict) else {}
-        snapshots.append(PhotoRecordSnapshot(
-            site=RemoteSite.MO,
-            photo_id=photo_id,
-            observation_id=observation_id,
-            license_label=str(raw.get("license") or ""),
-            copyright_holder=str(raw.get("copyright_holder") or ""),
-            owner_id=positive_int(owner.get("id")) or 0,
-            source_url=_mo_best_url(raw),
-        ))
+        snapshots.append(
+            PhotoRecordSnapshot(
+                site=RemoteSite.MO,
+                photo_id=photo_id,
+                observation_id=observation_id,
+                license_label=str(raw.get("license") or ""),
+                copyright_holder=str(raw.get("copyright_holder") or ""),
+                owner_id=positive_int(owner.get("id")) or 0,
+                source_url=_mo_best_url(raw),
+            )
+        )
     return tuple(snapshots)
 
 
@@ -1375,10 +1637,15 @@ def _mo_best_url(raw: dict[str, Any]) -> str:
     carry no credential and are safe to hold in memory. They are never persisted.
     """
     wanted = mo_best_downloadable_size(positive_int(raw.get("id")))
-    listed = [
-        entry.strip() for entry in (raw.get("files") or [])
-        if isinstance(entry, str) and entry.strip()
-    ] if isinstance(raw.get("files"), list) else []
+    listed = (
+        [
+            entry.strip()
+            for entry in (raw.get("files") or [])
+            if isinstance(entry, str) and entry.strip()
+        ]
+        if isinstance(raw.get("files"), list)
+        else []
+    )
     by_size = {mo_image_size(entry): entry for entry in listed if mo_image_size(entry)}
     for size in (wanted, *reversed(MO_FETCHABLE_IMAGE_SIZES)):
         if size in by_size:
@@ -1392,7 +1659,8 @@ def _mo_best_url(raw: dict[str, Any]) -> str:
 
 
 def _inat_photo_snapshots(
-    observation: dict[str, Any], observation_id: int,
+    observation: dict[str, Any],
+    observation_id: int,
 ) -> tuple[PhotoRecordSnapshot, ...]:
     snapshots: list[PhotoRecordSnapshot] = []
     for row in observation.get("observation_photos") or []:
@@ -1401,15 +1669,17 @@ def _inat_photo_snapshots(
         raw_photo = row.get("photo")
         photo: dict[str, Any] = raw_photo if isinstance(raw_photo, dict) else {}
         photo_id = str(photo.get("id") or "").strip()
-        snapshots.append(PhotoRecordSnapshot(
-            site=RemoteSite.INAT,
-            photo_id=photo_id or f"observation_photo:{row.get('uuid')}",
-            observation_id=observation_id,
-            license_label=str(photo.get("license_code") or ""),
-            copyright_holder=str(photo.get("attribution") or ""),
-            source_url=str(photo.get("url") or ""),
-            observation_photo_uuid=str(row.get("uuid") or ""),
-        ))
+        snapshots.append(
+            PhotoRecordSnapshot(
+                site=RemoteSite.INAT,
+                photo_id=photo_id or f"observation_photo:{row.get('uuid')}",
+                observation_id=observation_id,
+                license_label=str(photo.get("license_code") or ""),
+                copyright_holder=str(photo.get("attribution") or ""),
+                source_url=str(photo.get("url") or ""),
+                observation_photo_uuid=str(row.get("uuid") or ""),
+            )
+        )
     return tuple(snapshots)
 
 
@@ -1428,10 +1698,15 @@ def _inat_photos_fingerprint(photos: tuple[PhotoRecordSnapshot, ...]) -> str:
     ``updated_at``, so the URL is the closest available revision signal.
     """
     parts = sorted(
-        "|".join((
-            p.observation_photo_uuid, p.photo_id, p.license_label,
-            p.copyright_holder, p.source_url,
-        ))
+        "|".join(
+            (
+                p.observation_photo_uuid,
+                p.photo_id,
+                p.license_label,
+                p.copyright_holder,
+                p.source_url,
+            )
+        )
         for p in photos
     )
     return public_fingerprint("inat_photos", *parts)
@@ -1447,10 +1722,15 @@ def _mo_photos_fingerprint(photos: tuple[PhotoRecordSnapshot, ...]) -> str:
     in, so any change to a reviewed image invalidates the preview.
     """
     parts = sorted(
-        "|".join((
-            p.photo_id, p.license_label, p.copyright_holder,
-            str(p.owner_id), p.source_url,
-        ))
+        "|".join(
+            (
+                p.photo_id,
+                p.license_label,
+                p.copyright_holder,
+                str(p.owner_id),
+                p.source_url,
+            )
+        )
         for p in photos
     )
     return public_fingerprint("mo_photos", *parts)
@@ -1469,8 +1749,12 @@ def _key_marker(key: str) -> str:
 
 def _pair_fingerprint(pair: dict[str, Any]) -> str:
     return public_fingerprint(
-        "pair", pair.get("pair_id"), pair.get("updated_at"), pair.get("review_state"),
-        pair.get("link_state"), pair.get("confirmed_by"),
+        "pair",
+        pair.get("pair_id"),
+        pair.get("updated_at"),
+        pair.get("review_state"),
+        pair.get("link_state"),
+        pair.get("confirmed_by"),
     )
 
 
@@ -1535,8 +1819,12 @@ def _safe_filename(source: PhotoRecordSnapshot) -> str:
 def _content_type(filename: str) -> str:
     suffix = filename.rsplit(".", 1)[-1].lower()
     return {
-        "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-        "gif": "image/gif", "bmp": "image/bmp", "tif": "image/tiff",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "tif": "image/tiff",
         "tiff": "image/tiff",
     }.get(suffix, "image/jpeg")
 

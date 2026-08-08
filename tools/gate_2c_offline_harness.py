@@ -5,6 +5,7 @@ This is not a repository test. It uses temporary SQLite databases and in-memory
 remote records, never reads credentials, never opens a network connection, and
 never calls either production deletion endpoint.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -20,9 +21,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from observation_workbench.reconciliation.deletion import (  # noqa: E402
-    CapabilityStatus, DeletionContent, DeletionError, DeletionService, DeleteDispatch,
-    DonorDeletionPreview, ExternalDependency, RemoteDeletionRecord,
-    SiteDeletionCapability, ThirdPartyContribution, analyze_lossless_parity,
+    CapabilityStatus,
+    DeletionContent,
+    DeletionError,
+    DeletionService,
+    DeleteDispatch,
+    DonorDeletionPreview,
+    ExternalDependency,
+    RemoteDeletionRecord,
+    SiteDeletionCapability,
+    ThirdPartyContribution,
+    analyze_lossless_parity,
     _activity_inventory_from_raw,
 )
 from observation_workbench.reconciliation.consolidation_identity import (  # noqa: E402
@@ -30,9 +39,14 @@ from observation_workbench.reconciliation.consolidation_identity import (  # noq
 )
 from observation_workbench.reconciliation.types import RemoteSite  # noqa: E402
 import observation_workbench.ui.reconciliation as reconciliation_ui  # noqa: E402
-from observation_workbench.ui.reconciliation import DonorDeletionPreviewDialog  # noqa: E402
+from observation_workbench.ui.reconciliation import (
+    DonorDeletionPreviewDialog,
+)  # noqa: E402
 from tools.gate_2b_saga_harness import (  # noqa: E402
-    Environment, INAT_USER_ID, MO_USER_ID, PROFILE_ID,
+    Environment,
+    INAT_USER_ID,
+    MO_USER_ID,
+    PROFILE_ID,
 )
 
 
@@ -59,20 +73,36 @@ OFFLINE_CAPABILITIES = {
 
 
 def _content(
-    kind: str, identity: str, value: str = "", *,
-    media: str = "", byte_fp: str = "", license_label: str = "",
-    holder: str = "", attribution: str = "",
+    kind: str,
+    identity: str,
+    value: str = "",
+    *,
+    media: str = "",
+    byte_fp: str = "",
+    license_label: str = "",
+    holder: str = "",
+    attribution: str = "",
 ) -> DeletionContent:
     fingerprint = f"fp:{kind}:{identity}:{value}:{byte_fp}"
     return DeletionContent(
-        kind, identity, value, fingerprint, f"{kind} {identity}",
-        media, byte_fp, license_label, holder, attribution,
+        kind,
+        identity,
+        value,
+        fingerprint,
+        f"{kind} {identity}",
+        media,
+        byte_fp,
+        license_label,
+        holder,
+        attribution,
     )
 
 
 def _record(
-    site: RemoteSite, observation_id: int,
-    contents: tuple[DeletionContent, ...] = (), *,
+    site: RemoteSite,
+    observation_id: int,
+    contents: tuple[DeletionContent, ...] = (),
+    *,
     third_party: tuple[ThirdPartyContribution, ...] = (),
     dependencies: tuple[ExternalDependency, ...] = (),
     owner_id: int | None = None,
@@ -124,7 +154,11 @@ class FakeDispatch(DeleteDispatch):
             return self.records[(site, int(observation_id))]
 
     def delete_exact(
-        self, profile, record, request_correlation, cancelled,
+        self,
+        profile,
+        record,
+        request_correlation,
+        cancelled,
     ) -> None:
         del profile, request_correlation
         key = (record.site, record.observation_id)
@@ -140,7 +174,13 @@ class FakeDispatch(DeleteDispatch):
             raise AmbiguousDelete("offline lost response")
 
     def verify_exact_absence(
-        self, profile, site, observation_id, remote_uuid, owner_id, cancelled,
+        self,
+        profile,
+        site,
+        observation_id,
+        remote_uuid,
+        owner_id,
+        cancelled,
     ) -> str:
         del profile, remote_uuid, owner_id, cancelled
         key = (site, int(observation_id))
@@ -165,25 +205,37 @@ class Scenario:
         assert self.env.run(group_id)[-1].state == "succeeded"
         records = {
             (RemoteSite.MO, 10): _record(
-                RemoteSite.MO, 10, targets=((RemoteSite.INAT, 20),),
+                RemoteSite.MO,
+                10,
+                targets=((RemoteSite.INAT, 20),),
             ),
             (RemoteSite.MO, 11): _record(RemoteSite.MO, 11),
             (RemoteSite.INAT, 20): _record(
-                RemoteSite.INAT, 20, targets=((RemoteSite.MO, 10),),
+                RemoteSite.INAT,
+                20,
+                targets=((RemoteSite.MO, 10),),
             ),
             (RemoteSite.INAT, 21): _record(RemoteSite.INAT, 21),
         }
         self.dispatch = FakeDispatch(records)
         self.service = DeletionService(
-            self.env.db, self.env.inat, self.env.mo, lambda: self.env.auth,
-            lambda _profile_id: "offline-mo-key", lambda: 0, lambda: 0,
-            dispatch=self.dispatch, capabilities=OFFLINE_CAPABILITIES,
+            self.env.db,
+            self.env.inat,
+            self.env.mo,
+            lambda: self.env.auth,
+            lambda _profile_id: "offline-mo-key",
+            lambda: 0,
+            lambda: 0,
+            dispatch=self.dispatch,
+            capabilities=OFFLINE_CAPABILITIES,
             phase_2b_closed_provider=lambda: True,
         )
 
     def preview(self) -> DonorDeletionPreview:
         return self.service.prepare_preview(
-            PROFILE_ID, self.consolidation_id, lambda: False,
+            PROFILE_ID,
+            self.consolidation_id,
+            lambda: False,
         )
 
     def close(self) -> None:
@@ -195,15 +247,20 @@ def parity_scenarios() -> None:
     assert not analyze_lossless_parity(empty, _record(RemoteSite.MO, 2))[1]
 
     unique = _record(
-        RemoteSite.MO, 1,
+        RemoteSite.MO,
+        1,
         (_content("photo", "p1", media="mo:photo:1", license_label="CC0"),),
     )
     _, reasons = analyze_lossless_parity(unique, _record(RemoteSite.MO, 2))
     assert "Blocked: unique photo" in reasons
 
     same_photo = _content(
-        "photo", "p1", media="source:photo:7", license_label="CC-BY",
-        holder="owner", attribution="owner / CC-BY",
+        "photo",
+        "p1",
+        media="source:photo:7",
+        license_label="CC-BY",
+        holder="owner",
+        attribution="owner / CC-BY",
     )
     canonical_photo = replace(same_photo, identity="canonical-photo")
     assert not analyze_lossless_parity(
@@ -218,14 +275,22 @@ def parity_scenarios() -> None:
     )[1]
 
     for donor_item, canonical_item in (
-        (_content("description", "description", "one"),
-         _content("description", "description", "two")),
-        (_content("voucher", "voucher_number", "V-1"),
-         _content("collection_number", "collection_number", "V-1")),
-        (_content("date", "observed_on", "2026-01-01"),
-         _content("date", "observed_on", "2026-01-02")),
-        (_content("coordinates", "coordinates", "1,2"),
-         _content("coordinates", "coordinates", "1,3")),
+        (
+            _content("description", "description", "one"),
+            _content("description", "description", "two"),
+        ),
+        (
+            _content("voucher", "voucher_number", "V-1"),
+            _content("collection_number", "collection_number", "V-1"),
+        ),
+        (
+            _content("date", "observed_on", "2026-01-01"),
+            _content("date", "observed_on", "2026-01-02"),
+        ),
+        (
+            _content("coordinates", "coordinates", "1,2"),
+            _content("coordinates", "coordinates", "1,3"),
+        ),
     ):
         assert analyze_lossless_parity(
             _record(RemoteSite.MO, 1, (donor_item,)),
@@ -243,15 +308,21 @@ def parity_scenarios() -> None:
 def hardening_regressions() -> None:
     donor_photos = (
         DeletionContent(
-            "photo", "donor-photo-1", source_media_identity="same-source",
+            "photo",
+            "donor-photo-1",
+            source_media_identity="same-source",
         ),
         DeletionContent(
-            "photo", "donor-photo-2", source_media_identity="same-source",
+            "photo",
+            "donor-photo-2",
+            source_media_identity="same-source",
         ),
     )
     canonical_photo = (
         DeletionContent(
-            "photo", "canonical-photo-1", source_media_identity="same-source",
+            "photo",
+            "canonical-photo-1",
+            source_media_identity="same-source",
         ),
     )
     _, reasons = analyze_lossless_parity(
@@ -283,17 +354,20 @@ def hardening_regressions() -> None:
         preview = scenario.preview()
         first, second = preview.donors
         scenario.env.db.journal_deletion_attempt(
-            preview, (first.stable_member_id,),
+            preview,
+            (first.stable_member_id,),
         )
         try:
             scenario.env.db.journal_deletion_attempt(
-                preview, (second.stable_member_id,),
+                preview,
+                (second.stable_member_id,),
             )
             raise AssertionError("parallel consolidation deletion was accepted")
         except ValueError:
             pass
         unresolved = scenario.env.db.unresolved_deletion_for_consolidation(
-            PROFILE_ID, scenario.consolidation_id,
+            PROFILE_ID,
+            scenario.consolidation_id,
         )
         assert unresolved is not None
         blocked = scenario.preview()
@@ -302,7 +376,8 @@ def hardening_regressions() -> None:
             for donor in blocked.donors
         )
         current = scenario.env.db.get_consolidation(
-            PROFILE_ID, scenario.consolidation_id,
+            PROFILE_ID,
+            scenario.consolidation_id,
         )["current_finalized_attempt_id"]
         baseline_blocked = False
         try:
@@ -315,9 +390,13 @@ def hardening_regressions() -> None:
         except sqlite3.IntegrityError:
             baseline_blocked = True
         assert baseline_blocked, "baseline advanced during deletion attempt"
-        assert scenario.env.db.get_consolidation(
-            PROFILE_ID, scenario.consolidation_id,
-        )["current_finalized_attempt_id"] == current
+        assert (
+            scenario.env.db.get_consolidation(
+                PROFILE_ID,
+                scenario.consolidation_id,
+            )["current_finalized_attempt_id"]
+            == current
+        )
         print(
             "one unresolved attempt per consolidation / preview guard / "
             "baseline serialization: PASS"
@@ -330,41 +409,65 @@ def hardening_regressions() -> None:
         preview = scenario.preview()
         selected = tuple(item.stable_member_id for item in preview.donors)
         attempt_id, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, selected,
+            preview,
+            selected,
         )
         attempt = scenario.env.db.deletion_attempt_for_group(
-            PROFILE_ID, group_id,
+            PROFILE_ID,
+            group_id,
         )
         items = scenario.env.db.deletion_items(PROFILE_ID, attempt_id)
         first = scenario.service._execute_one(
-            PROFILE_ID, attempt, items[0], lambda: False,
+            PROFILE_ID,
+            attempt,
+            items[0],
+            lambda: False,
             lambda _message: None,
         )
         assert first.state == "succeeded"
-        assert scenario.env.db.cancel_deletion_tail(
-            PROFILE_ID, attempt_id, 2,
-        ) == 1
-        assert scenario.env.db.deletion_attempt(
-            PROFILE_ID, attempt_id,
-        )["state"] == "partial"
+        assert (
+            scenario.env.db.cancel_deletion_tail(
+                PROFILE_ID,
+                attempt_id,
+                2,
+            )
+            == 1
+        )
+        assert (
+            scenario.env.db.deletion_attempt(
+                PROFILE_ID,
+                attempt_id,
+            )["state"]
+            == "partial"
+        )
         assert [
             item["state"]
             for item in scenario.env.db.deletion_items(PROFILE_ID, attempt_id)
         ] == ["succeeded", "cancelled"]
         assert not scenario.env.db.unresolved_deletion_for_consolidation(
-            PROFILE_ID, scenario.consolidation_id,
+            PROFILE_ID,
+            scenario.consolidation_id,
         )["resumable"]
         retry_preview = scenario.preview()
         assert len(retry_preview.donors) == 1
         retry_attempt_id, _ = scenario.env.db.journal_deletion_attempt(
-            retry_preview, (retry_preview.donors[0].stable_member_id,),
+            retry_preview,
+            (retry_preview.donors[0].stable_member_id,),
         )
-        assert scenario.env.db.deletion_attempt(
-            PROFILE_ID, attempt_id,
-        )["state"] == "superseded"
-        assert scenario.env.db.deletion_attempt(
-            PROFILE_ID, retry_attempt_id,
-        )["state"] == "pending"
+        assert (
+            scenario.env.db.deletion_attempt(
+                PROFILE_ID,
+                attempt_id,
+            )["state"]
+            == "superseded"
+        )
+        assert (
+            scenario.env.db.deletion_attempt(
+                PROFILE_ID,
+                retry_attempt_id,
+            )["state"]
+            == "pending"
+        )
         print("successful prefix / cancelled tail records partial attempt: PASS")
     finally:
         scenario.close()
@@ -378,13 +481,14 @@ def readiness_and_confirmation_scenarios(app: QApplication) -> None:
         assert all(item.eligible for item in preview.donors)
         dialog = DonorDeletionPreviewDialog(preview)
         assert not dialog.selected_member_ids()
-        phrase_one = preview.typed_phrase(
-            (preview.donors[0].stable_member_id,)
-        )
+        phrase_one = preview.typed_phrase((preview.donors[0].stable_member_id,))
         assert phrase_one in {"DELETE MO 11", "DELETE INAT 21"}
-        assert preview.typed_phrase(
-            tuple(item.stable_member_id for item in preview.donors)
-        ) == "DELETE 2 DONORS"
+        assert (
+            preview.typed_phrase(
+                tuple(item.stable_member_id for item in preview.donors)
+            )
+            == "DELETE 2 DONORS"
+        )
         first_fp = preview.confirmation_fingerprint(
             (preview.donors[0].stable_member_id,)
         )
@@ -404,10 +508,12 @@ def readiness_and_confirmation_scenarios(app: QApplication) -> None:
             no_dialog._checks[member_id].setChecked(True)
 
             def answer_no(*args, **kwargs):
-                assert len(args) + len(kwargs) >= 5, (
-                    f"unexpected QMessageBox.question call: args={args} kwargs={kwargs}"
+                assert (
+                    len(args) + len(kwargs) >= 5
+                ), f"unexpected QMessageBox.question call: args={args} kwargs={kwargs}"
+                default_button = kwargs.get(
+                    "defaultButton", args[4] if len(args) > 4 else None
                 )
-                default_button = kwargs.get("defaultButton", args[4] if len(args) > 4 else None)
                 defaults.append(default_button)
                 return reconciliation_ui.QMessageBox.StandardButton.No
 
@@ -423,8 +529,9 @@ def readiness_and_confirmation_scenarios(app: QApplication) -> None:
                 lambda *_args: reconciliation_ui.QMessageBox.StandardButton.Yes
             )
             reconciliation_ui.QMessageBox.warning = lambda *_args: None
-            reconciliation_ui.QInputDialog.getText = (
-                lambda *_args: ("DELETE SOMETHING", True)
+            reconciliation_ui.QInputDialog.getText = lambda *_args: (
+                "DELETE SOMETHING",
+                True,
             )
             wrong_dialog._confirm()
             assert not wrong_dialog.approved_member_ids
@@ -447,12 +554,16 @@ def readiness_and_confirmation_scenarios(app: QApplication) -> None:
             reconciliation_ui.QInputDialog.getText = original_get_text
 
         contribution = ThirdPartyContribution(
-            "identification", "id-7", 777,
-            "Third-party identification by account 777", "third-party-fp",
+            "identification",
+            "id-7",
+            777,
+            "Third-party identification by account 777",
+            "third-party-fp",
         )
         key = (RemoteSite.MO, 11)
         scenario.dispatch.records[key] = replace(
-            scenario.dispatch.records[key], third_party=(contribution,),
+            scenario.dispatch.records[key],
+            third_party=(contribution,),
         )
         blocked = scenario.preview()
         row = next(item for item in blocked.donors if item.site is RemoteSite.MO)
@@ -474,36 +585,51 @@ def blocked_readiness_scenarios() -> None:
     try:
         key = (RemoteSite.MO, 11)
         scenario.dispatch.records[key] = replace(
-            scenario.dispatch.records[key], content_enumeration_complete=False,
+            scenario.dispatch.records[key],
+            content_enumeration_complete=False,
         )
         assert any(
             "complete donor content" in reason
             for reason in next(
-                item for item in scenario.preview().donors
-                if item.site is RemoteSite.MO
+                item for item in scenario.preview().donors if item.site is RemoteSite.MO
             ).blocking_reasons
         )
         scenario.dispatch.records[key] = replace(
             scenario.dispatch.records[key],
             content_enumeration_complete=True,
-            dependencies=(ExternalDependency(
-                "reverse_link", "other:1", "mo:11",
-                "Other observation links to donor", False,
-            ),),
+            dependencies=(
+                ExternalDependency(
+                    "reverse_link",
+                    "other:1",
+                    "mo:11",
+                    "Other observation links to donor",
+                    False,
+                ),
+            ),
         )
-        assert "Blocked: external dependency" in next(
-            item for item in scenario.preview().donors
-            if item.site is RemoteSite.MO
-        ).blocking_reasons
+        assert (
+            "Blocked: external dependency"
+            in next(
+                item for item in scenario.preview().donors if item.site is RemoteSite.MO
+            ).blocking_reasons
+        )
         scenario.dispatch.records[key] = replace(
-            scenario.dispatch.records[key], dependencies=(), owner_id=999,
+            scenario.dispatch.records[key],
+            dependencies=(),
+            owner_id=999,
         )
         preview_before_drift = scenario.preview()
-        assert "Blocked: donor no longer owned" in next(
-            item for item in preview_before_drift.donors
-            if item.site is RemoteSite.MO
-        ).blocking_reasons
-        baseline_fingerprint = preview_before_drift.canonical_mutable_snapshot_fingerprint
+        assert (
+            "Blocked: donor no longer owned"
+            in next(
+                item
+                for item in preview_before_drift.donors
+                if item.site is RemoteSite.MO
+            ).blocking_reasons
+        )
+        baseline_fingerprint = (
+            preview_before_drift.canonical_mutable_snapshot_fingerprint
+        )
         scenario.dispatch.records[(RemoteSite.MO, 10)] = replace(
             scenario.dispatch.records[(RemoteSite.MO, 10)],
             record_fingerprint="canonical-drift",
@@ -520,7 +646,8 @@ def blocked_readiness_scenarios() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         _, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         key = (donor.site, donor.observation_id)
         scenario.dispatch.records[key] = replace(
@@ -529,7 +656,10 @@ def blocked_readiness_scenarios() -> None:
         )
         try:
             scenario.service.execute_group(
-                PROFILE_ID, group_id, lambda: False, lambda _message: None,
+                PROFILE_ID,
+                group_id,
+                lambda: False,
+                lambda _message: None,
             )
             raise AssertionError("fingerprint drift reached deletion")
         except DeletionError as exc:
@@ -537,9 +667,12 @@ def blocked_readiness_scenarios() -> None:
         assert not scenario.dispatch.delete_calls
         assert not scenario.env.db.deletion_actions_for_attempt(
             PROFILE_ID,
-            int(scenario.env.db.deletion_attempt_for_group(
-                PROFILE_ID, group_id,
-            )["deletion_attempt_id"]),
+            int(
+                scenario.env.db.deletion_attempt_for_group(
+                    PROFILE_ID,
+                    group_id,
+                )["deletion_attempt_id"]
+            ),
         )
         print("reviewed fingerprint drift blocks before delete-action journal: PASS")
     finally:
@@ -552,36 +685,53 @@ def saga_success_and_partial() -> None:
         preview = scenario.preview()
         selected = tuple(item.stable_member_id for item in preview.donors)
         attempt_id, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, selected,
+            preview,
+            selected,
         )
         results = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
         assert [item.state for item in results] == ["succeeded", "succeeded"]
         assert len(scenario.dispatch.delete_calls) == 2
-        assert scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
-        ) == []
+        assert (
+            scenario.service.execute_group(
+                PROFILE_ID,
+                group_id,
+                lambda: False,
+                lambda _message: None,
+            )
+            == []
+        )
         for action in scenario.env.db.deletion_actions_for_attempt(
-            PROFILE_ID, attempt_id,
+            PROFILE_ID,
+            attempt_id,
         ):
             assert scenario.env.db.settle_deletion_success(
-                PROFILE_ID, int(action["deletion_action_id"]),
+                PROFILE_ID,
+                int(action["deletion_action_id"]),
             )
         attempt = scenario.env.db.deletion_attempt(PROFILE_ID, attempt_id)
         assert attempt and attempt["state"] == "succeeded"
         members = scenario.env.db.list_consolidation_members(
-            PROFILE_ID, scenario.consolidation_id,
+            PROFILE_ID,
+            scenario.consolidation_id,
         )
         assert all(
             member["remote_state"] == "deleted"
-            for member in members if member["role"] == "donor"
+            for member in members
+            if member["role"] == "donor"
         )
         assert all(
             member["remote_state"] == "online"
-            for member in members if member["role"] == "canonical"
+            for member in members
+            if member["role"] == "canonical"
         )
-        print("two sequential successes / idempotent resume / canonical untouched: PASS")
+        print(
+            "two sequential successes / idempotent resume / canonical untouched: PASS"
+        )
     finally:
         scenario.close()
 
@@ -593,25 +743,37 @@ def saga_success_and_partial() -> None:
         selected = tuple(item.stable_member_id for item in preview.donors)
         _, group_id = scenario.env.db.journal_deletion_attempt(preview, selected)
         results = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
         # Exceptions after write_started_at are never treated as definitive
         # rejection: the second action is unknown and the verified first
         # tombstone remains intact.
         assert [item.state for item in results] == [
-            "succeeded", "outcome_unknown",
+            "succeeded",
+            "outcome_unknown",
         ]
         assert len(scenario.dispatch.delete_calls) == 2
-        first_member = scenario.env.db.connection().execute(
-            "SELECT remote_state FROM sync_consolidation_members "
-            "WHERE consolidation_member_id=?",
-            (preview.donors[0].stable_member_id,),
-        ).fetchone()
-        second_member = scenario.env.db.connection().execute(
-            "SELECT remote_state FROM sync_consolidation_members "
-            "WHERE consolidation_member_id=?",
-            (preview.donors[1].stable_member_id,),
-        ).fetchone()
+        first_member = (
+            scenario.env.db.connection()
+            .execute(
+                "SELECT remote_state FROM sync_consolidation_members "
+                "WHERE consolidation_member_id=?",
+                (preview.donors[0].stable_member_id,),
+            )
+            .fetchone()
+        )
+        second_member = (
+            scenario.env.db.connection()
+            .execute(
+                "SELECT remote_state FROM sync_consolidation_members "
+                "WHERE consolidation_member_id=?",
+                (preview.donors[1].stable_member_id,),
+            )
+            .fetchone()
+        )
         assert first_member["remote_state"] == "deleted"
         assert second_member["remote_state"] == "online"
         print("partial completion retained / no rollback recreation: PASS")
@@ -627,21 +789,30 @@ def saga_unknown_and_cancellation() -> None:
         key = (donor.site, donor.observation_id)
         scenario.dispatch.lose_response_for.add(key)
         _, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         result = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )[0]
         assert result.state == "outcome_unknown"
         assert scenario.dispatch.delete_calls == [key]
         action_id = scenario.env.db.deletion_items(
             PROFILE_ID,
-            int(scenario.env.db.deletion_attempt_for_group(
-                PROFILE_ID, group_id,
-            )["deletion_attempt_id"]),
+            int(
+                scenario.env.db.deletion_attempt_for_group(
+                    PROFILE_ID,
+                    group_id,
+                )["deletion_attempt_id"]
+            ),
         )[0]["action_id"]
         verified = scenario.service.verify_unknown(
-            PROFILE_ID, int(action_id), lambda: False,
+            PROFILE_ID,
+            int(action_id),
+            lambda: False,
         )
         assert verified.state == "succeeded"
         assert scenario.dispatch.delete_calls == [key]
@@ -654,14 +825,21 @@ def saga_unknown_and_cancellation() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         _, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         assert not scenario.dispatch.delete_calls
         # No action has been journaled yet, so cancellation of the worker tail
         # sends nothing and leaves the immutable review pending.
-        assert scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: True, lambda _message: None,
-        ) == []
+        assert (
+            scenario.service.execute_group(
+                PROFILE_ID,
+                group_id,
+                lambda: True,
+                lambda _message: None,
+            )
+            == []
+        )
         assert not scenario.dispatch.delete_calls
         print("cancellation before request sends nothing: PASS")
     finally:
@@ -679,20 +857,28 @@ def saga_unknown_and_cancellation() -> None:
             else:
                 scenario.dispatch.ambiguous_verify_for.add(key)
             _, group_id = scenario.env.db.journal_deletion_attempt(
-                preview, (donor.stable_member_id,),
+                preview,
+                (donor.stable_member_id,),
             )
             initial = scenario.service.execute_group(
-                PROFILE_ID, group_id, lambda: False, lambda _message: None,
+                PROFILE_ID,
+                group_id,
+                lambda: False,
+                lambda _message: None,
             )[0]
             assert initial.state == "outcome_unknown"
             attempt = scenario.env.db.deletion_attempt_for_group(
-                PROFILE_ID, group_id,
+                PROFILE_ID,
+                group_id,
             )
             item = scenario.env.db.deletion_items(
-                PROFILE_ID, int(attempt["deletion_attempt_id"]),
+                PROFILE_ID,
+                int(attempt["deletion_attempt_id"]),
             )[0]
             result = scenario.service.verify_unknown(
-                PROFILE_ID, int(item["action_id"]), lambda: False,
+                PROFILE_ID,
+                int(item["action_id"]),
+                lambda: False,
             )
             assert result.state == (
                 "retry_required" if verdict == "present" else "outcome_unknown"
@@ -700,19 +886,23 @@ def saga_unknown_and_cancellation() -> None:
             assert scenario.dispatch.delete_calls == [key]
             if verdict == "present":
                 scenario.dispatch.records[key] = replace(
-                    scenario.dispatch.records[key], exists=True,
+                    scenario.dispatch.records[key],
+                    exists=True,
                 )
                 scenario.dispatch.present_verify_for.discard(key)
                 retry_preview = scenario.preview()
                 retry_donor = next(
-                    item for item in retry_preview.donors
+                    item
+                    for item in retry_preview.donors
                     if item.stable_member_id == donor.stable_member_id
                 )
                 retry_attempt_id, _ = scenario.env.db.journal_deletion_attempt(
-                    retry_preview, (retry_donor.stable_member_id,),
+                    retry_preview,
+                    (retry_donor.stable_member_id,),
                 )
                 retry_attempt = scenario.env.db.deletion_attempt(
-                    PROFILE_ID, retry_attempt_id,
+                    PROFILE_ID,
+                    retry_attempt_id,
                 )
                 assert (
                     retry_attempt["supersedes_attempt_id"]
@@ -727,14 +917,15 @@ def saga_unknown_and_cancellation() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         cancelled = {"value": False}
-        scenario.dispatch.after_delete = (
-            lambda _key: cancelled.update(value=True)
-        )
+        scenario.dispatch.after_delete = lambda _key: cancelled.update(value=True)
         _, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         result = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: cancelled["value"],
+            PROFILE_ID,
+            group_id,
+            lambda: cancelled["value"],
             lambda _message: None,
         )[0]
         assert result.state == "outcome_unknown"
@@ -750,35 +941,47 @@ def claimed_action_exception_recovery() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         attempt_id, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         original_refresh = scenario.dispatch.refresh_record
 
         def fail_claimed_refresh(profile, site, observation_id, cancelled):
-            running = scenario.env.db.connection().execute(
-                "SELECT 1 FROM sync_deletion_actions "
-                "WHERE profile_id=? AND state='running' LIMIT 1",
-                (PROFILE_ID,),
-            ).fetchone()
+            running = (
+                scenario.env.db.connection()
+                .execute(
+                    "SELECT 1 FROM sync_deletion_actions "
+                    "WHERE profile_id=? AND state='running' LIMIT 1",
+                    (PROFILE_ID,),
+                )
+                .fetchone()
+            )
             if running and observation_id == donor.observation_id:
                 raise RuntimeError("offline pre-write parser failure")
             return original_refresh(profile, site, observation_id, cancelled)
 
         scenario.dispatch.refresh_record = fail_claimed_refresh
         result = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )[0]
         assert result.state == "pending"
         item = scenario.env.db.deletion_items(PROFILE_ID, attempt_id)[0]
         action = scenario.env.db.deletion_action(
-            PROFILE_ID, int(item["action_id"]),
+            PROFILE_ID,
+            int(item["action_id"]),
         )
         assert action["state"] == "pending"
         assert action["write_started_at"] is None
         assert not scenario.dispatch.delete_calls
         scenario.dispatch.refresh_record = original_refresh
         resumed = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
         assert [row.state for row in resumed] == ["succeeded"]
         print("claimed pre-write exception normalizes without restart: PASS")
@@ -790,7 +993,8 @@ def claimed_action_exception_recovery() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         attempt_id, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         original_verify = scenario.dispatch.verify_exact_absence
 
@@ -799,14 +1003,19 @@ def claimed_action_exception_recovery() -> None:
 
         scenario.dispatch.verify_exact_absence = verifier_raises
         result = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )[0]
         assert result.state == "outcome_unknown"
         assert len(scenario.dispatch.delete_calls) == 1
         item = scenario.env.db.deletion_items(PROFILE_ID, attempt_id)[0]
         scenario.dispatch.verify_exact_absence = original_verify
         resumed = scenario.service.verify_unknown(
-            PROFILE_ID, int(item["action_id"]), lambda: False,
+            PROFILE_ID,
+            int(item["action_id"]),
+            lambda: False,
         )
         assert resumed.state == "succeeded"
         assert len(scenario.dispatch.delete_calls) == 1
@@ -819,23 +1028,32 @@ def claimed_action_exception_recovery() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         attempt_id, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         item = scenario.env.db.deletion_items(PROFILE_ID, attempt_id)[0]
         identity = canonical_stable_identity_fingerprint(
-            donor.site, donor.observation_id, donor.remote_uuid,
+            donor.site,
+            donor.observation_id,
+            donor.remote_uuid,
             MO_USER_ID if donor.site is RemoteSite.MO else INAT_USER_ID,
         )
         action_id = scenario.env.db.mint_deletion_action(
-            PROFILE_ID, attempt_id, int(item["deletion_item_id"]),
-            site=donor.site.value, observation_id=donor.observation_id,
+            PROFILE_ID,
+            attempt_id,
+            int(item["deletion_item_id"]),
+            site=donor.site.value,
+            observation_id=donor.observation_id,
             remote_uuid=donor.remote_uuid,
             reviewed_identity_fingerprint=identity,
             request_correlation="offline-running-resume",
         )
         assert scenario.env.db.claim_deletion_action(PROFILE_ID, action_id)
         resumed = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
         assert [row.state for row in resumed] == ["succeeded"]
         assert len(scenario.dispatch.delete_calls) == 1
@@ -851,20 +1069,28 @@ def restart_concurrency_and_rollback() -> None:
         selected = tuple(item.stable_member_id for item in preview.donors)
         _, group_id = scenario.env.db.journal_deletion_attempt(preview, selected)
         attempt = scenario.env.db.deletion_attempt_for_group(
-            PROFILE_ID, group_id,
+            PROFILE_ID,
+            group_id,
         )
         first_item = scenario.env.db.deletion_items(
-            PROFILE_ID, int(attempt["deletion_attempt_id"]),
+            PROFILE_ID,
+            int(attempt["deletion_attempt_id"]),
         )[0]
         first = scenario.service._execute_one(
-            PROFILE_ID, attempt, first_item, lambda: False,
+            PROFILE_ID,
+            attempt,
+            first_item,
+            lambda: False,
             lambda _message: None,
         )
         assert first.state == "succeeded"
         scenario.env.reopen()
         scenario.service.db = scenario.env.db
         rest = scenario.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
         assert [item.state for item in rest] == ["succeeded"]
         assert len(scenario.dispatch.delete_calls) == 2
@@ -877,14 +1103,18 @@ def restart_concurrency_and_rollback() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         _, group_id = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         barrier = threading.Barrier(2)
         original_refresh = scenario.dispatch.refresh_record
 
         def synchronized_refresh(profile, site, observation_id, cancelled):
             record = original_refresh(
-                profile, site, observation_id, cancelled,
+                profile,
+                site,
+                observation_id,
+                cancelled,
             )
             if observation_id == donor.observation_id and record.exists:
                 try:
@@ -898,10 +1128,14 @@ def restart_concurrency_and_rollback() -> None:
 
         def run() -> None:
             try:
-                outputs.append(scenario.service.execute_group(
-                    PROFILE_ID, group_id, lambda: False,
-                    lambda _message: None,
-                ))
+                outputs.append(
+                    scenario.service.execute_group(
+                        PROFILE_ID,
+                        group_id,
+                        lambda: False,
+                        lambda _message: None,
+                    )
+                )
             except Exception as exc:
                 outputs.append(exc)
 
@@ -921,16 +1155,22 @@ def restart_concurrency_and_rollback() -> None:
         preview = scenario.preview()
         donor = preview.donors[0]
         attempt_id, _ = scenario.env.db.journal_deletion_attempt(
-            preview, (donor.stable_member_id,),
+            preview,
+            (donor.stable_member_id,),
         )
         attempt = scenario.env.db.deletion_attempt(PROFILE_ID, attempt_id)
         item = scenario.env.db.deletion_items(PROFILE_ID, attempt_id)[0]
         action_id = scenario.env.db.mint_deletion_action(
-            PROFILE_ID, attempt_id, int(item["deletion_item_id"]),
-            site=donor.site.value, observation_id=donor.observation_id,
+            PROFILE_ID,
+            attempt_id,
+            int(item["deletion_item_id"]),
+            site=donor.site.value,
+            observation_id=donor.observation_id,
             remote_uuid=donor.remote_uuid,
             reviewed_identity_fingerprint=canonical_stable_identity_fingerprint(
-                donor.site, donor.observation_id, donor.remote_uuid,
+                donor.site,
+                donor.observation_id,
+                donor.remote_uuid,
                 MO_USER_ID if donor.site is RemoteSite.MO else INAT_USER_ID,
             ),
             request_correlation="offline-rollback-correlation",
@@ -950,17 +1190,32 @@ def restart_concurrency_and_rollback() -> None:
             raise AssertionError("broken finalization invariant was accepted")
         except ValueError:
             pass
-        assert scenario.env.db.deletion_action(
-            PROFILE_ID, action_id,
-        )["state"] == "running"
-        assert scenario.env.db.deletion_items(
-            PROFILE_ID, attempt_id,
-        )[0]["state"] == "running"
-        assert scenario.env.db.connection().execute(
-            "SELECT remote_state FROM sync_consolidation_members "
-            "WHERE consolidation_member_id=?",
-            (donor.stable_member_id,),
-        ).fetchone()["remote_state"] == "online"
+        assert (
+            scenario.env.db.deletion_action(
+                PROFILE_ID,
+                action_id,
+            )["state"]
+            == "running"
+        )
+        assert (
+            scenario.env.db.deletion_items(
+                PROFILE_ID,
+                attempt_id,
+            )[
+                0
+            ]["state"]
+            == "running"
+        )
+        assert (
+            scenario.env.db.connection()
+            .execute(
+                "SELECT remote_state FROM sync_consolidation_members "
+                "WHERE consolidation_member_id=?",
+                (donor.stable_member_id,),
+            )
+            .fetchone()["remote_state"]
+            == "online"
+        )
         print("finalization invariant failure rolls back every local update: PASS")
     finally:
         scenario.close()
@@ -973,17 +1228,24 @@ def migration_invariants() -> None:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert conn.execute(
-            "SELECT COUNT(*) FROM sync_deletion_attempts"
-        ).fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT COUNT(*) FROM sync_consolidation_members "
-            "WHERE remote_state='deleted'"
-        ).fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT COUNT(*) FROM sync_consolidation_members "
-            "WHERE local_state='superseded' AND remote_state='online'"
-        ).fetchone()[0] == 2
+        assert (
+            conn.execute("SELECT COUNT(*) FROM sync_deletion_attempts").fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM sync_consolidation_members "
+                "WHERE remote_state='deleted'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM sync_consolidation_members "
+                "WHERE local_state='superseded' AND remote_state='online'"
+            ).fetchone()[0]
+            == 2
+        )
         print("v17 migration integrity / no invented attempts or tombstones: PASS")
     finally:
         scenario.close()

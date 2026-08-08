@@ -1,4 +1,5 @@
 """Persistent iNaturalist API-token auth state."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -73,4 +74,4 @@ def normalise_token(token: Optional[str]) -> str:
 
     # Preserve support for non-JWT values while removing harmless wrapping
     # quotes from manually entered credentials.
-    return value.strip().strip('"\'').strip()
+    return value.strip().strip("\"'").strip()

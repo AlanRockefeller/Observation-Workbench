@@ -10,6 +10,7 @@ Pagination:
   load_page() fetches one page. Call repeatedly with page=2,3,... and append
   results to your list. total_results is returned so the UI can show progress.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +23,10 @@ from observation_workbench.api.observation_url import (
     parse_observations_url,
     with_taxon_filter,
 )
-from observation_workbench.api.parsers import parse_observation, parse_observation_from_ident
+from observation_workbench.api.parsers import (
+    parse_observation,
+    parse_observation_from_ident,
+)
 from observation_workbench.models import StudyObservation
 from observation_workbench.storage.cache_db import CacheDB
 
@@ -82,13 +86,19 @@ class LoadFilters:
         apply_taxon_filter_to_observation_url: bool = True,
     ) -> None:
         self.source_input = username.strip()
-        self.apply_taxon_filter_to_observation_url = apply_taxon_filter_to_observation_url
-        parsed_observation_query = observation_query or parse_observations_url(self.source_input)
+        self.apply_taxon_filter_to_observation_url = (
+            apply_taxon_filter_to_observation_url
+        )
+        parsed_observation_query = observation_query or parse_observations_url(
+            self.source_input
+        )
         if (
             parsed_observation_query is not None
             and self.apply_taxon_filter_to_observation_url
         ):
-            parsed_observation_query = with_taxon_filter(parsed_observation_query, taxon_id)
+            parsed_observation_query = with_taxon_filter(
+                parsed_observation_query, taxon_id
+            )
         self.observation_query = parsed_observation_query
         self.username = "" if self.observation_query else self.source_input
         self.place_id = None if self.observation_query else place_id
@@ -289,7 +299,10 @@ def _passes_provisional_filter(obs: StudyObservation, filters: LoadFilters) -> b
     if not filters.provisional_name_only:
         return True
     if filters.observation_query:
-        if any(ident.current and _has_provisional_name(ident.taxon) for ident in obs.all_identifications):
+        if any(
+            ident.current and _has_provisional_name(ident.taxon)
+            for ident in obs.all_identifications
+        ):
             return True
         return (
             _has_provisional_name(obs.community_taxon)

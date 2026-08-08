@@ -1,4 +1,5 @@
 """Strict normalizers for remote references and non-reversible evidence."""
+
 from __future__ import annotations
 
 import hashlib
@@ -30,16 +31,16 @@ _INAT_PATH = re.compile(r"^/observations/(?P<id>[1-9]\d*)/?$", re.IGNORECASE)
 # which fails closed: the ITS gate marks it invalid and blocks the write.
 _INSDC_ACCESSION = re.compile(
     r"(?:"
-    r"[A-Z]\d{5}"          # 1 + 5   e.g. U12345
-    r"|[A-Z]{2}\d{6}"      # 2 + 6   e.g. AF123456, MK000001
-    r"|[A-Z]{2}\d{8}"      # 2 + 8   e.g. KY1234567 8-digit series
-    r"|[A-Z]{3}\d{5}"      # 3 + 5   protein
-    r"|[A-Z]{4}\d{8,10}"   # 4 + 8-10  WGS
-    r"|[A-Z]{5}\d{7}"      # 5 + 7   MGA
-    r"|[A-Z]{6}\d{9,11}"   # 6 + 9-11  TSA/WGS extended
-    r"|[A-Z]{2}_\d{6,9}"   # RefSeq, e.g. NC_000001, NM_000546
+    r"[A-Z]\d{5}"  # 1 + 5   e.g. U12345
+    r"|[A-Z]{2}\d{6}"  # 2 + 6   e.g. AF123456, MK000001
+    r"|[A-Z]{2}\d{8}"  # 2 + 8   e.g. KY1234567 8-digit series
+    r"|[A-Z]{3}\d{5}"  # 3 + 5   protein
+    r"|[A-Z]{4}\d{8,10}"  # 4 + 8-10  WGS
+    r"|[A-Z]{5}\d{7}"  # 5 + 7   MGA
+    r"|[A-Z]{6}\d{9,11}"  # 6 + 9-11  TSA/WGS extended
+    r"|[A-Z]{2}_\d{6,9}"  # RefSeq, e.g. NC_000001, NM_000546
     r")"
-    r"(?:\.\d+)?"          # optional version suffix
+    r"(?:\.\d+)?"  # optional version suffix
 )
 _UNITE_ACCESSION = re.compile(r"SH\d{6,9}\.\d{2}FU")
 _BOLD_ACCESSION = re.compile(r"[A-Z][A-Z0-9]{1,11}-\d{2,10}")
@@ -64,7 +65,10 @@ def parse_mo_observation_url(value: object) -> Optional[int]:
         parts = urlsplit(text)
     except ValueError:
         return None
-    if parts.scheme.casefold() not in {"http", "https"} or parts.hostname not in _MO_HOSTS:
+    if (
+        parts.scheme.casefold() not in {"http", "https"}
+        or parts.hostname not in _MO_HOSTS
+    ):
         return None
     try:
         port = parts.port
@@ -85,7 +89,10 @@ def parse_inat_observation_url(value: object) -> Optional[int]:
         parts = urlsplit(text)
     except ValueError:
         return None
-    if parts.scheme.casefold() not in {"http", "https"} or parts.hostname not in _INAT_HOSTS:
+    if (
+        parts.scheme.casefold() not in {"http", "https"}
+        or parts.hostname not in _INAT_HOSTS
+    ):
         return None
     match = _INAT_PATH.fullmatch(parts.path)
     return int(match.group("id")) if match else None
@@ -143,8 +150,10 @@ def normalize_archive(value: object, accession: object = None) -> str:
     """
     text = " ".join(str(value or "").strip().casefold().split())
     known = {
-        "genbank": MO_GENBANK_ARCHIVE, "ncbi": MO_GENBANK_ARCHIVE,
-        "ena": MO_ENA_ARCHIVE, "unite": MO_UNITE_ARCHIVE,
+        "genbank": MO_GENBANK_ARCHIVE,
+        "ncbi": MO_GENBANK_ARCHIVE,
+        "ena": MO_ENA_ARCHIVE,
+        "unite": MO_UNITE_ARCHIVE,
     }
     if text in known:
         return known[text]
@@ -163,7 +172,8 @@ def is_mo_writable_archive(archive: object) -> bool:
 def normalize_sequence(value: object) -> str:
     """Normalize IUPAC DNA characters; reject prose and unusably short values."""
     lines = [
-        line for line in str(value or "").splitlines()
+        line
+        for line in str(value or "").splitlines()
         if not line.lstrip().startswith(">")
     ]
     text = re.sub(r"[\s\d.-]+", "", "\n".join(lines)).upper()

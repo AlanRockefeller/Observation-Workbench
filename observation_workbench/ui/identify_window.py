@@ -1,4 +1,5 @@
 """Separate, read-only local iNaturalist Identify window."""
+
 from __future__ import annotations
 
 import html
@@ -63,7 +64,10 @@ from observation_workbench.ui.identify_comment_dialog import IdentifyCommentDial
 from observation_workbench.ui.identify_favorite_dialog import IdentifyFavoriteDialog
 from observation_workbench.ui.identify_info_tab import IdentifyInfoTab
 from observation_workbench.ui.identify_photo_panel import IdentifyPhotoPanel
-from observation_workbench.ui.identify_read_error import format_read_failure, show_safe_read_failure
+from observation_workbench.ui.identify_read_error import (
+    format_read_failure,
+    show_safe_read_failure,
+)
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +98,9 @@ class _DetailsSignals(QObject):
 
 
 class _DetailsWorker(QRunnable):
-    def __init__(self, client: INatClient, observation_ids: tuple[int, ...], token: str) -> None:
+    def __init__(
+        self, client: INatClient, observation_ids: tuple[int, ...], token: str
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self._client = client
@@ -128,7 +134,9 @@ class _CurrentUserWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            user_id = _extract_current_user_id(self._client.get_current_user(self._token))
+            user_id = _extract_current_user_id(
+                self._client.get_current_user(self._token)
+            )
             if user_id is None:
                 raise ValueError("Current user response had no numeric id")
             self.signals.loaded.emit(user_id)
@@ -307,7 +315,9 @@ class IdentifyWindow(QMainWindow):
         self._prefetch.set_observations(session.observations)
         self._prefetch.image_ready_detailed.connect(self._image_ready)
         self._prefetch.image_failed_detailed.connect(self._image_failed)
-        self._prefetch.image_diagnostics_changed.connect(self._image_diagnostics_changed)
+        self._prefetch.image_diagnostics_changed.connect(
+            self._image_diagnostics_changed
+        )
         self._prefetch.request_state_changed.connect(self._image_request_state_changed)
 
         self._shortcut_filter = _IdentifyShortcutFilter(self)
@@ -364,8 +374,12 @@ class IdentifyWindow(QMainWindow):
         self._pending_actions_label.setWordWrap(True)
         self._pending_actions_label.setTextFormat(Qt.TextFormat.PlainText)
         pending_layout.addWidget(self._pending_actions_label, 1)
-        self._view_pending_actions_button = QPushButton("View pending actions…", self._pending_actions_panel)
-        self._view_pending_actions_button.clicked.connect(self.pending_actions_requested.emit)
+        self._view_pending_actions_button = QPushButton(
+            "View pending actions…", self._pending_actions_panel
+        )
+        self._view_pending_actions_button.clicked.connect(
+            self.pending_actions_requested.emit
+        )
         pending_layout.addWidget(self._view_pending_actions_button)
         self._pending_actions_panel.hide()
         image_layout.addWidget(self._pending_actions_panel)
@@ -403,7 +417,9 @@ class IdentifyWindow(QMainWindow):
         for title in ("Suggestions", "Annotations", "Data Quality"):
             placeholder = QWidget(self._tabs)
             placeholder_layout = QVBoxLayout(placeholder)
-            placeholder_layout.addWidget(QLabel("Not implemented in this gate.", placeholder))
+            placeholder_layout.addWidget(
+                QLabel("Not implemented in this gate.", placeholder)
+            )
             self._tabs.addTab(placeholder, title)
         self._refresh_button = QToolButton(self._tabs)
         self._refresh_button.setIcon(
@@ -462,7 +478,9 @@ class IdentifyWindow(QMainWindow):
             self.restoreState(window_state)
         if _has_saved_value(splitter_state):
             self._splitter.restoreState(splitter_state)
-        active_tab = max(0, min(self._settings.identify_active_tab, self._tabs.count() - 1))
+        active_tab = max(
+            0, min(self._settings.identify_active_tab, self._tabs.count() - 1)
+        )
         self._tabs.setCurrentIndex(active_tab)
 
     def _show_current_observation(self, direction: int = 0) -> None:
@@ -476,7 +494,9 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         self._photo_index = _clamp_photo_index(self._photo_index, observation.photos)
         self._selected_photo_id = (
-            observation.photos[self._photo_index].photo_id if observation.photos else None
+            observation.photos[self._photo_index].photo_id
+            if observation.photos
+            else None
         )
         self._brightness = 0
         self._update_header()
@@ -527,7 +547,10 @@ class IdentifyWindow(QMainWindow):
     def _update_selected_loading_state(self) -> None:
         photo = self._current_photo()
         if photo is not None and self._prefetch.is_request_in_flight(photo.photo_id):
-            if self._prefetch.active_request_mode(photo.photo_id) == ImageRequestMode.EXPLICIT_RETRY:
+            if (
+                self._prefetch.active_request_mode(photo.photo_id)
+                == ImageRequestMode.EXPLICIT_RETRY
+            ):
                 self._photo_panel.show_retrying(photo.photo_id)
             else:
                 self._photo_panel.show_loading(photo.photo_id)
@@ -568,7 +591,9 @@ class IdentifyWindow(QMainWindow):
             button.setIconSize(QSize(64, 64))
             button.setToolTip(f"Photo {photo_index + 1} of {len(observation.photos)}")
             button.clicked.connect(
-                lambda _checked=False, photo_id=photo.photo_id: self._select_photo_id(photo_id)
+                lambda _checked=False, photo_id=photo.photo_id: self._select_photo_id(
+                    photo_id
+                )
             )
             self._thumbnail_buttons[photo.photo_id] = button
             cached = self._prefetch.get_best_cached(photo.photo_id)
@@ -670,7 +695,11 @@ class IdentifyWindow(QMainWindow):
         self._settings.identify_show_reviewed = checked
         self._settings.sync()
         self._update_reviewed_availability()
-        if checked or not self._session.items or self._is_index_visible(self._observation_index):
+        if (
+            checked
+            or not self._session.items
+            or self._is_index_visible(self._observation_index)
+        ):
             return
         candidate = self._next_visible_index(self._observation_index, 1)
         if candidate is None:
@@ -694,7 +723,8 @@ class IdentifyWindow(QMainWindow):
         def is_current() -> bool:
             return (
                 not self._closed
-                and authentication_generation == self._identify_authentication_generation
+                and authentication_generation
+                == self._identify_authentication_generation
                 and token == self._current_detail_read_token()
             )
 
@@ -757,7 +787,8 @@ class IdentifyWindow(QMainWindow):
             photo_id,
             pixmap,
             size,
-            preserve_view=self._photo_panel.current_photo_id == photo_id and self._photo_panel.has_pixmap,
+            preserve_view=self._photo_panel.current_photo_id == photo_id
+            and self._photo_panel.has_pixmap,
         )
         diagnostics = self._prefetch.diagnostics_for_photo(photo_id)
         if diagnostics is not None and diagnostics.partial_failures:
@@ -799,13 +830,19 @@ class IdentifyWindow(QMainWindow):
         text = _format_image_diagnostics(diagnostics)
         QMessageBox.information(self, "Image details", text)
 
-    def _image_request_state_changed(self, active_count: int, active_photo_ids: object) -> None:
+    def _image_request_state_changed(
+        self, active_count: int, active_photo_ids: object
+    ) -> None:
         del active_count
         if self._closed:
             return
-        self._active_image_photo_ids = frozenset(
-            photo_id for photo_id in active_photo_ids if isinstance(photo_id, int)
-        ) if isinstance(active_photo_ids, tuple) else frozenset()
+        self._active_image_photo_ids = (
+            frozenset(
+                photo_id for photo_id in active_photo_ids if isinstance(photo_id, int)
+            )
+            if isinstance(active_photo_ids, tuple)
+            else frozenset()
+        )
         self._update_selected_loading_state()
         self._derive_network_status()
 
@@ -832,7 +869,9 @@ class IdentifyWindow(QMainWindow):
             if self._detail_is_eligible(self._session.items[index].observation_id, now)
         ]
         if ids:
-            self._start_detail_request(ids, explicit=False, operation="Load Identify observation details")
+            self._start_detail_request(
+                ids, explicit=False, operation="Load Identify observation details"
+            )
 
     def _detail_is_eligible(self, observation_id: int, now: float) -> bool:
         state = self._detail_states.setdefault(observation_id, _DetailState())
@@ -857,7 +896,8 @@ class IdentifyWindow(QMainWindow):
         requested_ids = frozenset(
             observation_id
             for observation_id in observation_ids
-            if self._detail_states.setdefault(observation_id, _DetailState()).status != "in_flight"
+            if self._detail_states.setdefault(observation_id, _DetailState()).status
+            != "in_flight"
         )
         if not requested_ids:
             return
@@ -877,7 +917,10 @@ class IdentifyWindow(QMainWindow):
             authentication_generation=self._detail_authentication_generation,
             requested_ids=requested_ids,
             observation_versions=tuple(
-                (observation_id, self._observation_refresh_versions.get(observation_id, 0))
+                (
+                    observation_id,
+                    self._observation_refresh_versions.get(observation_id, 0),
+                )
                 for observation_id in sorted(requested_ids)
             ),
             explicit=explicit,
@@ -912,10 +955,14 @@ class IdentifyWindow(QMainWindow):
         previous_photo_id = self._selected_photo_id
 
         for record in records or []:
-            observation = parse_observation(record) if isinstance(record, dict) else None
+            observation = (
+                parse_observation(record) if isinstance(record, dict) else None
+            )
             if observation is None or observation.obs_id not in request.requested_ids:
                 continue
-            if request.version_for(observation.obs_id) != self._observation_refresh_versions.get(
+            if request.version_for(
+                observation.obs_id
+            ) != self._observation_refresh_versions.get(
                 observation.obs_id,
                 0,
             ):
@@ -932,7 +979,9 @@ class IdentifyWindow(QMainWindow):
 
         now = time.monotonic()
         for observation_id in request.requested_ids - returned_ids:
-            if request.version_for(observation_id) != self._observation_refresh_versions.get(
+            if request.version_for(
+                observation_id
+            ) != self._observation_refresh_versions.get(
                 observation_id,
                 0,
             ):
@@ -956,7 +1005,9 @@ class IdentifyWindow(QMainWindow):
         now = time.monotonic()
         affected_ids: list[int] = []
         for observation_id in request.requested_ids:
-            if request.version_for(observation_id) != self._observation_refresh_versions.get(
+            if request.version_for(
+                observation_id
+            ) != self._observation_refresh_versions.get(
                 observation_id,
                 0,
             ):
@@ -976,8 +1027,11 @@ class IdentifyWindow(QMainWindow):
         current_id = self._current_observation().obs_id
         self._derive_network_status()
         if request.explicit and current_id in request.requested_ids:
+
             def retry_same_detail_read() -> None:
-                self._retry_detail_request(tuple(request.requested_ids), request.operation)
+                self._retry_detail_request(
+                    tuple(request.requested_ids), request.operation
+                )
 
             show_safe_read_failure(
                 self,
@@ -986,7 +1040,9 @@ class IdentifyWindow(QMainWindow):
                 retry_same_detail_read,
             )
         else:
-            log.warning("Identify detail read failed ids=%s: %s", request.requested_ids, exc)
+            log.warning(
+                "Identify detail read failed ids=%s: %s", request.requested_ids, exc
+            )
 
     def _reconcile_current_after_detail(self, previous_photo_id: int | None) -> None:
         observation = self._current_observation()
@@ -997,7 +1053,9 @@ class IdentifyWindow(QMainWindow):
             self._photo_index = photo_ids.index(previous_photo_id)
             selected_photo_changed = False
         elif photo_ids:
-            self._photo_index = _clamp_photo_index(self._photo_index, observation.photos)
+            self._photo_index = _clamp_photo_index(
+                self._photo_index, observation.photos
+            )
             self._selected_photo_id = photo_ids[self._photo_index]
             selected_photo_changed = True
         else:
@@ -1079,7 +1137,9 @@ class IdentifyWindow(QMainWindow):
     ) -> None:
         if self._closed:
             return
-        self._start_detail_request(list(observation_ids), explicit=True, operation=operation)
+        self._start_detail_request(
+            list(observation_ids), explicit=True, operation=operation
+        )
 
     def _derive_network_status(self) -> None:
         if self._closed or not self._session.items:
@@ -1087,23 +1147,30 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         photo = self._current_photo()
         current_image_failure = (
-            self._prefetch.failure_for_photo(photo.photo_id) if photo is not None else None
+            self._prefetch.failure_for_photo(photo.photo_id)
+            if photo is not None
+            else None
         )
-        detail_state = self._detail_states.setdefault(observation.obs_id, _DetailState())
+        detail_state = self._detail_states.setdefault(
+            observation.obs_id, _DetailState()
+        )
         current_detail_failure = detail_state.status in {"failed", "missing"}
         current_image_loading = (
             photo is not None and self._prefetch.is_request_in_flight(photo.photo_id)
         )
         current_image_retrying = (
             photo is not None
-            and self._prefetch.active_request_mode(photo.photo_id) == ImageRequestMode.EXPLICIT_RETRY
+            and self._prefetch.active_request_mode(photo.photo_id)
+            == ImageRequestMode.EXPLICIT_RETRY
         )
         background_image_loading = bool(
-            self._active_image_photo_ids - ({photo.photo_id} if photo is not None else set())
+            self._active_image_photo_ids
+            - ({photo.photo_id} if photo is not None else set())
         )
         current_detail_loading = detail_state.status == "in_flight"
         background_detail_failures = any(
-            state.status in {"failed", "missing"} and observation_id != observation.obs_id
+            state.status in {"failed", "missing"}
+            and observation_id != observation.obs_id
             for observation_id, state in self._detail_states.items()
         )
         background_detail_loading = any(
@@ -1134,7 +1201,9 @@ class IdentifyWindow(QMainWindow):
 
     def _show_network_details(self) -> None:
         if not self._recent_failures:
-            QMessageBox.information(self, "Network details", "No recent network failures.")
+            QMessageBox.information(
+                self, "Network details", "No recent network failures."
+            )
             return
         text = "\n\n".join(
             f"{label}\n{detail}" for label, detail in self._recent_failures
@@ -1357,12 +1426,18 @@ class IdentifyWindow(QMainWindow):
             # drop the in-flight marker so the header no longer reads "saving".
             if not optimistic.confirmed:
                 optimistic.confirmed = True
-                if self._session.items and self._current_observation().obs_id == observation_id:
+                if (
+                    self._session.items
+                    and self._current_observation().obs_id == observation_id
+                ):
                     self._update_header()
             return
         if state in _OPTIMISTIC_REVERT_STATES:
             self._optimistic_taxa.pop(observation_id, None)
-            if self._session.items and self._current_observation().obs_id == observation_id:
+            if (
+                self._session.items
+                and self._current_observation().obs_id == observation_id
+            ):
                 self._update_header()
             self._notify_optimistic_reverted(observation_id, optimistic.taxon, state)
 
@@ -1540,7 +1615,9 @@ class IdentifyWindow(QMainWindow):
         if self._positive_numeric_id(observation.obs_id) is None:
             return False
         taxon = observation.taxon
-        return taxon is not None and self._positive_numeric_id(taxon.taxon_id) is not None
+        return (
+            taxon is not None and self._positive_numeric_id(taxon.taxon_id) is not None
+        )
 
     def _can_open_comment(self) -> bool:
         """Return whether this window can safely open the Comment dialog."""
@@ -1599,7 +1676,9 @@ class IdentifyWindow(QMainWindow):
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
             self._agree_action.setEnabled(False)
-            self._agree_action.setToolTip("Authenticate to agree with the observation taxon.")
+            self._agree_action.setToolTip(
+                "Authenticate to agree with the observation taxon."
+            )
             return
         observation = self._current_observation()
         if self._positive_numeric_id(observation.obs_id) is None:
@@ -1609,7 +1688,9 @@ class IdentifyWindow(QMainWindow):
         taxon = observation.taxon
         if taxon is None:
             self._agree_action.setEnabled(False)
-            self._agree_action.setToolTip("This observation has no current taxon to agree with.")
+            self._agree_action.setToolTip(
+                "This observation has no current taxon to agree with."
+            )
             return
         if self._positive_numeric_id(taxon.taxon_id) is None:
             self._agree_action.setEnabled(False)
@@ -1617,7 +1698,9 @@ class IdentifyWindow(QMainWindow):
                 "The observation taxon has no valid numeric ID to agree with."
             )
             return
-        taxon_name = str(taxon.display_name or taxon.name or "observation taxon").strip()
+        taxon_name = str(
+            taxon.display_name or taxon.name or "observation taxon"
+        ).strip()
         self._agree_action.setEnabled(True)
         self._agree_action.setToolTip(
             f"Agree with {taxon_name} as {snapshot.login} (A)"
@@ -1632,7 +1715,9 @@ class IdentifyWindow(QMainWindow):
             return
         if self._action_manager is None:
             self._comment_action.setEnabled(False)
-            self._comment_action.setToolTip("Identify action management is unavailable.")
+            self._comment_action.setToolTip(
+                "Identify action management is unavailable."
+            )
             return
         if self._comment_dialog is not None:
             self._comment_action.setEnabled(False)
@@ -1665,7 +1750,9 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         if self._positive_numeric_id(observation.obs_id) is None:
             self._comment_action.setEnabled(False)
-            self._comment_action.setToolTip("This observation has no stable numeric ID.")
+            self._comment_action.setToolTip(
+                "This observation has no stable numeric ID."
+            )
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
@@ -1699,7 +1786,9 @@ class IdentifyWindow(QMainWindow):
             return
         if self._action_manager is None:
             self._reviewed_action.setEnabled(False)
-            self._reviewed_action.setToolTip("Identify action management is unavailable.")
+            self._reviewed_action.setToolTip(
+                "Identify action management is unavailable."
+            )
             return
         if self._reviewed_operation is not None:
             self._reviewed_action.setEnabled(False)
@@ -1732,12 +1821,16 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         if self._positive_numeric_id(observation.obs_id) is None:
             self._reviewed_action.setEnabled(False)
-            self._reviewed_action.setToolTip("This observation has no stable numeric ID.")
+            self._reviewed_action.setToolTip(
+                "This observation has no stable numeric ID."
+            )
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
             self._reviewed_action.setEnabled(False)
-            self._reviewed_action.setToolTip("Authenticate to mark this observation reviewed.")
+            self._reviewed_action.setToolTip(
+                "Authenticate to mark this observation reviewed."
+            )
             return
         self._reviewed_action.setEnabled(True)
         tooltip = f"Mark this observation reviewed as {snapshot.login} (R)"
@@ -1769,7 +1862,9 @@ class IdentifyWindow(QMainWindow):
             return
         if self._action_manager is None:
             self._favorite_action.setEnabled(False)
-            self._favorite_action.setToolTip("Identify action management is unavailable.")
+            self._favorite_action.setToolTip(
+                "Identify action management is unavailable."
+            )
             return
         if self._favorite_dialog is not None:
             self._favorite_action.setEnabled(False)
@@ -1802,7 +1897,9 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         if self._positive_numeric_id(observation.obs_id) is None:
             self._favorite_action.setEnabled(False)
-            self._favorite_action.setToolTip("This observation has no stable numeric ID.")
+            self._favorite_action.setToolTip(
+                "This observation has no stable numeric ID."
+            )
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
@@ -1840,7 +1937,9 @@ class IdentifyWindow(QMainWindow):
             return
         if self._action_manager is None:
             self._captive_button.setEnabled(False)
-            self._captive_button.setToolTip("Identify action management is unavailable.")
+            self._captive_button.setToolTip(
+                "Identify action management is unavailable."
+            )
             return
         if self._captive_dialog is not None:
             self._captive_button.setEnabled(False)
@@ -1873,7 +1972,9 @@ class IdentifyWindow(QMainWindow):
         observation = self._current_observation()
         if self._positive_numeric_id(observation.obs_id) is None:
             self._captive_button.setEnabled(False)
-            self._captive_button.setToolTip("This observation has no stable numeric ID.")
+            self._captive_button.setToolTip(
+                "This observation has no stable numeric ID."
+            )
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
@@ -1980,7 +2081,10 @@ class IdentifyWindow(QMainWindow):
             or resolution.observation_id != operation.observation_id
         ):
             return
-        if operation.authentication_generation != self._identify_authentication_generation:
+        if (
+            operation.authentication_generation
+            != self._identify_authentication_generation
+        ):
             self._cancel_agree_for_authentication_change()
             return
         if not resolution.resolved:
@@ -2015,7 +2119,9 @@ class IdentifyWindow(QMainWindow):
         if result.inserted_action_id is not None:
             action_id = int(result.inserted_action_id)
             self._clear_agree_operation()
-            self._agree_journaled(action_id, operation.observation_id, operation.taxon_display_name)
+            self._agree_journaled(
+                action_id, operation.observation_id, operation.taxon_display_name
+            )
             return
         if result.duplicate_action_id is not None:
             duplicate_id = int(result.duplicate_action_id)
@@ -2041,12 +2147,17 @@ class IdentifyWindow(QMainWindow):
         resolution: ObservationUUIDResolution,
     ) -> bool:
         """Check immutable operation correlation and live authentication at commit."""
-        snapshot = self._action_manager.current_authentication() if self._action_manager else None
+        snapshot = (
+            self._action_manager.current_authentication()
+            if self._action_manager
+            else None
+        )
         return bool(
             self._is_active_agree_operation(operation)
             and self._agree_resolution_request_id == resolution.request_id
             and resolution.observation_id == operation.observation_id
-            and operation.authentication_generation == self._identify_authentication_generation
+            and operation.authentication_generation
+            == self._identify_authentication_generation
             and snapshot is not None
             and snapshot.authenticated
             and self._same_login(snapshot.login, operation.account_login)
@@ -2191,7 +2302,10 @@ class IdentifyWindow(QMainWindow):
             or resolution.observation_id != operation.observation_id
         ):
             return
-        if operation.authentication_generation != self._identify_authentication_generation:
+        if (
+            operation.authentication_generation
+            != self._identify_authentication_generation
+        ):
             self._cancel_reviewed_for_authentication_change()
             return
         if not resolution.resolved:
@@ -2234,9 +2348,7 @@ class IdentifyWindow(QMainWindow):
             cancelled_note = describe_cancelled_opposite_actions(
                 "Reviewed", tuple(int(a) for a in result.cancelled_action_ids)
             )
-            pending_message = (
-                f"An equivalent unresolved Reviewed action already exists locally as action #{duplicate_id}."
-            )
+            pending_message = f"An equivalent unresolved Reviewed action already exists locally as action #{duplicate_id}."
             status_message = (
                 "An equivalent unresolved Reviewed action already exists locally "
                 f"as action #{duplicate_id}. No new action was created or authorized."
@@ -2259,12 +2371,17 @@ class IdentifyWindow(QMainWindow):
         resolution: ObservationUUIDResolution,
     ) -> bool:
         """Check immutable operation correlation and live authentication at commit."""
-        snapshot = self._action_manager.current_authentication() if self._action_manager else None
+        snapshot = (
+            self._action_manager.current_authentication()
+            if self._action_manager
+            else None
+        )
         return bool(
             self._is_active_reviewed_operation(operation)
             and self._reviewed_resolution_request_id == resolution.request_id
             and resolution.observation_id == operation.observation_id
-            and operation.authentication_generation == self._identify_authentication_generation
+            and operation.authentication_generation
+            == self._identify_authentication_generation
             and snapshot is not None
             and snapshot.authenticated
             and self._same_login(snapshot.login, operation.account_login)
@@ -2600,7 +2717,9 @@ class IdentifyWindow(QMainWindow):
         dialog.favorite_journaled.connect(self._favorite_journaled)
         dialog.pending_actions_requested.connect(self.pending_actions_requested.emit)
         dialog.destroyed.connect(
-            lambda _object=None, tracked=dialog: self._favorite_dialog_destroyed(tracked)
+            lambda _object=None, tracked=dialog: self._favorite_dialog_destroyed(
+                tracked
+            )
         )
         self._favorite_dialog = dialog
         self._refresh_action_entry_availability()
@@ -2623,9 +2742,11 @@ class IdentifyWindow(QMainWindow):
         del observation_id
         if self._closed or self._action_manager is None:
             return
-        cancelled_ids = tuple(
-            int(a) for a in cancelled_action_ids
-        ) if isinstance(cancelled_action_ids, (tuple, list)) else ()
+        cancelled_ids = (
+            tuple(int(a) for a in cancelled_action_ids)
+            if isinstance(cancelled_action_ids, (tuple, list))
+            else ()
+        )
         cancelled_note = describe_cancelled_opposite_actions("Favorite", cancelled_ids)
         verb = "addition" if desired_state else "removal"
         if self._action_manager.request_dispatch(int(action_id)):
@@ -2723,10 +2844,14 @@ class IdentifyWindow(QMainWindow):
         del observation_id
         if self._closed or self._action_manager is None:
             return
-        cancelled_ids = tuple(
-            int(a) for a in cancelled_action_ids
-        ) if isinstance(cancelled_action_ids, (tuple, list)) else ()
-        cancelled_note = describe_cancelled_conflicting_actions("Captive/Cultivated", cancelled_ids)
+        cancelled_ids = (
+            tuple(int(a) for a in cancelled_action_ids)
+            if isinstance(cancelled_action_ids, (tuple, list))
+            else ()
+        )
+        cancelled_note = describe_cancelled_conflicting_actions(
+            "Captive/Cultivated", cancelled_ids
+        )
         label = {
             "disagree": "Captive/Cultivated vote",
             "agree": "Wild vote",
@@ -2758,7 +2883,8 @@ class IdentifyWindow(QMainWindow):
         return (
             not self._closed
             and request.generation == self._generation
-            and request.authentication_generation == self._detail_authentication_generation
+            and request.authentication_generation
+            == self._detail_authentication_generation
         )
 
     def _invalidate_detail_authentication_context(self) -> None:
@@ -2784,7 +2910,11 @@ class IdentifyWindow(QMainWindow):
             for action in self._action_manager.actions_for_observation(observation_id)
         ]
         self._info_tab.set_pending_actions(
-            [action for action in actions if action.is_active or action.requires_attention]
+            [
+                action
+                for action in actions
+                if action.is_active or action.requires_attention
+            ]
         )
         text = compact_observation_action_text(actions)
         if text:
@@ -2839,7 +2969,9 @@ class IdentifyWindow(QMainWindow):
         self._settings.sync()
         if self._action_manager is not None:
             try:
-                self._action_manager.action_changed.disconnect(self._action_manager_changed)
+                self._action_manager.action_changed.disconnect(
+                    self._action_manager_changed
+                )
                 self._action_manager.authentication_context_changed.disconnect(
                     self._action_manager_authentication_changed
                 )

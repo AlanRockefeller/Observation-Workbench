@@ -12,6 +12,7 @@ Favorite desired state, or a Captive/Cultivated vote) and how it is queued
 differ. This base class owns the shared machinery; subclasses implement the
 hooks below to supply the action-specific pieces.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -164,7 +165,10 @@ class IdentifyJournalDialog(QDialog):
 
     def _refresh_auth_status(self) -> None:
         snapshot = self._action_manager.current_authentication()
-        if self._same_login(snapshot.login, self._opened_login) and snapshot.authenticated:
+        if (
+            self._same_login(snapshot.login, self._opened_login)
+            and snapshot.authenticated
+        ):
             self._auth_status.setText(f"Authenticated as {snapshot.login}.")
         elif snapshot.authenticated:
             self._auth_status.setText(
@@ -212,7 +216,9 @@ class IdentifyJournalDialog(QDialog):
         # Capture all user intent before asynchronous UUID resolution.
         self._submission_generation += 1
         self._active_submission_generation = self._submission_generation
-        self._active_submission_authentication_generation = self._authentication_generation
+        self._active_submission_authentication_generation = (
+            self._authentication_generation
+        )
         self._active_submission_value = value
         self._set_busy(True)
         self._status.setText("Resolving the observation identity…")
@@ -235,7 +241,10 @@ class IdentifyJournalDialog(QDialog):
     def _uuid_resolved(self, resolution: object) -> None:
         if self._closed or not isinstance(resolution, ObservationUUIDResolution):
             return
-        if self._resolution_request_id is None or self._active_submission_generation is None:
+        if (
+            self._resolution_request_id is None
+            or self._active_submission_generation is None
+        ):
             return
         if (
             resolution.request_id != self._resolution_request_id
@@ -315,7 +324,8 @@ class IdentifyJournalDialog(QDialog):
             not self._closed
             and self._busy
             and self._active_submission_generation is not None
-            and self._resolution_request_generation == self._active_submission_generation
+            and self._resolution_request_generation
+            == self._active_submission_generation
             and self._resolution_request_id == resolution.request_id
             and resolution.observation_id == self._observation_id
             and self._active_submission_authentication_generation
@@ -345,7 +355,9 @@ class IdentifyJournalDialog(QDialog):
             return
         self._closed = True
         try:
-            self._action_manager.observation_uuid_resolved.disconnect(self._uuid_resolved)
+            self._action_manager.observation_uuid_resolved.disconnect(
+                self._uuid_resolved
+            )
             self._action_manager.authentication_context_changed.disconnect(
                 self._authentication_changed
             )

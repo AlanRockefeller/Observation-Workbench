@@ -15,6 +15,7 @@ Q*Application exists, but `QT_SCALE_FACTOR` is only read while one is being
 constructed — so the probe runs in a throwaway subprocess (~0.4s, creates no
 window) and this process applies the result to its own environment.
 """
+
 from __future__ import annotations
 
 import logging
@@ -76,7 +77,9 @@ def probe_display() -> tuple[float, int] | None:
         return None
 
     if proc.returncode != 0:
-        log.debug("HiDPI probe failed (rc=%s): %s", proc.returncode, proc.stderr.strip())
+        log.debug(
+            "HiDPI probe failed (rc=%s): %s", proc.returncode, proc.stderr.strip()
+        )
         return None
 
     parts = proc.stdout.split()
@@ -111,7 +114,9 @@ def ensure_scale_factor() -> str | None:
     scale = recommended_scale(dpr, logical_height)
     log.debug(
         "HiDPI probe: dpr=%s logical_height=%s -> QT_SCALE_FACTOR=%s",
-        dpr, logical_height, scale or "unset",
+        dpr,
+        logical_height,
+        scale or "unset",
     )
     if scale is None:
         return None

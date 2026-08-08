@@ -4,17 +4,36 @@ checkboxes, optional date range, Load/Cancel buttons.
 
 Autocomplete uses a background worker so API calls don't freeze typing.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import (
-    QDate, QEvent, QObject, QRunnable, QStringListModel, QThreadPool, Qt, QTimer, Signal, Slot,
+    QDate,
+    QEvent,
+    QObject,
+    QRunnable,
+    QStringListModel,
+    QThreadPool,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
 )
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QCompleter, QDateEdit, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox,
+    QComboBox,
+    QCompleter,
+    QDateEdit,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.api.client import INatClient
@@ -75,7 +94,9 @@ class _AutocompleteSignals(QObject):
 
 
 class _PlaceAutocompleteWorker(QRunnable):
-    def __init__(self, client: INatClient, query: str, generation: int, get_gen) -> None:
+    def __init__(
+        self, client: INatClient, query: str, generation: int, get_gen
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self.client = client
@@ -104,13 +125,15 @@ class _PlaceAutocompleteWorker(QRunnable):
 
 
 class _UserValidateSignals(QObject):
-    found = Signal(str)   # canonical login
+    found = Signal(str)  # canonical login
     not_found = Signal()
     error = Signal(str)
 
 
 class _UserValidateWorker(QRunnable):
-    def __init__(self, client: INatClient, login: str, generation: int, get_gen) -> None:
+    def __init__(
+        self, client: INatClient, login: str, generation: int, get_gen
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self.client = client
@@ -196,7 +219,9 @@ class FilterBar(QWidget):
 
         row1.addWidget(QLabel("Identifier / URL:"))
         self._username_edit = QLineEdit()
-        self._username_edit.setPlaceholderText("e.g. deniszabin or an iNaturalist observations URL")
+        self._username_edit.setPlaceholderText(
+            "e.g. deniszabin or an iNaturalist observations URL"
+        )
         self._username_edit.setMinimumWidth(80)
         self._username_edit.setToolTip(
             "iNaturalist username, or an iNaturalist observations URL to study its returned observations"
@@ -258,27 +283,35 @@ class FilterBar(QWidget):
 
         row1.addSpacing(8)
         self._leading_cb = QCheckBox("Leading only")
-        self._leading_cb.setToolTip("Only show identifications that are currently leading the community ID")
+        self._leading_cb.setToolTip(
+            "Only show identifications that are currently leading the community ID"
+        )
         row1.addWidget(self._leading_cb)
 
         row1.addSpacing(8)
         self._rank_filter_cb = QCheckBox("Min rank:")
         self._rank_filter_cb.setChecked(True)
-        self._rank_filter_cb.setToolTip("Filter identifications to a minimum taxonomic rank")
+        self._rank_filter_cb.setToolTip(
+            "Filter identifications to a minimum taxonomic rank"
+        )
         row1.addWidget(self._rank_filter_cb)
         self._rank_combo = QComboBox()
         for name, level in RANK_COMBO_ITEMS:
             self._rank_combo.addItem(name, level)
         self._rank_combo.setCurrentIndex(_DEFAULT_RANK_INDEX)
         self._rank_combo.setMinimumWidth(90)
-        self._rank_combo.setToolTip("Minimum rank to include (and all more specific ranks)")
+        self._rank_combo.setToolTip(
+            "Minimum rank to include (and all more specific ranks)"
+        )
         row1.addWidget(self._rank_combo)
         self._exact_rank_cb = QCheckBox("Exact")
         self._exact_rank_cb.setChecked(False)
         self._exact_rank_cb.setToolTip("Only show identifications at exactly this rank")
         row1.addWidget(self._exact_rank_cb)
         self._provisional_cb = QCheckBox("Provisional Name")
-        self._provisional_cb.setToolTip("Only show observations with taxon names containing an apostrophe")
+        self._provisional_cb.setToolTip(
+            "Only show observations with taxon names containing an apostrophe"
+        )
         self._provisional_cb.toggled.connect(self.provisional_filter_changed)
         row1.addWidget(self._provisional_cb)
         self._rank_filter_cb.toggled.connect(self._on_rank_filter_toggled)
@@ -398,9 +431,21 @@ class FilterBar(QWidget):
             "leading_only": self._leading_cb.isChecked(),
             "d1": d1,
             "d2": d2,
-            "rank_level": self._rank_combo.currentData() if self._rank_filter_cb.isChecked() else None,
-            "rank_name": self._rank_combo.currentText().lower() if self._rank_filter_cb.isChecked() else None,
-            "exact_rank": self._exact_rank_cb.isChecked() if self._rank_filter_cb.isChecked() else False,
+            "rank_level": (
+                self._rank_combo.currentData()
+                if self._rank_filter_cb.isChecked()
+                else None
+            ),
+            "rank_name": (
+                self._rank_combo.currentText().lower()
+                if self._rank_filter_cb.isChecked()
+                else None
+            ),
+            "exact_rank": (
+                self._exact_rank_cb.isChecked()
+                if self._rank_filter_cb.isChecked()
+                else False
+            ),
             "provisional_name_only": self._provisional_cb.isChecked(),
         }
 
@@ -420,7 +465,7 @@ class FilterBar(QWidget):
             # Strip common-name prefix if a previous session saved "Common (Sci)" format
             taxon_name = s.last_taxon_name
             if taxon_name.endswith(")") and " (" in taxon_name:
-                taxon_name = taxon_name[taxon_name.rfind(" (") + 2:-1]
+                taxon_name = taxon_name[taxon_name.rfind(" (") + 2 : -1]
             self._taxon_edit.setText(taxon_name)
             self._taxon_id = s.last_taxon_id
             self._taxon_name = taxon_name
@@ -544,7 +589,12 @@ class FilterBar(QWidget):
         worker = _PlaceAutocompleteWorker(self._client, q, gen, lambda: self._place_gen)
         sigs = worker.signals
         self._live_ac_signals.add(sigs)
-        sigs.results.connect(lambda items, s=sigs: (self._live_ac_signals.discard(s), self._on_place_results(items)))
+        sigs.results.connect(
+            lambda items, s=sigs: (
+                self._live_ac_signals.discard(s),
+                self._on_place_results(items),
+            )
+        )
         sigs.error.connect(lambda _e, s=sigs: self._live_ac_signals.discard(s))
         self._pool.start(worker)
 
@@ -612,27 +662,38 @@ class FilterBar(QWidget):
         self._taxon_model.setStringList(
             [item.display_name(StudyTaxon.show_common_names) for item in items]
         )
-        log.debug("Filter-bar taxon autocomplete returned %s usable result(s)", len(items))
+        log.debug(
+            "Filter-bar taxon autocomplete returned %s usable result(s)", len(items)
+        )
         if items and self._taxon_edit.hasFocus() and self._taxon_edit.isVisible():
             self._taxon_completer.setCompletionPrefix(self._taxon_edit.text().strip())
             self._taxon_completer.popup().setCurrentIndex(
                 self._taxon_completer.completionModel().index(0, 0)
             )
             self._taxon_completer.complete(self._taxon_edit.rect())
-            log.debug("Showing %s filter-bar taxon autocomplete suggestion(s)", len(items))
+            log.debug(
+                "Showing %s filter-bar taxon autocomplete suggestion(s)", len(items)
+            )
 
     def _fetch_username_validate(self) -> None:
         if is_probable_url_input(self._username_edit.text()):
             return
-        login = self._username_edit.text().strip().replace(' ', '_')
+        login = self._username_edit.text().strip().replace(" ", "_")
         if not login:
             return
         self._username_gen += 1
         gen = self._username_gen
-        worker = _UserValidateWorker(self._client, login, gen, lambda: self._username_gen)
+        worker = _UserValidateWorker(
+            self._client, login, gen, lambda: self._username_gen
+        )
         sigs = worker.signals
         self._live_ac_signals.add(sigs)
-        sigs.found.connect(lambda name, s=sigs: (self._live_ac_signals.discard(s), self._on_username_validated(name)))
+        sigs.found.connect(
+            lambda name, s=sigs: (
+                self._live_ac_signals.discard(s),
+                self._on_username_validated(name),
+            )
+        )
         sigs.not_found.connect(lambda s=sigs: self._live_ac_signals.discard(s))
         sigs.error.connect(lambda _e, s=sigs: self._live_ac_signals.discard(s))
         self._pool.start(worker)
@@ -642,7 +703,10 @@ class FilterBar(QWidget):
         self._username_check.setVisible(True)
         self._add_to_username_history(login)
         current = self._username_edit.text()
-        if current != login and current.strip().replace(' ', '_').lower() == login.lower():
+        if (
+            current != login
+            and current.strip().replace(" ", "_").lower() == login.lower()
+        ):
             self._username_edit.setText(login)
         log.debug("Validated username: %s", login)
 
@@ -682,11 +746,13 @@ class FilterBar(QWidget):
                 self._taxon_edit.setToolTip(
                     f"Taxon: {item.scientific_name}  (id={item.taxon_id})"
                 )
-                log.debug("Selected taxon: %s (id=%s)", item.scientific_name, item.taxon_id)
+                log.debug(
+                    "Selected taxon: %s (id=%s)", item.scientific_name, item.taxon_id
+                )
                 break
 
     def _source_text(self) -> str:
         raw = self._username_edit.text().strip()
         if is_probable_url_input(raw):
             return raw
-        return raw.replace(' ', '_')
+        return raw.replace(" ", "_")

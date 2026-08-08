@@ -1,4 +1,5 @@
 """Canonical, persistence-safe reconciliation domain types."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -198,7 +199,10 @@ class MOSequenceRecord:
 
     @property
     def has_deposit(self) -> bool:
-        return bool(self.normalized_accession and self.archive) and self.accession_validation == "valid"
+        return (
+            bool(self.normalized_accession and self.archive)
+            and self.accession_validation == "valid"
+        )
 
     @property
     def accession_identity(self) -> Optional[tuple[str, str]]:
@@ -1027,7 +1031,8 @@ class ConsolidationPreview:
             (RemoteSite.INAT, self.canonical_inat_observation_id),
         }
         return tuple(
-            member for member in self.members
+            member
+            for member in self.members
             if (member.site, member.observation_id) not in canonical_ids
         )
 
@@ -1038,7 +1043,9 @@ class ConsolidationPreview:
             (RemoteSite.INAT, self.canonical_inat_observation_id),
         }
         return tuple(
-            member for member in self.members
+            member
+            for member in self.members
             if (member.site, member.observation_id) in canonical_ids
         )
+
     warnings: tuple[str, ...] = ()

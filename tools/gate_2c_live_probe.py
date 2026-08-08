@@ -59,6 +59,7 @@ Usage
 Use ONLY disposable observations you created for this purpose on your own
 account. Never a real record: iNaturalist deletion is permanent.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -113,13 +114,13 @@ class Probe:
     """One recorded read. This is the unit ``summarise`` reasons over."""
 
     run_id: str
-    scenario: str          # watch / lookalikes / feed / whoami
-    probe: str             # auth_uuid / unauth_uuid / auth_numeric / feed / ...
-    subject: str           # the uuid or id this read was about
-    elapsed_s: float       # seconds since the deletion marker (watch only)
-    at: str                # wall clock, UTC
+    scenario: str  # watch / lookalikes / feed / whoami
+    probe: str  # auth_uuid / unauth_uuid / auth_numeric / feed / ...
+    subject: str  # the uuid or id this read was about
+    elapsed_s: float  # seconds since the deletion marker (watch only)
+    at: str  # wall clock, UTC
     status_code: Optional[int]
-    outcome: str           # present / absent / denied / ambiguous / error
+    outcome: str  # present / absent / denied / ambiguous / error
     total_results: Optional[int] = None
     returned_uuid: str = ""
     returned_id: Optional[int] = None
@@ -150,7 +151,9 @@ class _ProbeClient:
     exactly the failure this probe exists to rule out.
     """
 
-    def __init__(self, jwt: str, *, timeout: float = 30.0, verbose: bool = False) -> None:
+    def __init__(
+        self, jwt: str, *, timeout: float = 30.0, verbose: bool = False
+    ) -> None:
         self._jwt = (jwt or "").strip().strip('"').strip("'")
         if self._jwt.lower().startswith("bearer "):
             self._jwt = self._jwt[7:].strip()
@@ -174,8 +177,12 @@ class _ProbeClient:
         self._last = time.monotonic()
 
     def get(
-        self, path: str, *, params: Optional[dict] = None,
-        token: Optional[str] = None, authenticate: bool = True,
+        self,
+        path: str,
+        *,
+        params: Optional[dict] = None,
+        token: Optional[str] = None,
+        authenticate: bool = True,
         timeout: Optional[float] = None,
     ) -> tuple[int, Any]:
         """The ONLY request method in this file, and it is hardcoded to GET.
@@ -189,11 +196,18 @@ class _ProbeClient:
         if authenticate:
             headers["Authorization"] = token if token is not None else self._jwt
         if self._verbose:
-            shown = "anon" if not authenticate else ("override" if token is not None else "auth")
+            shown = (
+                "anon"
+                if not authenticate
+                else ("override" if token is not None else "auth")
+            )
             print(f"    → GET {path} [{shown}]")
         try:
             response = self._client.request(
-                "GET", path, params=params, headers=headers,
+                "GET",
+                path,
+                params=params,
+                headers=headers,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
@@ -213,7 +227,9 @@ class _ProbeClient:
 # ---------------------------------------------------------------------------
 
 
-def _classify(status: int, payload: Any) -> tuple[str, Optional[int], str, Optional[int]]:
+def _classify(
+    status: int, payload: Any
+) -> tuple[str, Optional[int], str, Optional[int]]:
     """Map one response to (outcome, total_results, returned_uuid, returned_id).
 
     ``outcome`` is deliberately coarse and never guesses "absent" from a bare
@@ -249,28 +265,57 @@ def _classify(status: int, payload: Any) -> tuple[str, Optional[int], str, Optio
 
 
 def _record(
-    client: _ProbeClient, run_id: str, scenario: str, probe: str, subject: str,
-    path: str, *, params: dict, elapsed: float = -1.0, note: str = "",
-    token: Optional[str] = None, authenticate: bool = True,
-    timeout: Optional[float] = None, store_excerpt: bool = True,
+    client: _ProbeClient,
+    run_id: str,
+    scenario: str,
+    probe: str,
+    subject: str,
+    path: str,
+    *,
+    params: dict,
+    elapsed: float = -1.0,
+    note: str = "",
+    token: Optional[str] = None,
+    authenticate: bool = True,
+    timeout: Optional[float] = None,
+    store_excerpt: bool = True,
 ) -> Probe:
     at = datetime.now(timezone.utc).isoformat()
     try:
         status, payload = client.get(
-            path, params=params, token=token,
-            authenticate=authenticate, timeout=timeout,
+            path,
+            params=params,
+            token=token,
+            authenticate=authenticate,
+            timeout=timeout,
         )
     except Ambiguous as exc:
         return Probe(
-            run_id=run_id, scenario=scenario, probe=probe, subject=subject,
-            elapsed_s=round(elapsed, 3), at=at, status_code=None,
-            outcome="ambiguous", transport_error=str(exc), note=note,
+            run_id=run_id,
+            scenario=scenario,
+            probe=probe,
+            subject=subject,
+            elapsed_s=round(elapsed, 3),
+            at=at,
+            status_code=None,
+            outcome="ambiguous",
+            transport_error=str(exc),
+            note=note,
         )
     outcome, total, ruuid, rid = _classify(status, payload)
     return Probe(
-        run_id=run_id, scenario=scenario, probe=probe, subject=subject,
-        elapsed_s=round(elapsed, 3), at=at, status_code=status, outcome=outcome,
-        total_results=total, returned_uuid=ruuid, returned_id=rid, note=note,
+        run_id=run_id,
+        scenario=scenario,
+        probe=probe,
+        subject=subject,
+        elapsed_s=round(elapsed, 3),
+        at=at,
+        status_code=status,
+        outcome=outcome,
+        total_results=total,
+        returned_uuid=ruuid,
+        returned_id=rid,
+        note=note,
         body_excerpt=json.dumps(payload, sort_keys=True)[:300] if store_excerpt else "",
     )
 
@@ -278,18 +323,30 @@ def _record(
 def probe_auth_uuid(client, run_id, scenario, obs_uuid, elapsed=-1.0, **kw) -> Probe:
     """The PRIMARY evidence: authenticated read of the exact stable identity."""
     return _record(
-        client, run_id, scenario, "auth_uuid", obs_uuid,
-        f"/observations/{obs_uuid}", params={"fields": IDENTITY_FIELDS},
-        elapsed=elapsed, **kw,
+        client,
+        run_id,
+        scenario,
+        "auth_uuid",
+        obs_uuid,
+        f"/observations/{obs_uuid}",
+        params={"fields": IDENTITY_FIELDS},
+        elapsed=elapsed,
+        **kw,
     )
 
 
 def probe_unauth_uuid(client, run_id, scenario, obs_uuid, elapsed=-1.0) -> Probe:
     """Never acceptable as proof (audit item 7) — recorded to demonstrate why."""
     return _record(
-        client, run_id, scenario, "unauth_uuid", obs_uuid,
-        f"/observations/{obs_uuid}", params={"fields": IDENTITY_FIELDS},
-        elapsed=elapsed, authenticate=False,
+        client,
+        run_id,
+        scenario,
+        "unauth_uuid",
+        obs_uuid,
+        f"/observations/{obs_uuid}",
+        params={"fields": IDENTITY_FIELDS},
+        elapsed=elapsed,
+        authenticate=False,
         note="unauthenticated absence is never proof",
     )
 
@@ -298,22 +355,34 @@ def probe_auth_numeric(client, run_id, scenario, observation_id, elapsed=-1.0) -
     """Numeric-id search, the weaker identity. A hit whose UUID differs is a
     DIFFERENT object (audit item 8) and must never satisfy the verifier."""
     return _record(
-        client, run_id, scenario, "auth_numeric", str(observation_id),
+        client,
+        run_id,
+        scenario,
+        "auth_numeric",
+        str(observation_id),
         "/observations",
         params={"id": int(observation_id), "per_page": 1, "fields": IDENTITY_FIELDS},
         elapsed=elapsed,
     )
 
 
-def probe_feed(client, run_id, scenario, since: str, elapsed=-1.0, *, fields: bool = True) -> Probe:
+def probe_feed(
+    client, run_id, scenario, since: str, elapsed=-1.0, *, fields: bool = True
+) -> Probe:
     params: dict[str, Any] = {"since": since}
     if fields:
         # The app currently sends this. The schema says results are bare
         # integers, so it is probably inert — this records whether it is.
         params["fields"] = IDENTITY_FIELDS
     return _record(
-        client, run_id, scenario, "feed" if fields else "feed_nofields", since,
-        "/observations/deleted", params=params, elapsed=elapsed,
+        client,
+        run_id,
+        scenario,
+        "feed" if fields else "feed_nofields",
+        since,
+        "/observations/deleted",
+        params=params,
+        elapsed=elapsed,
         note=f"since={since}",
     )
 
@@ -342,7 +411,9 @@ class Log:
             extra = f" id={probe.returned_id}"
         if probe.transport_error:
             extra = f" {probe.transport_error}"
-        print(f"  {marker}  {probe.probe:<14} {str(status):>4}  {probe.outcome:<14}{extra}")
+        print(
+            f"  {marker}  {probe.probe:<14} {str(status):>4}  {probe.outcome:<14}{extra}"
+        )
         return probe
 
 
@@ -365,28 +436,47 @@ def load_log(path: Path) -> list[Probe]:
 
 def scenario_whoami(client: _ProbeClient, log: Log, run_id: str) -> int:
     print("\n--- whoami ---")
-    probe = log.add(_record(
-        client, run_id, "whoami", "whoami", "me", "/users/me",
-        params={"fields": "(id:!t,login:!t)"},
-    ))
+    probe = log.add(
+        _record(
+            client,
+            run_id,
+            "whoami",
+            "whoami",
+            "me",
+            "/users/me",
+            params={"fields": "(id:!t,login:!t)"},
+        )
+    )
     if probe.outcome != "present":
-        print("\nThe token did not authenticate. Everything else in this probe "
-              "depends on it, so stop here.")
+        print(
+            "\nThe token did not authenticate. Everything else in this probe "
+            "depends on it, so stop here."
+        )
         return 1
     print("\nAuthenticated. Only delete observations owned by this account.")
     return 0
 
 
-def scenario_baseline(client: _ProbeClient, log: Log, run_id: str, obs_uuid: str) -> int:
+def scenario_baseline(
+    client: _ProbeClient, log: Log, run_id: str, obs_uuid: str
+) -> int:
     """Deep pre-deletion snapshot, so a later cascade check has a reference."""
     print("\n--- baseline (deep read, before any deletion) ---")
     # DEEP_FIELDS pulls in other users' logins/comments and place_guess;
     # don't persist that into the evidence log.
-    probe = log.add(_record(
-        client, run_id, "baseline", "auth_uuid_deep", obs_uuid,
-        f"/observations/{obs_uuid}", params={"fields": DEEP_FIELDS},
-        note="pre-deletion content inventory", store_excerpt=False,
-    ))
+    probe = log.add(
+        _record(
+            client,
+            run_id,
+            "baseline",
+            "auth_uuid_deep",
+            obs_uuid,
+            f"/observations/{obs_uuid}",
+            params={"fields": DEEP_FIELDS},
+            note="pre-deletion content inventory",
+            store_excerpt=False,
+        )
+    )
     if probe.outcome != "present":
         print("\nThe observation is not readable, so there is nothing to watch.")
         return 1
@@ -394,8 +484,13 @@ def scenario_baseline(client: _ProbeClient, log: Log, run_id: str, obs_uuid: str
 
 
 def scenario_watch(
-    client: _ProbeClient, log: Log, run_id: str, obs_uuid: str,
-    observation_id: Optional[int], schedule: tuple[int, ...], assume_deleted: bool,
+    client: _ProbeClient,
+    log: Log,
+    run_id: str,
+    obs_uuid: str,
+    observation_id: Optional[int],
+    schedule: tuple[int, ...],
+    assume_deleted: bool,
 ) -> int:
     """Sample the transition across an out-of-band deletion.
 
@@ -408,7 +503,8 @@ def scenario_watch(
     if observation_id is None:
         try:
             _status, payload = client.get(
-                f"/observations/{obs_uuid}", params={"fields": IDENTITY_FIELDS},
+                f"/observations/{obs_uuid}",
+                params={"fields": IDENTITY_FIELDS},
             )
         except Ambiguous:
             payload = None
@@ -449,7 +545,9 @@ def scenario_watch(
         log.add(probe_auth_uuid(client, run_id, "watch", obs_uuid, elapsed))
         if observation_id is not None:
             elapsed = time.monotonic() - started
-            log.add(probe_auth_numeric(client, run_id, "watch", observation_id, elapsed))
+            log.add(
+                probe_auth_numeric(client, run_id, "watch", observation_id, elapsed)
+            )
         elapsed = time.monotonic() - started
         log.add(probe_unauth_uuid(client, run_id, "watch", obs_uuid, elapsed))
         elapsed = time.monotonic() - started
@@ -459,8 +557,11 @@ def scenario_watch(
 
 
 def scenario_lookalikes(
-    client: _ProbeClient, log: Log, run_id: str,
-    owned_uuid: str, other_uuid: str,
+    client: _ProbeClient,
+    log: Log,
+    run_id: str,
+    owned_uuid: str,
+    other_uuid: str,
 ) -> int:
     """The decisive experiment: is a deletion distinguishable from everything
     that merely LOOKS like one?
@@ -473,38 +574,75 @@ def scenario_lookalikes(
     print("\n--- look-alikes (no deletion required) ---")
     nonexistent = str(uuidlib.uuid4())
 
-    log.add(probe_auth_uuid(
-        client, run_id, "lookalike", owned_uuid,
-        note="control: an existing observation you own MUST read as present",
-    ))
-    log.add(probe_auth_uuid(
-        client, run_id, "lookalike", nonexistent,
-        note="never existed — must be distinguishable from deleted",
-    ))
-    log.add(_record(
-        client, run_id, "lookalike", "auth_uuid", "not-a-uuid",
-        "/observations/not-a-uuid", params={"fields": IDENTITY_FIELDS},
-        note="malformed identity",
-    ))
-    log.add(_record(
-        client, run_id, "lookalike", "auth_uuid_badtoken", owned_uuid,
-        f"/observations/{owned_uuid}", params={"fields": IDENTITY_FIELDS},
-        token="not-a-valid-jwt",
-        note="bad credential — must NOT look like deleted",
-    ))
+    log.add(
+        probe_auth_uuid(
+            client,
+            run_id,
+            "lookalike",
+            owned_uuid,
+            note="control: an existing observation you own MUST read as present",
+        )
+    )
+    log.add(
+        probe_auth_uuid(
+            client,
+            run_id,
+            "lookalike",
+            nonexistent,
+            note="never existed — must be distinguishable from deleted",
+        )
+    )
+    log.add(
+        _record(
+            client,
+            run_id,
+            "lookalike",
+            "auth_uuid",
+            "not-a-uuid",
+            "/observations/not-a-uuid",
+            params={"fields": IDENTITY_FIELDS},
+            note="malformed identity",
+        )
+    )
+    log.add(
+        _record(
+            client,
+            run_id,
+            "lookalike",
+            "auth_uuid_badtoken",
+            owned_uuid,
+            f"/observations/{owned_uuid}",
+            params={"fields": IDENTITY_FIELDS},
+            token="not-a-valid-jwt",
+            note="bad credential — must NOT look like deleted",
+        )
+    )
     log.add(probe_unauth_uuid(client, run_id, "lookalike", owned_uuid))
     if other_uuid:
-        log.add(probe_auth_uuid(
-            client, run_id, "lookalike", other_uuid,
-            note="another user's record — must NOT look like deleted",
-        ))
+        log.add(
+            probe_auth_uuid(
+                client,
+                run_id,
+                "lookalike",
+                other_uuid,
+                note="another user's record — must NOT look like deleted",
+            )
+        )
     else:
         print("  (no --other-uuid given; the someone-else's-record case is UNTESTED)")
-    log.add(_record(
-        client, run_id, "lookalike", "auth_uuid_timeout", owned_uuid,
-        f"/observations/{owned_uuid}", params={"fields": IDENTITY_FIELDS},
-        timeout=0.001, note="forced timeout — must classify ambiguous, never absent",
-    ))
+    log.add(
+        _record(
+            client,
+            run_id,
+            "lookalike",
+            "auth_uuid_timeout",
+            owned_uuid,
+            f"/observations/{owned_uuid}",
+            params={"fields": IDENTITY_FIELDS},
+            timeout=0.001,
+            note="forced timeout — must classify ambiguous, never absent",
+        )
+    )
     return 0
 
 
@@ -517,12 +655,18 @@ def scenario_feed(client: _ProbeClient, log: Log, run_id: str, days: int) -> int
         log.add(probe_feed(client, run_id, "feed", since))
     log.add(probe_feed(client, run_id, "feed", today.isoformat(), fields=False))
     # `since` is documented as format: date. Record what a timestamp does.
-    log.add(_record(
-        client, run_id, "feed", "feed_timestamp",
-        datetime.now(timezone.utc).isoformat(), "/observations/deleted",
-        params={"since": datetime.now(timezone.utc).isoformat()},
-        note="timestamp instead of date — schema says format: date",
-    ))
+    log.add(
+        _record(
+            client,
+            run_id,
+            "feed",
+            "feed_timestamp",
+            datetime.now(timezone.utc).isoformat(),
+            "/observations/deleted",
+            params={"since": datetime.now(timezone.utc).isoformat()},
+            note="timestamp instead of date — schema says format: date",
+        )
+    )
     return 0
 
 
@@ -566,8 +710,10 @@ def scenario_summarise(records: list[Probe]) -> int:
     if watch:
         settled = [r for r in watch if r.probe == "auth_uuid" and r.elapsed_s >= 30]
         deleted_sig = {_signature(r) for r in settled}
-        print("\n  authenticated-UUID signature after deletion (t>=30s): "
-              + (", ".join(sorted(deleted_sig)) or "none recorded"))
+        print(
+            "\n  authenticated-UUID signature after deletion (t>=30s): "
+            + (", ".join(sorted(deleted_sig)) or "none recorded")
+        )
 
     if look and deleted_sig:
         collisions = []
@@ -615,9 +761,13 @@ def scenario_summarise(records: list[Probe]) -> int:
             # match — the schedule's first sample is rarely at t=0.000 sharp.
             STABLE_TOLERANCE_S = 0.05
             if stable_from is not None and stable_from > STABLE_TOLERANCE_S:
-                print(f"\n  *** The signature only became stable at t={stable_from:.0f}s.")
+                print(
+                    f"\n  *** The signature only became stable at t={stable_from:.0f}s."
+                )
                 print("      A verifier reading earlier than that can see a stale")
-                print("      positive and wrongly report 'present'. Build in the delay. ***")
+                print(
+                    "      positive and wrongly report 'present'. Build in the delay. ***"
+                )
             elif stable_from is not None:
                 print("\n  Stable from t=0: no post-return visibility lag observed.")
 
@@ -629,11 +779,17 @@ def scenario_summarise(records: list[Probe]) -> int:
         print("  no feed probes in this log")
     else:
         for probe in feed:
-            shape = "int-ids" if probe.returned_id is not None and not probe.returned_uuid else "?"
+            shape = (
+                "int-ids"
+                if probe.returned_id is not None and not probe.returned_uuid
+                else "?"
+            )
             if probe.returned_uuid:
                 shape = "CARRIES UUID (unexpected — re-read the schema)"
-            print(f"  {probe.probe:<14} {probe.subject:<28} {_signature(probe):<20} "
-                  f"total={probe.total_results} {shape}")
+            print(
+                f"  {probe.probe:<14} {probe.subject:<28} {_signature(probe):<20} "
+                f"total={probe.total_results} {shape}"
+            )
         print("\n  Reminder: the schema types results as integers, so the feed")
         print("  cannot establish UUID identity. Treat it as corroboration.")
 
@@ -666,19 +822,27 @@ def main() -> int:
 
     p_watch = sub.add_parser("watch", help="sample one observation across its deletion")
     p_watch.add_argument("--uuid", required=True, help="disposable observation UUID")
-    p_watch.add_argument("--id", type=int, default=None, help="its numeric id (auto-resolved)")
     p_watch.add_argument(
-        "--schedule", default=",".join(str(v) for v in DEFAULT_SCHEDULE),
+        "--id", type=int, default=None, help="its numeric id (auto-resolved)"
+    )
+    p_watch.add_argument(
+        "--schedule",
+        default=",".join(str(v) for v in DEFAULT_SCHEDULE),
         help="comma-separated seconds after deletion to sample",
     )
     p_watch.add_argument(
-        "--assume-deleted", action="store_true",
+        "--assume-deleted",
+        action="store_true",
         help="skip the prompt; the observation is already deleted",
     )
 
-    p_look = sub.add_parser("lookalikes", help="distinguishability battery (no deletion)")
+    p_look = sub.add_parser(
+        "lookalikes", help="distinguishability battery (no deletion)"
+    )
     p_look.add_argument("--uuid", required=True, help="an observation you own and KEEP")
-    p_look.add_argument("--other-uuid", default="", help="an observation you do NOT own")
+    p_look.add_argument(
+        "--other-uuid", default="", help="an observation you do NOT own"
+    )
 
     p_feed = sub.add_parser("feed", help="characterise the deleted feed")
     p_feed.add_argument("--days", type=int, default=30, help="furthest `since` to try")
@@ -693,7 +857,9 @@ def main() -> int:
             return 2
         return scenario_summarise(load_log(args.log))
 
-    jwt = os.environ.get("INAT_JWT", "") or getpass.getpass("iNaturalist JWT (hidden): ")
+    jwt = os.environ.get("INAT_JWT", "") or getpass.getpass(
+        "iNaturalist JWT (hidden): "
+    )
     if not jwt.strip():
         print("No iNaturalist JWT supplied.", file=sys.stderr)
         return 2
@@ -711,7 +877,13 @@ def main() -> int:
                 int(part) for part in str(args.schedule).split(",") if part.strip()
             )
             return scenario_watch(
-                client, log, run_id, args.uuid, args.id, schedule, args.assume_deleted,
+                client,
+                log,
+                run_id,
+                args.uuid,
+                args.id,
+                schedule,
+                args.assume_deleted,
             )
         if args.scenario == "lookalikes":
             return scenario_lookalikes(client, log, run_id, args.uuid, args.other_uuid)

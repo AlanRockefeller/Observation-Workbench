@@ -23,6 +23,7 @@ would have hidden all four defects.
 MO's parameter allow-lists and error conventions below were recorded from live
 ``?help=1`` probes on 2026-07-27.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,11 +54,18 @@ from observation_workbench.api.client import INatClient  # noqa: E402
 from observation_workbench.models import StudyPhoto  # noqa: E402
 import observation_workbench.reconciliation.coordinator as coordinator_module  # noqa: E402
 from observation_workbench.reconciliation.coordinator import (  # noqa: E402
-    ReconciliationCoordinator, _mo_time_range, _total,
+    ReconciliationCoordinator,
+    _mo_time_range,
+    _total,
 )
-from observation_workbench.reconciliation.db import ReconciliationDB, _utc_now  # noqa: E402
+from observation_workbench.reconciliation.db import (
+    ReconciliationDB,
+    _utc_now,
+)  # noqa: E402
 from observation_workbench.reconciliation.mo_client import (  # noqa: E402
-    MO_API_BASE, MOClient, ReconciliationCancelled,
+    MO_API_BASE,
+    MOClient,
+    ReconciliationCancelled,
 )
 from observation_workbench.storage.settings import AppSettings  # noqa: E402
 
@@ -90,16 +98,37 @@ def check(condition: bool, message: str) -> None:
 _MO_GLOBAL_PARAMS = {"format", "detail", "page", "api_key"}
 _MO_ENDPOINT_PARAMS = {
     "observations": {
-        "user", "id", "updated_at", "created_at", "date", "notes_has",
-        "has_specimen", "has_images", "has_name", "gps_hidden", "north",
-        "south", "east", "west",
+        "user",
+        "id",
+        "updated_at",
+        "created_at",
+        "date",
+        "notes_has",
+        "has_specimen",
+        "has_images",
+        "has_name",
+        "gps_hidden",
+        "north",
+        "south",
+        "east",
+        "west",
     },
     "external_sites": set(),
     "external_links": {"id", "observation"},
     "names": {"id"},
     # NOTE: no "observation" -- this is the whole point of the sequences check.
-    "sequences": {"id", "observer", "user", "name", "herbarium", "locus",
-                  "obs_date", "accession_has", "archive", "notes_has"},
+    "sequences": {
+        "id",
+        "observer",
+        "user",
+        "name",
+        "herbarium",
+        "locus",
+        "obs_date",
+        "accession_has",
+        "archive",
+        "notes_has",
+    },
     "images": {"id", "observation"},
 }
 
@@ -129,7 +158,9 @@ def _mo_observation(observation_id: int, *, updated_at: str) -> dict:
         "owner_id": MO_USER_ID,
         "owner": {"id": MO_USER_ID, "login": MO_LOGIN},
         "consensus": {
-            "id": 321, "text_name": "Amanita muscaria", "rank": "Species",
+            "id": 321,
+            "text_name": "Amanita muscaria",
+            "rank": "Species",
             "classification": {"kingdom": "Fungi"},
         },
         "date": "2026-06-01",
@@ -170,10 +201,12 @@ class MORemote:
             # which is how discover_observation_capabilities decides.
             return {
                 "version": 2.0,
-                "errors": [{
-                    "code": "API2::HelpMessage",
-                    "details": "Usage: updated_at: time range; user: user list",
-                }],
+                "errors": [
+                    {
+                        "code": "API2::HelpMessage",
+                        "details": "Usage: updated_at: time range; user: user list",
+                    }
+                ],
             }
         allowed = _MO_GLOBAL_PARAMS | _MO_ENDPOINT_PARAMS.get(endpoint, set())
         unexpected = sorted(set(params) - allowed - {"help"})
@@ -191,26 +224,35 @@ class MORemote:
         if endpoint == "observations":
             return self._observations(params)
         if endpoint == "external_sites":
-            return self._results([
-                {"id": 1, "name": "MyCoPortal"},
-                {"id": INAT_SITE_ID, "name": "iNaturalist"},
-            ])
+            return self._results(
+                [
+                    {"id": 1, "name": "MyCoPortal"},
+                    {"id": INAT_SITE_ID, "name": "iNaturalist"},
+                ]
+            )
         if endpoint == "external_links":
             wanted = _int_csv(params.get("observation", ""))
-            return self._paginated([
-                {
-                    "id": 10_000 + value,
-                    "url": f"https://www.inaturalist.org/observations/{value}",
-                    "observation_id": value,
-                    "external_site_id": INAT_SITE_ID,
-                }
-                for value in wanted if value in self.observations
-            ], params)
+            return self._paginated(
+                [
+                    {
+                        "id": 10_000 + value,
+                        "url": f"https://www.inaturalist.org/observations/{value}",
+                        "observation_id": value,
+                        "external_site_id": INAT_SITE_ID,
+                    }
+                    for value in wanted
+                    if value in self.observations
+                ],
+                params,
+            )
         if endpoint == "names":
-            return self._paginated([
-                {"id": value, "classification": {"kingdom": "Fungi"}}
-                for value in _int_csv(params.get("id", ""))
-            ], params)
+            return self._paginated(
+                [
+                    {"id": value, "classification": {"kingdom": "Fungi"}}
+                    for value in _int_csv(params.get("id", ""))
+                ],
+                params,
+            )
         if endpoint == "sequences":
             # Only 'observer' can select an account's sequences; 'user' would
             # select by sequence AUTHOR and miss third-party rows.
@@ -227,28 +269,36 @@ class MORemote:
             # observation that already has one. Model the strip so a caller that
             # forgets detail=high fails here instead of on MO.
             if params.get("detail") == "high":
-                row.update({
-                    "locus": "ITS", "accession": "MK000001", "archive": "GenBank",
-                    "bases": "ACGT" * 30, "notes": "",
-                    "user": {"id": MO_USER_ID, "login": MO_LOGIN},
-                    "user_id": MO_USER_ID,
-                    "created_at": "2026-07-01 00:00:00",
-                    "updated_at": "2026-07-01 00:00:00",
-                })
+                row.update(
+                    {
+                        "locus": "ITS",
+                        "accession": "MK000001",
+                        "archive": "GenBank",
+                        "bases": "ACGT" * 30,
+                        "notes": "",
+                        "user": {"id": MO_USER_ID, "login": MO_LOGIN},
+                        "user_id": MO_USER_ID,
+                        "created_at": "2026-07-01 00:00:00",
+                        "updated_at": "2026-07-01 00:00:00",
+                    }
+                )
             return self._paginated([row], params)
         return self._paginated([], params)
 
     def _observations(self, params: dict[str, str]) -> dict:
         if "id" in params:
             wanted = _int_csv(params["id"])
-            return self._results([
-                self.observations[value] for value in wanted
-                if value in self.observations
-            ])
+            return self._results(
+                [
+                    self.observations[value]
+                    for value in wanted
+                    if value in self.observations
+                ]
+            )
         rows = [self.observations[key] for key in sorted(self.observations)]
         page = max(1, int(params.get("page") or 1))
         start = (page - 1) * self.page_size
-        return self._results(rows[start:start + self.page_size], total=len(rows))
+        return self._results(rows[start : start + self.page_size], total=len(rows))
 
     def _paginated(self, rows: list[dict], params: dict[str, str]) -> dict:
         """Serve one page and report the GRAND total, exactly as MO does.
@@ -261,7 +311,7 @@ class MORemote:
         """
         page = max(1, int(params.get("page") or 1))
         start = (page - 1) * self.page_size
-        return self._results(rows[start:start + self.page_size], total=len(rows))
+        return self._results(rows[start : start + self.page_size], total=len(rows))
 
     def _results(self, rows: list[dict], total: int | None = None) -> dict:
         # MO reports the total as 'number_of_records' -- deliberately NOT
@@ -320,22 +370,31 @@ class OfflineMOClient(MOClient):
 # iNaturalist fake
 # --------------------------------------------------------------------------
 
+
 def _inat_observation(observation_id: int, mo_target: int | None) -> dict:
     ofvs = []
     if mo_target is not None:
-        ofvs.append({
-            "id": f"ofv-{observation_id}",
-            "uuid": f"ofv-uuid-{observation_id}",
-            "observation_field": {"id": MO_FIELD_ID, "name": "Mushroom Observer URL"},
-            "value": f"https://mushroomobserver.org/{mo_target}",
-        })
+        ofvs.append(
+            {
+                "id": f"ofv-{observation_id}",
+                "uuid": f"ofv-uuid-{observation_id}",
+                "observation_field": {
+                    "id": MO_FIELD_ID,
+                    "name": "Mushroom Observer URL",
+                },
+                "value": f"https://mushroomobserver.org/{mo_target}",
+            }
+        )
     return {
         "id": observation_id,
         "uuid": f"inat-uuid-{observation_id}",
         "user": {"id": INAT_USER_ID, "login": INAT_LOGIN},
         "taxon": {
-            "id": 123, "name": "Amanita muscaria", "rank": "species",
-            "iconic_taxon_name": "Fungi", "ancestry": "48460/47170/123",
+            "id": 123,
+            "name": "Amanita muscaria",
+            "rank": "species",
+            "iconic_taxon_name": "Fungi",
+            "ancestry": "48460/47170/123",
         },
         "observed_on": "2026-06-01",
         "updated_at": "2026-07-01T00:00:00+00:00",
@@ -351,8 +410,7 @@ def _inat_observation(observation_id: int, mo_target: int | None) -> dict:
 class INatRemote:
     def __init__(self, links: dict[int, int]) -> None:
         self.observations = {
-            value: _inat_observation(value, target)
-            for value, target in links.items()
+            value: _inat_observation(value, target) for value, target in links.items()
         }
         self.deleted_ids: list[int] = []
         self.deleted_reported_total: int | None = None
@@ -366,20 +424,37 @@ class INatRemote:
         with self._lock:
             self.requests.append((path, dict(params)))
         if path.endswith("/observation_fields/autocomplete"):
-            return httpx.Response(200, json={"results": [{
-                "id": MO_FIELD_ID,
-                "name": "Mushroom Observer URL",
-                "datatype": "text",
-            }] if params.get("q") == "Mushroom Observer URL" else []})
+            return httpx.Response(
+                200,
+                json={
+                    "results": (
+                        [
+                            {
+                                "id": MO_FIELD_ID,
+                                "name": "Mushroom Observer URL",
+                                "datatype": "text",
+                            }
+                        ]
+                        if params.get("q") == "Mushroom Observer URL"
+                        else []
+                    )
+                },
+            )
         if path.endswith("/observations/deleted"):
             total = (
-                len(self.deleted_ids) if self.deleted_reported_total is None
+                len(self.deleted_ids)
+                if self.deleted_reported_total is None
                 else self.deleted_reported_total
             )
-            return httpx.Response(200, json={
-                "total_results": total, "page": 1,
-                "per_page": len(self.deleted_ids), "results": self.deleted_ids,
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "total_results": total,
+                    "page": 1,
+                    "per_page": len(self.deleted_ids),
+                    "results": self.deleted_ids,
+                },
+            )
         if path.endswith("/observations"):
             return httpx.Response(200, json=self._observations(params))
         return httpx.Response(200, json={"total_results": 0, "results": []})
@@ -388,7 +463,8 @@ class INatRemote:
         if "id" in params:
             wanted = _int_csv(params["id"])
             rows = [
-                self.observations[value] for value in wanted
+                self.observations[value]
+                for value in wanted
                 if value in self.observations
             ]
             return {"total_results": len(rows), "results": rows}
@@ -409,9 +485,14 @@ class INatRemote:
                 # iNaturalist rejects an unparseable updated_since rather than
                 # silently serving everything; mimic that so a bad cursor
                 # format is loud here instead of invisible.
-                return {"error": "invalid updated_since", "total_results": 0, "results": []}
+                return {
+                    "error": "invalid updated_since",
+                    "total_results": 0,
+                    "results": [],
+                }
             rows = [
-                row for row in rows
+                row
+                for row in rows
                 if (_parse_inat_timestamp(row.get("updated_at")) or cutoff) >= cutoff
             ]
         total = len(rows)
@@ -422,7 +503,7 @@ class INatRemote:
             "total_results": total,
             "page": page,
             "per_page": per_page,
-            "results": rows[start:start + per_page],
+            "results": rows[start : start + per_page],
         }
 
 
@@ -443,9 +524,12 @@ class OfflineINatClient(INatClient):
 # Environment
 # --------------------------------------------------------------------------
 
+
 class Environment:
     def __init__(
-        self, *, mo_ids: tuple[int, ...] = (10, 11),
+        self,
+        *,
+        mo_ids: tuple[int, ...] = (10, 11),
         inat_links: dict[int, int] | None = None,
     ) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="coordinator-scan-db-")
@@ -466,7 +550,9 @@ class Environment:
         coordinator_module.ReconciliationDB = lambda: original_db(path)
         try:
             self.coordinator = ReconciliationCoordinator(
-                self.inat, lambda: self.auth, self.settings,
+                self.inat,
+                lambda: self.auth,
+                self.settings,
             )
         finally:
             coordinator_module.ReconciliationDB = original_db
@@ -487,8 +573,12 @@ class Environment:
             (PROFILE_ID, INAT_USER_ID, INAT_LOGIN, MO_USER_ID, MO_LOGIN, now, now),
         )
         self.db.save_field_binding(
-            PROFILE_ID, "mo_url", MO_FIELD_ID, "Mushroom Observer URL",
-            "text", "verified",
+            PROFILE_ID,
+            "mo_url",
+            MO_FIELD_ID,
+            "Mushroom Observer URL",
+            "text",
+            "verified",
         )
 
     def scan(self, *, force_full: bool = False, timeout_ms: int = 30_000) -> str:
@@ -522,7 +612,8 @@ class Environment:
 
     def mo_requests(self, endpoint: str) -> list[dict[str, str]]:
         return [
-            params for name, params in self.mo_remote.requests
+            params
+            for name, params in self.mo_remote.requests
             if name == endpoint and not params.get("help")
         ]
 
@@ -540,6 +631,7 @@ def pump(milliseconds: int = 50) -> None:
 # --------------------------------------------------------------------------
 # Scenarios
 # --------------------------------------------------------------------------
+
 
 def full_scan_completes() -> None:
     """Finding 1: 'limit' on /observations is a FATAL MO error at HTTP 200.
@@ -584,7 +676,8 @@ def incremental_scan_sends_mo_time_range() -> None:
         result = env.scan()
         check(result.startswith("ok:"), f"incremental scan failed: {result}")
         filtered = [
-            params for endpoint, params in env.mo_remote.requests[before:]
+            params
+            for endpoint, params in env.mo_remote.requests[before:]
             if endpoint == "observations" and "updated_at" in params
         ]
         check(bool(filtered), "the incremental scan sent no updated_at filter")
@@ -642,11 +735,14 @@ def truncated_deleted_feed_holds_cursor() -> None:
             "deletions would be lost permanently",
         )
         issues = {
-            str(row["issue_type"]) for row in env.db.connection().execute(
+            str(row["issue_type"])
+            for row in env.db.connection()
+            .execute(
                 "SELECT issue_type FROM sync_issues WHERE profile_id=? "
                 "AND state='open'",
                 (PROFILE_ID,),
-            ).fetchall()
+            )
+            .fetchall()
         }
         check(
             "deleted_feed_incomplete" in issues,
@@ -672,7 +768,9 @@ def dropped_action_result_releases_the_action_lock() -> None:
 
         coordinator._action_running = True
         coordinator._start_worker(
-            coordinator.action_pool, "harness_action", coordinator.generation,
+            coordinator.action_pool,
+            "harness_action",
+            coordinator.generation,
             blocked,
             lambda *_args: None,
             lambda *_args: None,
@@ -703,7 +801,9 @@ def sequences_select_by_observer() -> None:
     client = OfflineMOClient(remote)
     try:
         payload = client.sequences(MO_USER_ID, (10,), lambda: False)
-        sent = [params for endpoint, params in remote.requests if endpoint == "sequences"]
+        sent = [
+            params for endpoint, params in remote.requests if endpoint == "sequences"
+        ]
         check(bool(sent), "no sequences request was issued")
         for params in sent:
             check(
@@ -766,7 +866,8 @@ def mo_paging_follows_every_page() -> None:
         )
         pages = [
             int(params.get("page") or 1)
-            for endpoint, params in remote.requests if endpoint == "external_links"
+            for endpoint, params in remote.requests
+            if endpoint == "external_links"
         ]
         check(max(pages) >= 2, "the paging loop never requested a second page")
     finally:
@@ -818,7 +919,9 @@ def inat_incremental_scan_pages_through_a_delta() -> None:
 def non_substitutable_photo_url_is_not_called_original() -> None:
     """Finding 6: an unsubstitutable URL must not be labelled 'original'."""
     from observation_workbench.services.prefetcher import (
-        _SIZE_ORDER, _higher_quality_candidates, _same_or_lower_quality_candidates,
+        _SIZE_ORDER,
+        _higher_quality_candidates,
+        _same_or_lower_quality_candidates,
     )
 
     normal = StudyPhoto(1, "https://static.inaturalist.org/photos/1/square.jpg")

@@ -69,7 +69,9 @@ class ImageCacheTests(unittest.TestCase):
             "observation_workbench.services.image_cache.Path.unlink",
             side_effect=FileNotFoundError(),
         ):
-            with self.assertNoLogs("observation_workbench.services.image_cache", level="WARNING"):
+            with self.assertNoLogs(
+                "observation_workbench.services.image_cache", level="WARNING"
+            ):
                 self._cache._maybe_evict()
 
         self.assertEqual(self._db.get_total_image_cache_size(), 0)

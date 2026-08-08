@@ -2,12 +2,12 @@
 Core data models for Observation Workbench.
 All fields are defensive (Optional where API may omit them).
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import ClassVar, List, Optional
-
 
 # ---------------------------------------------------------------------------
 # Photo size constants (iNaturalist-defined sizes)
@@ -161,7 +161,7 @@ class StudyObservation:
     uuid: str = ""
     observed_on: str = ""
     place_guess: str = ""
-    taxon: Optional[StudyTaxon] = None          # observation's own taxon (obs taxon)
+    taxon: Optional[StudyTaxon] = None  # observation's own taxon (obs taxon)
     community_taxon: Optional[StudyTaxon] = None  # community ID taxon
     photos: List[StudyPhoto] = field(default_factory=list)
     target_identification: Optional[StudyIdentification] = None  # ID by queried user
@@ -190,6 +190,7 @@ class StudyObservation:
     @property
     def display_taxon(self) -> Optional[StudyTaxon]:
         """Best taxon to display: first of target ID / community / obs taxon with a usable name."""
+
         def _usable(t: Optional["StudyTaxon"]) -> bool:
             return t is not None and bool(t.name) and t.name != "Unknown"
 

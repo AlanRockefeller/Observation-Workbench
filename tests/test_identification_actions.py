@@ -1,7 +1,15 @@
 import unittest
 
-from observation_workbench.models import StudyComment, StudyIdentification, StudyObservation, StudyTaxon
-from observation_workbench.services.identification_actions import AgreeTarget, needs_human_review
+from observation_workbench.models import (
+    StudyComment,
+    StudyIdentification,
+    StudyObservation,
+    StudyTaxon,
+)
+from observation_workbench.services.identification_actions import (
+    AgreeTarget,
+    needs_human_review,
+)
 
 
 class NeedsHumanReviewTests(unittest.TestCase):

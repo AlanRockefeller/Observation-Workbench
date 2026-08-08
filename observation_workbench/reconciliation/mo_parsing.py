@@ -1,4 +1,5 @@
 """Canonical parsing for current Mushroom Observer API2 representations."""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -6,10 +7,18 @@ import re
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from .normalization import parse_inat_observation_url, public_fingerprint, sequence_digest
+from .normalization import (
+    parse_inat_observation_url,
+    public_fingerprint,
+    sequence_digest,
+)
 from .types import (
-    AuthoritativeLinkRow, CoordinatePrivacyState, InventoryObservation, MediaIdentity,
-    RemoteRecordKey, RemoteSite,
+    AuthoritativeLinkRow,
+    CoordinatePrivacyState,
+    InventoryObservation,
+    MediaIdentity,
+    RemoteRecordKey,
+    RemoteSite,
 )
 
 TARGET_UNKNOWN = "target_unknown_due_to_api_capability"
@@ -53,13 +62,9 @@ MO_ORIGINAL_AVAILABLE_FROM_IMAGE_ID = 1_600_000
 # of such an image are the same picture at the same pixel dimensions; 1280 is
 # never WORSE, and is genuinely larger whenever the source exceeds it.
 MO_LARGEST_FETCHABLE_SIZE = "1280"
-MO_FETCHABLE_IMAGE_SIZES = tuple(
-    size for size in MO_IMAGE_SIZES if size != "orig"
-)
+MO_FETCHABLE_IMAGE_SIZES = tuple(size for size in MO_IMAGE_SIZES if size != "orig")
 
-_MO_IMAGE_PATH = re.compile(
-    rf"/images/(?P<size>{'|'.join(MO_IMAGE_SIZES)})/"
-)
+_MO_IMAGE_PATH = re.compile(rf"/images/(?P<size>{'|'.join(MO_IMAGE_SIZES)})/")
 
 
 def mo_image_size(url: str) -> str:
@@ -90,9 +95,7 @@ def mo_original_is_public(image_id: object) -> bool:
     back to the rendition that always works rather than to a certain 403.
     """
     identifier = positive_int(image_id)
-    return bool(
-        identifier and identifier >= MO_ORIGINAL_AVAILABLE_FROM_IMAGE_ID
-    )
+    return bool(identifier and identifier >= MO_ORIGINAL_AVAILABLE_FROM_IMAGE_ID)
 
 
 def mo_best_downloadable_size(image_id: object) -> str:
@@ -104,10 +107,7 @@ def mo_best_downloadable_size(image_id: object) -> str:
     which is why this is worth deciding per image rather than settling on the
     size that always works.
     """
-    return (
-        "orig" if mo_original_is_public(image_id)
-        else MO_LARGEST_FETCHABLE_SIZE
-    )
+    return "orig" if mo_original_is_public(image_id) else MO_LARGEST_FETCHABLE_SIZE
 
 
 def mo_image_page_url(image_id: object) -> str:
@@ -135,7 +135,11 @@ def parse_mo_observation(raw: dict[str, Any], account_id: int) -> InventoryObser
         raise ValueError("MO observation has no positive ID")
 
     owner = _mapping(raw.get("owner")) or _mapping(raw.get("user"))
-    owner_id = positive_int(raw.get("owner_id")) or positive_int(owner) or positive_int(raw.get("user_id"))
+    owner_id = (
+        positive_int(raw.get("owner_id"))
+        or positive_int(owner)
+        or positive_int(raw.get("user_id"))
+    )
     owner_login = str(
         owner.get("login") or owner.get("name") or raw.get("owner_login") or ""
     ).strip()
@@ -163,31 +167,55 @@ def parse_mo_observation(raw: dict[str, Any], account_id: int) -> InventoryObser
     location = _mapping(raw.get("location"))
     location_id = positive_int(raw.get("location_id")) or positive_int(location)
     location_name = str(
-        raw.get("location_name") or location.get("name") or location.get("display_name") or ""
+        raw.get("location_name")
+        or location.get("name")
+        or location.get("display_name")
+        or ""
     ).strip()
-    observed = parse_mo_date(raw.get("date") or raw.get("observed_on") or raw.get("when"))
+    observed = parse_mo_date(
+        raw.get("date") or raw.get("observed_on") or raw.get("when")
+    )
     updated = parse_mo_datetime(raw.get("updated_at") or raw.get("modified"))
     fungi_status = mo_fungi_status(raw, consensus)
     media = _observation_media(raw)
     fingerprint = public_fingerprint(
-        observation_id, owner_id, observed, consensus_id, consensus_name, rank,
-        location_id, location_name, fungi_status, updated,
+        observation_id,
+        owner_id,
+        observed,
+        consensus_id,
+        consensus_name,
+        rank,
+        location_id,
+        location_name,
+        fungi_status,
+        updated,
         *((item.photo_id, item.source_site, item.source_photo_id) for item in media),
     )
     return InventoryObservation(
-        key=RemoteRecordKey(RemoteSite.MO, observation_id), account_id=account_id,
-        owner_id=owner_id, owner_login=owner_login, observed_on=observed,
-        taxon_id=consensus_id, taxon_name=consensus_name, taxon_rank=rank,
-        public_locality=location_name, fungi_status=fungi_status,
-        updated_at=updated, content_fingerprint=fingerprint, media=media,
+        key=RemoteRecordKey(RemoteSite.MO, observation_id),
+        account_id=account_id,
+        owner_id=owner_id,
+        owner_login=owner_login,
+        observed_on=observed,
+        taxon_id=consensus_id,
+        taxon_name=consensus_name,
+        taxon_rank=rank,
+        public_locality=location_name,
+        fungi_status=fungi_status,
+        updated_at=updated,
+        content_fingerprint=fingerprint,
+        media=media,
     )
 
 
 def parse_mo_external_link(
-    raw: dict[str, Any], required_site_id: int,
+    raw: dict[str, Any],
+    required_site_id: int,
 ) -> Optional[tuple[int, AuthoritativeLinkRow]]:
     """Parse one link without treating an API capability gap as malformed data."""
-    source_id = positive_int(raw.get("observation_id") or raw.get("observation") or raw.get("target"))
+    source_id = positive_int(
+        raw.get("observation_id") or raw.get("observation") or raw.get("target")
+    )
     site_id = positive_int(
         raw.get("external_site_id") or raw.get("external_site") or raw.get("site")
     )
@@ -196,8 +224,11 @@ def parse_mo_external_link(
     row_id = str(raw.get("id") or "").strip()
     external_id = positive_int(raw.get("external_id"))
     url_value = str(
-        raw.get("url") or raw.get("link_url") or raw.get("derived_url")
-        or raw.get("external_url") or ""
+        raw.get("url")
+        or raw.get("link_url")
+        or raw.get("derived_url")
+        or raw.get("external_url")
+        or ""
     ).strip()
     target_id = external_id or parse_inat_observation_url(url_value)
     if target_id:
@@ -210,7 +241,11 @@ def parse_mo_external_link(
         parse_state = "malformed"
     identity = row_id or f"external:{source_id}:unidentified"
     return source_id, AuthoritativeLinkRow(
-        identity, site_id, RemoteSite.INAT, target_id, parse_state,
+        identity,
+        site_id,
+        RemoteSite.INAT,
+        target_id,
+        parse_state,
         public_fingerprint(identity, site_id, target_id, parse_state, url_value),
     )
 
@@ -224,7 +259,9 @@ def mo_record_fingerprint(raw: dict[str, Any]) -> str:
 def parse_mo_sequence_record(raw: dict[str, Any]) -> Optional[tuple[int, str]]:
     """Return the current observation identity and non-reversible sequence hash."""
     observation_id = positive_int(raw.get("observation_id") or raw.get("observation"))
-    digest = sequence_digest(raw.get("sequence") or raw.get("bases") or raw.get("dna_sequence"))
+    digest = sequence_digest(
+        raw.get("sequence") or raw.get("bases") or raw.get("dna_sequence")
+    )
     return (observation_id, digest) if observation_id and digest else None
 
 
@@ -246,23 +283,29 @@ def parse_mo_coordinate(
         raw.get("gps_accuracy"), raw.get("accuracy"), raw.get("positional_accuracy")
     )
     hidden = _is_truthy(
-        raw.get("gps_hidden"), raw.get("hidden"), raw.get("location_hidden"),
+        raw.get("gps_hidden"),
+        raw.get("hidden"),
+        raw.get("location_hidden"),
     )
     readable = (
-        latitude is not None and longitude is not None
-        and -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0
+        latitude is not None
+        and longitude is not None
+        and -90.0 <= latitude <= 90.0
+        and -180.0 <= longitude <= 180.0
     )
     if not readable:
         # ``gps_hidden`` proves a private point exists even though this reader
         # cannot see it — distinct from a genuinely absent coordinate. Either way
         # no readable point is returned, so no copy can be proposed.
         privacy = (
-            CoordinatePrivacyState.PRIVATE.value if hidden
+            CoordinatePrivacyState.PRIVATE.value
+            if hidden
             else CoordinatePrivacyState.ABSENT.value
         )
         return None, None, None, privacy
     privacy = (
-        CoordinatePrivacyState.PRIVATE.value if hidden
+        CoordinatePrivacyState.PRIVATE.value
+        if hidden
         else CoordinatePrivacyState.PUBLIC.value
     )
     return latitude, longitude, accuracy, privacy
@@ -314,12 +357,16 @@ def parse_mo_date(value: object) -> Optional[date]:
 
 def parse_mo_datetime(value: object) -> Optional[datetime]:
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        return (
+            datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        )
     except ValueError:
         return None
 
 
-def mo_fungi_status(raw: dict[str, Any], consensus: Optional[dict[str, Any]] = None) -> str:
+def mo_fungi_status(
+    raw: dict[str, Any], consensus: Optional[dict[str, Any]] = None
+) -> str:
     name = consensus or _mapping(raw.get("consensus")) or _mapping(raw.get("name"))
     classification = name.get("classification") or raw.get("classification")
     if isinstance(classification, dict):
@@ -354,7 +401,9 @@ def _observation_media(raw: dict[str, Any]) -> tuple[MediaIdentity, ...]:
     # source attribution) overwrites it on a matching key rather than the
     # other way around.
     unique = {(item.site, item.photo_id, item.rendition): item for item in values}
-    return tuple(sorted(unique.values(), key=lambda item: (item.photo_id, item.rendition)))
+    return tuple(
+        sorted(unique.values(), key=lambda item: (item.photo_id, item.rendition))
+    )
 
 
 def mo_observation_photo_count(raw: dict[str, Any]) -> int:
@@ -373,25 +422,42 @@ def parse_mo_media_identity(raw: dict[str, Any]) -> Optional[MediaIdentity]:
     if not photo_id:
         return None
     source = _mapping(raw.get("source"))
-    source_name = " ".join(str(
-        raw.get("source_site") or raw.get("original_site")
-        or source.get("site") or source.get("name") or ""
-    ).casefold().split())
-    source_url = str(raw.get("source_url") or raw.get("original_url") or source.get("url") or "")
+    source_name = " ".join(
+        str(
+            raw.get("source_site")
+            or raw.get("original_site")
+            or source.get("site")
+            or source.get("name")
+            or ""
+        )
+        .casefold()
+        .split()
+    )
+    source_url = str(
+        raw.get("source_url") or raw.get("original_url") or source.get("url") or ""
+    )
     source_site: Optional[RemoteSite] = None
     if source_name in {"inaturalist", "inaturalist.org", "i naturalist"}:
         source_site = RemoteSite.INAT
     else:
         try:
-            if urlsplit(source_url).hostname in {"inaturalist.org", "www.inaturalist.org"}:
+            if urlsplit(source_url).hostname in {
+                "inaturalist.org",
+                "www.inaturalist.org",
+            }:
                 source_site = RemoteSite.INAT
         except ValueError:
             pass
     source_photo_id = positive_int(
-        raw.get("source_photo_id") or raw.get("original_photo_id") or source.get("photo_id")
+        raw.get("source_photo_id")
+        or raw.get("original_photo_id")
+        or source.get("photo_id")
     )
     return MediaIdentity(
-        RemoteSite.MO, str(photo_id), "display", source_site,
+        RemoteSite.MO,
+        str(photo_id),
+        "display",
+        source_site,
         str(source_photo_id) if source_site and source_photo_id else "",
     )
 

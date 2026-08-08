@@ -1,4 +1,5 @@
 """Utilities for turning iNaturalist observation URLs into API queries."""
+
 from __future__ import annotations
 
 import re
@@ -36,7 +37,7 @@ class ObservationURLQuery:
     def __post_init__(self) -> None:
         """Keep provenance positional and backward-compatible for old callers."""
         params = list(self.params)
-        sources = list(self.parameter_sources[:len(params)])
+        sources = list(self.parameter_sources[: len(params)])
         sources.extend(["URL"] * (len(params) - len(sources)))
         object.__setattr__(self, "params", params)
         object.__setattr__(self, "parameter_sources", tuple(sources))
@@ -46,7 +47,9 @@ def is_probable_url_input(text: str) -> bool:
     value = text.strip().lower()
     return bool(
         value.startswith(("http://", "https://"))
-        or value.startswith(("www.inaturalist.org/", "inaturalist.org/", "api.inaturalist.org/"))
+        or value.startswith(
+            ("www.inaturalist.org/", "inaturalist.org/", "api.inaturalist.org/")
+        )
     )
 
 
@@ -67,7 +70,9 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
     parsed = urlparse(display_url)
     host = (parsed.hostname or "").lower()
     if host not in _INAT_HOSTS:
-        raise ObservationURLParseError("Only iNaturalist observation URLs are supported.")
+        raise ObservationURLParseError(
+            "Only iNaturalist observation URLs are supported."
+        )
 
     path = _normalise_path(parsed.path)
     params = [
@@ -101,8 +106,14 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
 
     source_key = _canonical_source_key(params)
     return ObservationURLQuery(
-        display_url=display_url, source_key=source_key, params=params,
-        source_kind="identify" if is_identify else ("single" if detail_match else "observations"),
+        display_url=display_url,
+        source_key=source_key,
+        params=params,
+        source_kind=(
+            "identify"
+            if is_identify
+            else ("single" if detail_match else "observations")
+        ),
         parameter_sources=tuple(sources),
     )
 
@@ -116,8 +127,11 @@ def with_taxon_filter(
         return query
 
     sources = list(query.parameter_sources)
-    pairs = [(param, source) for param, source in zip(query.params, sources)
-             if param[0].lower() != "taxon_id"]
+    pairs = [
+        (param, source)
+        for param, source in zip(query.params, sources)
+        if param[0].lower() != "taxon_id"
+    ]
     params = [param for param, _ in pairs]
     new_sources = [source for _, source in pairs]
     params.append(("taxon_id", str(int(taxon_id))))
@@ -138,11 +152,7 @@ def extract_single_taxon_id_from_observation_query(query: ObservationURLQuery) -
     helper can distinguish a single source taxon from ambiguous multi-taxon
     searches.
     """
-    values = [
-        val.strip()
-        for key, val in query.params
-        if key.lower() == "taxon_id"
-    ]
+    values = [val.strip() for key, val in query.params if key.lower() == "taxon_id"]
     if not values:
         raise ValueError(
             "This bulk disagree workflow requires a URL with a numeric taxon_id."
@@ -169,11 +179,7 @@ def extract_optional_single_taxon_id_from_observation_query(
     can run against URLs filtered by something else (e.g. an observation field).
     Ambiguous multi-taxon or non-numeric ``taxon_id`` values are still rejected.
     """
-    values = [
-        val.strip()
-        for key, val in query.params
-        if key.lower() == "taxon_id"
-    ]
+    values = [val.strip() for key, val in query.params if key.lower() == "taxon_id"]
     if not values:
         return None
     if len(values) != 1 or "," in values[0]:

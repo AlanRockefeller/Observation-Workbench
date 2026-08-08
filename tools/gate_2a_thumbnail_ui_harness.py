@@ -13,6 +13,7 @@ selected item becoming disabled, and dialog close before the callback runs.
 Run:
     QT_QPA_PLATFORM=offscreen ./.venv/bin/python tools/gate_2a_thumbnail_ui_harness.py
 """
+
 from __future__ import annotations
 
 import os
@@ -27,11 +28,17 @@ from PySide6.QtCore import QBuffer, QIODevice  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from observation_workbench.reconciliation.photo_license import photo_byte_fingerprint  # noqa: E402
+from observation_workbench.reconciliation.photo_license import (
+    photo_byte_fingerprint,
+)  # noqa: E402
 from observation_workbench.reconciliation.types import (  # noqa: E402
-    ObservationCreationItem, ObservationCreationPreview, RemoteSite,
+    ObservationCreationItem,
+    ObservationCreationPreview,
+    RemoteSite,
 )
-from observation_workbench.ui.reconciliation import ObservationCreationPreviewDialog  # noqa: E402
+from observation_workbench.ui.reconciliation import (
+    ObservationCreationPreviewDialog,
+)  # noqa: E402
 
 
 def _make_png(color: str) -> bytes:
@@ -55,21 +62,36 @@ def check(name: str, condition: bool) -> None:
     print(f"[{PASS if condition else FAIL}] {name}")
 
 
-def _make_preview(items: tuple[ObservationCreationItem, ...]) -> ObservationCreationPreview:
+def _make_preview(
+    items: tuple[ObservationCreationItem, ...],
+) -> ObservationCreationPreview:
     return ObservationCreationPreview(
-        profile_id=1, source_site=RemoteSite.MO, source_observation_id=1,
-        destination_site=RemoteSite.INAT, auth_generation=1, mo_key_generation=1,
-        source_fingerprint="fp", destination_account_login="tester",
-        observed_on_string="2026-01-01", taxon_name="Amanita sp.", taxon_id=1,
-        place_guess="somewhere", description="", items=items,
+        profile_id=1,
+        source_site=RemoteSite.MO,
+        source_observation_id=1,
+        destination_site=RemoteSite.INAT,
+        auth_generation=1,
+        mo_key_generation=1,
+        source_fingerprint="fp",
+        destination_account_login="tester",
+        observed_on_string="2026-01-01",
+        taxon_name="Amanita sp.",
+        taxon_id=1,
+        place_guess="somewhere",
+        description="",
+        items=items,
     )
 
 
 def _item(key: str, expected_fp: str) -> ObservationCreationItem:
     return ObservationCreationItem(
-        item_type="photo", source_site=RemoteSite.MO, source_identity=key,
-        description=f"MO photo {key}", source_url=f"stub://{key}",
-        reviewed_byte_fingerprint=expected_fp, enabled=True,
+        item_type="photo",
+        source_site=RemoteSite.MO,
+        source_identity=key,
+        description=f"MO photo {key}",
+        source_url=f"stub://{key}",
+        reviewed_byte_fingerprint=expected_fp,
+        enabled=True,
     )
 
 
@@ -111,7 +133,10 @@ def main() -> int:
     preview = _make_preview(items)
     dialog = ObservationCreationPreviewDialog(preview, downloader)
 
-    key_of = {it.source_identity: f"item:{i}:{it.source_identity}" for i, it in enumerate(items)}
+    key_of = {
+        it.source_identity: f"item:{i}:{it.source_identity}"
+        for i, it in enumerate(items)
+    }
 
     # --- Section 1 (release blocker): every photo checkbox must start
     # DISABLED, with a visible loading-state reason, before any thumbnail
@@ -119,7 +144,10 @@ def main() -> int:
     # any worker has had a chance to run. ------------------------------------
     check(
         "every photo checkbox starts disabled before any thumbnail callback arrives",
-        all(not dialog._check_by_key[key_of[k]].isEnabled() for k in ("match", "mismatch", "error", "empty", "garbage")),  # noqa: SLF001
+        all(
+            not dialog._check_by_key[key_of[k]].isEnabled()
+            for k in ("match", "mismatch", "error", "empty", "garbage")
+        ),  # noqa: SLF001
     )
     check(
         "a not-yet-loaded photo checkbox shows a visible loading-state reason",
@@ -142,11 +170,31 @@ def main() -> int:
 
     _wait_for_workers(app)
 
-    check("match: checkbox stays enabled and checked", dialog._check_by_key[key_of["match"]].isEnabled() and dialog._check_by_key[key_of["match"]].isChecked())  # noqa: SLF001
-    check("mismatch: checkbox disabled and unchecked", not dialog._check_by_key[key_of["mismatch"]].isEnabled() and not dialog._check_by_key[key_of["mismatch"]].isChecked())  # noqa: SLF001
-    check("error: checkbox disabled and unchecked", not dialog._check_by_key[key_of["error"]].isEnabled() and not dialog._check_by_key[key_of["error"]].isChecked())  # noqa: SLF001
-    check("empty: checkbox disabled and unchecked", not dialog._check_by_key[key_of["empty"]].isEnabled() and not dialog._check_by_key[key_of["empty"]].isChecked())  # noqa: SLF001
-    check("garbage/decode-failure: checkbox disabled and unchecked", not dialog._check_by_key[key_of["garbage"]].isEnabled() and not dialog._check_by_key[key_of["garbage"]].isChecked())  # noqa: SLF001
+    check(
+        "match: checkbox stays enabled and checked",
+        dialog._check_by_key[key_of["match"]].isEnabled()
+        and dialog._check_by_key[key_of["match"]].isChecked(),
+    )  # noqa: SLF001
+    check(
+        "mismatch: checkbox disabled and unchecked",
+        not dialog._check_by_key[key_of["mismatch"]].isEnabled()
+        and not dialog._check_by_key[key_of["mismatch"]].isChecked(),
+    )  # noqa: SLF001
+    check(
+        "error: checkbox disabled and unchecked",
+        not dialog._check_by_key[key_of["error"]].isEnabled()
+        and not dialog._check_by_key[key_of["error"]].isChecked(),
+    )  # noqa: SLF001
+    check(
+        "empty: checkbox disabled and unchecked",
+        not dialog._check_by_key[key_of["empty"]].isEnabled()
+        and not dialog._check_by_key[key_of["empty"]].isChecked(),
+    )  # noqa: SLF001
+    check(
+        "garbage/decode-failure: checkbox disabled and unchecked",
+        not dialog._check_by_key[key_of["garbage"]].isEnabled()
+        and not dialog._check_by_key[key_of["garbage"]].isChecked(),
+    )  # noqa: SLF001
 
     selected = {it.source_identity for it in dialog.selected_items()}
     check("selected_items() excludes every disabled item", selected == {"match"})
@@ -158,7 +206,8 @@ def main() -> int:
 
     check(
         "disabled reason text present for undisplayable image",
-        "could not be displayed and reviewed" in dialog._check_by_key[key_of["error"]].text(),  # noqa: SLF001
+        "could not be displayed and reviewed"
+        in dialog._check_by_key[key_of["error"]].text(),  # noqa: SLF001
     )
 
     # --- Selected item becoming disabled: prove the earlier `setChecked(True)`
@@ -166,7 +215,10 @@ def main() -> int:
     # (already implied by the checks, restated explicitly here). ------------
     check(
         "a previously-checked item that failed to load ends unchecked (not merely disabled)",
-        all(not dialog._check_by_key[key_of[k]].isChecked() for k in ("mismatch", "error", "empty", "garbage")),  # noqa: SLF001
+        all(
+            not dialog._check_by_key[key_of[k]].isChecked()
+            for k in ("mismatch", "error", "empty", "garbage")
+        ),  # noqa: SLF001
     )
 
     # --- Closing the dialog before a callback completes must not crash. ----

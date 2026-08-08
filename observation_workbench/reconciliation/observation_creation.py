@@ -85,6 +85,7 @@ this is the normal happy path on MO, not an outcome_unknown fallback. iNat's
 create response carries the id directly (the client-supplied ``uuid`` is
 proven idempotent), so no follow-up search is needed there.
 """
+
 from __future__ import annotations
 
 import json
@@ -103,8 +104,12 @@ from .mo_parsing import parse_mo_observation, positive_int
 from .normalization import public_fingerprint
 from .photos import PhotoSyncService, new_observation_photo_uuid
 from .types import (
-    HydratedObservation, InventoryObservation, LinkActionType,
-    ObservationCreationItem, ObservationCreationPreview, PhotoActionType,
+    HydratedObservation,
+    InventoryObservation,
+    LinkActionType,
+    ObservationCreationItem,
+    ObservationCreationPreview,
+    PhotoActionType,
     RemoteSite,
 )
 
@@ -147,7 +152,10 @@ FIELD_TRANSFER_POLICY: dict[str, dict[str, str]] = {
             "coordinates are omitted entirely and listed as a gap."
         ),
     },
-    "accuracy": {"mo_to_inat": "positional_accuracy, when known.", "inat_to_mo": "Not sent; MO has no accuracy-radius create field."},
+    "accuracy": {
+        "mo_to_inat": "positional_accuracy, when known.",
+        "inat_to_mo": "Not sent; MO has no accuracy-radius create field.",
+    },
     "description": {
         "mo_to_inat": "MO 'notes' -> iNat 'description', verbatim.",
         "inat_to_mo": (
@@ -248,7 +256,9 @@ def gap_display_text(code: str) -> str:
 
 
 class ObservationCreationError(RuntimeError):
-    def __init__(self, message: str, code: str = "observation_creation_unavailable") -> None:
+    def __init__(
+        self, message: str, code: str = "observation_creation_unavailable"
+    ) -> None:
         super().__init__(message)
         self.code = code
 
@@ -275,11 +285,16 @@ class ObservationCreationService:
     coordinator's generic dispatch contract (mirrors ``PhotoSyncService``)."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
-        photo_service: PhotoSyncService, link_service: LinkRepairService,
+        photo_service: PhotoSyncService,
+        link_service: LinkRepairService,
     ) -> None:
         self.db = db
         self.inat_client = inat_client
@@ -294,7 +309,11 @@ class ObservationCreationService:
     # Preview ------------------------------------------------------------
 
     def _fetch_source(
-        self, profile: Any, source_site: str, source_observation_id: int, cancelled: Callable[[], bool],
+        self,
+        profile: Any,
+        source_site: str,
+        source_observation_id: int,
+        cancelled: Callable[[], bool],
     ) -> tuple[dict[str, Any], InventoryObservation, HydratedObservation]:
         """Fresh read + hydrate of the source record. Called by BOTH
         ``prepare_preview`` and ``_execute_create``/finalize — never cached
@@ -305,29 +324,48 @@ class ObservationCreationService:
             auth = self.auth_provider()
             token = auth.api_token if auth.is_authenticated else ""
             if not token:
-                raise ObservationCreationError("iNaturalist authentication is required.", "inat_auth_missing")
+                raise ObservationCreationError(
+                    "iNaturalist authentication is required.", "inat_auth_missing"
+                )
             raw = _first_result(
-                self.inat_client.get_reconciliation_detail(source_observation_id, token, deep=True)
+                self.inat_client.get_reconciliation_detail(
+                    source_observation_id, token, deep=True
+                )
             )
             if not raw or positive_int(raw.get("id")) != source_observation_id:
-                raise ObservationCreationError("The iNaturalist source observation is unavailable.", "source_unavailable")
+                raise ObservationCreationError(
+                    "The iNaturalist source observation is unavailable.",
+                    "source_unavailable",
+                )
             owner = raw.get("user") if isinstance(raw.get("user"), dict) else {}
             if positive_int(owner.get("id")) != profile.inat_user_id:
                 raise ObservationCreationError(
-                    "The source observation's owner changed; it is not yours to copy.", "source_owner_changed",
+                    "The source observation's owner changed; it is not yours to copy.",
+                    "source_owner_changed",
                 )
             reader = INatReconciliationReader(self.inat_client)
             inventory = reader.parse_inventory(raw, profile.inat_user_id, None, None)
             from .coordinator import _hydrate_record
-            hydrated = _hydrate_record(inventory, raw, authorized=True, include_its=True)
+
+            hydrated = _hydrate_record(
+                inventory, raw, authorized=True, include_its=True
+            )
         else:
-            mo_raw = _first_result(self.mo_client.observation(source_observation_id, cancelled, detail="high"))
+            mo_raw = _first_result(
+                self.mo_client.observation(
+                    source_observation_id, cancelled, detail="high"
+                )
+            )
             if not mo_raw or positive_int(mo_raw.get("id")) != source_observation_id:
-                raise ObservationCreationError("The Mushroom Observer source observation is unavailable.", "source_unavailable")
+                raise ObservationCreationError(
+                    "The Mushroom Observer source observation is unavailable.",
+                    "source_unavailable",
+                )
             inventory = parse_mo_observation(mo_raw, profile.mo_user_id)
             if inventory.owner_id != profile.mo_user_id:
                 raise ObservationCreationError(
-                    "The source observation's owner changed; it is not yours to copy.", "source_owner_changed",
+                    "The source observation's owner changed; it is not yours to copy.",
+                    "source_owner_changed",
                 )
             # MO's observation payload's consensus name carries no
             # classification data, so a species-level name still parses as
@@ -339,9 +377,14 @@ class ObservationCreationService:
             if inventory.fungi_status == "unknown" and inventory.taxon_id is not None:
                 from .coordinator import _name_fungi_status, _with_fungi_status
                 from .mo_client import results_from_payload
-                name_rows = results_from_payload(self.mo_client.names([inventory.taxon_id], cancelled))
+
+                name_rows = results_from_payload(
+                    self.mo_client.names([inventory.taxon_id], cancelled)
+                )
                 if name_rows:
-                    inventory = _with_fungi_status(inventory, _name_fungi_status(name_rows[0]))
+                    inventory = _with_fungi_status(
+                        inventory, _name_fungi_status(name_rows[0])
+                    )
             if inventory.fungi_status == "unknown":
                 # Smaller issues: fail closed HERE, before any preview or
                 # write, rather than letting an unresolved fungal
@@ -352,14 +395,18 @@ class ObservationCreationService:
                 # caught up front.
                 raise ObservationCreationError(
                     "This source observation's fungal classification could not be confirmed; "
-                    "refusing to create a missing observation for it.", "fungi_status_unknown",
+                    "refusing to create a missing observation for it.",
+                    "fungi_status_unknown",
                 )
             from .its import _hydrate_mo_specimen
+
             hydrated = _hydrate_mo_specimen(inventory, mo_raw)
             raw = mo_raw
         return raw, inventory, hydrated
 
-    def _resolve_inat_taxon(self, name: str) -> tuple[Optional[int], str, Optional[str], str]:
+    def _resolve_inat_taxon(
+        self, name: str
+    ) -> tuple[Optional[int], str, Optional[str], str]:
         """Explicitly resolve a Fungi taxon via ``/taxa/autocomplete`` before
         creating. iNat's own create-time ``species_guess`` resolution is a
         SEPARATE, looser algorithm than autocomplete and can silently create
@@ -390,7 +437,8 @@ class ObservationCreationService:
             raw = self.inat_client.get_taxa_autocomplete(query, per_page=5)
             candidates = [r for r in (raw.get("results") or []) if isinstance(r, dict)]
             exact = [
-                r for r in candidates
+                r
+                for r in candidates
                 if str(r.get("name") or "").strip().casefold() == query.casefold()
                 and str(r.get("iconic_taxon_name") or "").casefold() == "fungi"
                 # "Exact active fungal matches are preferred" (section 10): a
@@ -421,7 +469,8 @@ class ObservationCreationService:
                 base_match = _exact_fungi_match(base)
                 if base_match:
                     return (
-                        int(base_match["id"]), base,
+                        int(base_match["id"]),
+                        base,
                         f"Mushroom Observer's '{cleaned}' has no matching iNaturalist taxon "
                         f"(a species-complex rank iNat does not model the same way); approximated "
                         f"as its base taxon '{base}' (iNaturalist taxon id {base_match['id']}).",
@@ -429,7 +478,8 @@ class ObservationCreationService:
                     )
                 break
         return (
-            None, cleaned,
+            None,
+            cleaned,
             f"Could not confidently resolve a single matching iNaturalist Fungi taxon for "
             f"'{cleaned}'; sent as free text only, and iNaturalist may create the observation "
             f"with no identified taxon at all.",
@@ -437,8 +487,12 @@ class ObservationCreationService:
         )
 
     def _derive_creation_fields(
-        self, source_site: str, destination_site: str,
-        raw: dict[str, Any], inventory: InventoryObservation, hydrated: HydratedObservation,
+        self,
+        source_site: str,
+        destination_site: str,
+        raw: dict[str, Any],
+        inventory: InventoryObservation,
+        hydrated: HydratedObservation,
     ) -> dict[str, Any]:
         """The M2 field-transfer policy matrix (module docstring) turned into
         concrete values. Shared by the preview and the actual write so they
@@ -449,7 +503,9 @@ class ObservationCreationService:
         # tolerated by _execute_pair_finalize's exact-match check) — the taxon
         # resolution note is informational, not a structural gap.
         taxon_warnings: list[str] = []
-        observed_on_string = inventory.observed_on.isoformat() if inventory.observed_on else ""
+        observed_on_string = (
+            inventory.observed_on.isoformat() if inventory.observed_on else ""
+        )
         if not observed_on_string:
             approved_field_gaps.append("observed_date")
         place_guess = inventory.public_locality
@@ -459,7 +515,9 @@ class ObservationCreationService:
         resolved_taxon_name = ""
         resolution_mode = ""
         if destination_site == "inat" and inventory.taxon_name:
-            taxon_id, resolved_taxon_name, gap_note, resolution_mode = self._resolve_inat_taxon(inventory.taxon_name)
+            taxon_id, resolved_taxon_name, gap_note, resolution_mode = (
+                self._resolve_inat_taxon(inventory.taxon_name)
+            )
             if gap_note:
                 taxon_warnings.append(gap_note)
             if taxon_id is None:
@@ -473,7 +531,9 @@ class ObservationCreationService:
         gps_hidden = False
         if hydrated.coordinates_available:
             if destination_site == "inat":
-                source_gps_hidden = bool(raw.get("gps_hidden")) if source_site == "mo" else False
+                source_gps_hidden = (
+                    bool(raw.get("gps_hidden")) if source_site == "mo" else False
+                )
                 if source_gps_hidden:
                     approved_field_gaps.append("coordinates_hidden_on_source")
                 else:
@@ -483,14 +543,22 @@ class ObservationCreationService:
             else:
                 latitude, longitude = hydrated.latitude, hydrated.longitude
                 positional_accuracy = hydrated.accuracy_m
-                source_geoprivacy = str(raw.get("geoprivacy") or "open") if source_site == "inat" else "open"
+                source_geoprivacy = (
+                    str(raw.get("geoprivacy") or "open")
+                    if source_site == "inat"
+                    else "open"
+                )
                 gps_hidden = source_geoprivacy != "open"
 
         if hydrated.specimen_available is not None and destination_site == "inat":
             approved_field_gaps.append("specimen_available")
 
         taxon_resolution_fingerprint = public_fingerprint(
-            "taxon_resolution", inventory.taxon_name, taxon_id, resolved_taxon_name, resolution_mode,
+            "taxon_resolution",
+            inventory.taxon_name,
+            taxon_id,
+            resolved_taxon_name,
+            resolution_mode,
         )
         # Finding 3 (round 3): source_fingerprint only pins the local
         # inventory record's (site, id, unpaired_state, local update
@@ -501,25 +569,42 @@ class ObservationCreationService:
         # reread create with values nobody reviewed. One-way hash only —
         # never stores raw notes or coordinates.
         payload_fingerprint = public_fingerprint(
-            "creation_payload", observed_on_string, place_guess, description,
-            latitude, longitude, positional_accuracy, geoprivacy,
-            ",".join(sorted(approved_field_gaps)), hydrated.attribution_name,
+            "creation_payload",
+            observed_on_string,
+            place_guess,
+            description,
+            latitude,
+            longitude,
+            positional_accuracy,
+            geoprivacy,
+            ",".join(sorted(approved_field_gaps)),
+            hydrated.attribution_name,
         )
         return {
-            "observed_on_string": observed_on_string, "taxon_name": inventory.taxon_name,
+            "observed_on_string": observed_on_string,
+            "taxon_name": inventory.taxon_name,
             "taxon_rank": inventory.taxon_rank,
-            "taxon_id": taxon_id, "resolved_taxon_name": resolved_taxon_name,
+            "taxon_id": taxon_id,
+            "resolved_taxon_name": resolved_taxon_name,
             "resolution_mode": resolution_mode,
             "taxon_resolution_fingerprint": taxon_resolution_fingerprint,
             "reviewed_payload_fingerprint": payload_fingerprint,
-            "place_guess": place_guess, "description": description,
-            "latitude": latitude, "longitude": longitude, "positional_accuracy": positional_accuracy,
-            "geoprivacy": geoprivacy, "gps_hidden": gps_hidden,
-            "approved_field_gaps": approved_field_gaps, "taxon_warnings": taxon_warnings,
+            "place_guess": place_guess,
+            "description": description,
+            "latitude": latitude,
+            "longitude": longitude,
+            "positional_accuracy": positional_accuracy,
+            "geoprivacy": geoprivacy,
+            "gps_hidden": gps_hidden,
+            "approved_field_gaps": approved_field_gaps,
+            "taxon_warnings": taxon_warnings,
         }
 
     def prepare_preview(
-        self, profile_id: int, source_site: str, source_observation_id: int,
+        self,
+        profile_id: int,
+        source_site: str,
+        source_observation_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> ObservationCreationPreview:
         if source_site not in {"mo", "inat"}:
@@ -541,8 +626,14 @@ class ObservationCreationService:
         profile = self.db.profile(profile_id)
         record = self.db.record_detail(profile_id, source_site, source_observation_id)
         if not record:
-            raise ObservationCreationError("The source record is unavailable.", "record_unavailable")
-        expected_state = "confirmed_missing_on_mo" if destination_site == "mo" else "confirmed_missing_on_inat"
+            raise ObservationCreationError(
+                "The source record is unavailable.", "record_unavailable"
+            )
+        expected_state = (
+            "confirmed_missing_on_mo"
+            if destination_site == "mo"
+            else "confirmed_missing_on_inat"
+        )
         if str(record.get("unpaired_state")) != expected_state:
             raise ObservationCreationError(
                 "This record has not been explicitly confirmed missing on the destination site. "
@@ -552,11 +643,15 @@ class ObservationCreationService:
         auth_generation = self.auth_generation_provider()
         mo_key_generation = self.mo_key_generation_provider()
 
-        raw, inventory, hydrated = self._fetch_source(profile, source_site, source_observation_id, cancelled)
+        raw, inventory, hydrated = self._fetch_source(
+            profile, source_site, source_observation_id, cancelled
+        )
         warnings: list[str] = []
         self._search_for_existing_match(profile, destination_site, inventory, cancelled)
 
-        fields = self._derive_creation_fields(source_site, destination_site, raw, inventory, hydrated)
+        fields = self._derive_creation_fields(
+            source_site, destination_site, raw, inventory, hydrated
+        )
         if fields["taxon_id"] is None:
             # Section 6: an unresolved destination taxon is never an
             # acceptable "cannot be transferred" gap — creating a taxon-less
@@ -582,7 +677,9 @@ class ObservationCreationService:
         warnings.extend(fields["taxon_warnings"])
 
         items: list[ObservationCreationItem] = []
-        identifier_count = len(hydrated.voucher_identifiers) + len(hydrated.collection_identifiers)
+        identifier_count = len(hydrated.voucher_identifiers) + len(
+            hydrated.collection_identifiers
+        )
         if identifier_count:
             # Section 10 finding: 'identifier' items were minted as
             # inat_ofv_add, but LinkRepairService._write's INAT_OFV_ADD
@@ -623,7 +720,11 @@ class ObservationCreationService:
                 "not read Mushroom Observer's sequence list. If this observation has any sequences, "
                 "add them manually on iNaturalist after creation."
             )
-        items.extend(self._photo_items(source_site, destination_site, profile, raw, warnings, cancelled))
+        items.extend(
+            self._photo_items(
+                source_site, destination_site, profile, raw, warnings, cancelled
+            )
+        )
 
         marker_in_public_notes = destination_site == "mo"
         if marker_in_public_notes:
@@ -634,32 +735,49 @@ class ObservationCreationService:
             )
 
         source_fingerprint = public_fingerprint(
-            "record", source_site, source_observation_id,
-            record.get("unpaired_state"), record.get("remote_updated_at") or record.get("last_seen_at"),
+            "record",
+            source_site,
+            source_observation_id,
+            record.get("unpaired_state"),
+            record.get("remote_updated_at") or record.get("last_seen_at"),
         )
         return ObservationCreationPreview(
-            profile_id=profile_id, source_site=RemoteSite(source_site),
+            profile_id=profile_id,
+            source_site=RemoteSite(source_site),
             source_observation_id=source_observation_id,
             destination_site=RemoteSite(destination_site),
-            auth_generation=auth_generation, mo_key_generation=mo_key_generation,
+            auth_generation=auth_generation,
+            mo_key_generation=mo_key_generation,
             source_fingerprint=source_fingerprint,
-            destination_account_login=(profile.mo_login if destination_site == "mo" else profile.inat_login),
-            observed_on_string=observed_on_string, taxon_name=inventory.taxon_name,
+            destination_account_login=(
+                profile.mo_login if destination_site == "mo" else profile.inat_login
+            ),
+            observed_on_string=observed_on_string,
+            taxon_name=inventory.taxon_name,
             taxon_rank=inventory.taxon_rank,
-            taxon_id=fields["taxon_id"], resolved_taxon_name=fields["resolved_taxon_name"],
+            taxon_id=fields["taxon_id"],
+            resolved_taxon_name=fields["resolved_taxon_name"],
             resolution_mode=fields["resolution_mode"],
             taxon_resolution_fingerprint=fields["taxon_resolution_fingerprint"],
             reviewed_payload_fingerprint=fields["reviewed_payload_fingerprint"],
-            place_guess=place_guess, description=description,
+            place_guess=place_guess,
+            description=description,
             source_attribution_name=hydrated.attribution_name,
-            latitude=latitude, longitude=longitude, positional_accuracy=positional_accuracy,
-            geoprivacy=geoprivacy, approved_field_gaps=tuple(approved_field_gaps),
-            items=tuple(items), marker_in_public_notes=marker_in_public_notes,
+            latitude=latitude,
+            longitude=longitude,
+            positional_accuracy=positional_accuracy,
+            geoprivacy=geoprivacy,
+            approved_field_gaps=tuple(approved_field_gaps),
+            items=tuple(items),
+            marker_in_public_notes=marker_in_public_notes,
             warnings=tuple(warnings),
         )
 
     def _search_for_existing_match(
-        self, profile: Any, destination_site: str, source_inventory: InventoryObservation,
+        self,
+        profile: Any,
+        destination_site: str,
+        source_inventory: InventoryObservation,
         cancelled: Callable[[], bool],
     ) -> None:
         """Risk-prioritized pre-creation duplicate search (saga-architecture-rules
@@ -711,7 +829,10 @@ class ObservationCreationService:
                 )
 
     def _live_search_inat_destination(
-        self, profile: Any, source_inventory: InventoryObservation, cancelled: Callable[[], bool],
+        self,
+        profile: Any,
+        source_inventory: InventoryObservation,
+        cancelled: Callable[[], bool],
     ) -> None:
         """Round-5 finding 1: a DEDICATED, purpose-built duplicate search for
         the one reachable creation direction (MO->iNat) — never a reuse of
@@ -770,7 +891,9 @@ class ObservationCreationService:
         # search undetected.
         try:
             mo_binding = self.db.field_binding(profile.profile_id, "mo_url")
-        except Exception as exc:  # noqa: BLE001 - fail closed: binding load must not silently degrade
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - fail closed: binding load must not silently degrade
             raise ObservationCreationError(
                 "Could not load the required Mushroom Observer reciprocal-link field binding for "
                 f"this profile; refusing to create without confirmed reciprocal-link evidence ({exc}).",
@@ -795,7 +918,9 @@ class ObservationCreationService:
         # silently assumed complete.
         try:
             its_binding = self.db.field_binding(profile.profile_id, "its")
-        except Exception as exc:  # noqa: BLE001 - fail closed on a genuine read failure only
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - fail closed on a genuine read failure only
             raise ObservationCreationError(
                 f"Could not load the optional ITS/accession field binding for this profile; "
                 f"refusing to create without a confirmed search state ({exc}).",
@@ -811,28 +936,37 @@ class ObservationCreationService:
             if items is None:
                 raise ObservationCreationError(
                     "The destination search returned no results field; refusing to create without "
-                    "a confirmed complete search.", "duplicate_search_unavailable",
+                    "a confirmed complete search.",
+                    "duplicate_search_unavailable",
                 )
             if not isinstance(items, list):
                 raise ObservationCreationError(
                     "The destination search returned an unexpected result shape; refusing to create "
-                    "without a confirmed complete search.", "duplicate_search_unavailable",
+                    "without a confirmed complete search.",
+                    "duplicate_search_unavailable",
                 )
             for raw in items:
                 if not isinstance(raw, dict):
                     raise ObservationCreationError(
                         "The destination search returned a malformed candidate observation; refusing "
-                        "to create without a confirmed complete search.", "duplicate_search_unavailable",
+                        "to create without a confirmed complete search.",
+                        "duplicate_search_unavailable",
                     )
                 try:
-                    candidate = reader.parse_inventory(raw, profile.inat_user_id, mo_field_id, its_field_id)
-                except Exception as exc:  # noqa: BLE001 - a candidate that cannot be parsed safely fails closed
+                    candidate = reader.parse_inventory(
+                        raw, profile.inat_user_id, mo_field_id, its_field_id
+                    )
+                except (
+                    Exception
+                ) as exc:  # noqa: BLE001 - a candidate that cannot be parsed safely fails closed
                     raise ObservationCreationError(
                         f"A destination candidate observation could not be parsed safely; refusing to "
                         f"create without a confirmed complete search ({exc}).",
                         "duplicate_search_unavailable",
                     ) from exc
-                pair = score_candidate(source_inventory, candidate, explicit_review=True)
+                pair = score_candidate(
+                    source_inventory, candidate, explicit_review=True
+                )
                 if pair is not None and pair.score >= 35:
                     raise ObservationCreationError(
                         "A possible match already exists on the destination site (found by a live, "
@@ -845,7 +979,8 @@ class ObservationCreationService:
             if not isinstance(payload, dict):
                 raise ObservationCreationError(
                     "The destination search returned an unexpected response shape; refusing to "
-                    "create without a confirmed complete search.", "duplicate_search_unavailable",
+                    "create without a confirmed complete search.",
+                    "duplicate_search_unavailable",
                 )
             items = payload.get("results")
             _score_page(items)
@@ -870,7 +1005,11 @@ class ObservationCreationService:
                 if cancelled():
                     raise ReconciliationCancelled("Duplicate search cancelled")
                 payload = self.inat_client.get_creation_duplicate_search(
-                    token, user_id=profile.inat_user_id, page=page, d1=d1, d2=d2,
+                    token,
+                    user_id=profile.inat_user_id,
+                    page=page,
+                    d1=d1,
+                    d2=d2,
                 )
                 items = _validated_page(payload)
                 # Terminal condition is PROVABLE from the page shape alone
@@ -880,11 +1019,14 @@ class ObservationCreationService:
                 if not items or len(items) < 200:
                     return True
                 page += 1
-                if page > 25:  # 5,000 observations within a 60-day window is implausible; fail closed rather than give up silently
+                if (
+                    page > 25
+                ):  # 5,000 observations within a 60-day window is implausible; fail closed rather than give up silently
                     raise ObservationCreationError(
                         "Too many observations fall within the destination account's date window "
                         "to exhaustively search; refusing to create without a confirmed complete "
-                        "search.", "duplicate_search_incomplete",
+                        "search.",
+                        "duplicate_search_incomplete",
                     )
 
         def _full_account_scan() -> None:
@@ -905,7 +1047,10 @@ class ObservationCreationService:
                 if cancelled():
                     raise ReconciliationCancelled("Duplicate search cancelled")
                 payload = self.inat_client.get_creation_duplicate_search(
-                    token, user_id=profile.inat_user_id, page=1, id_above=id_above,
+                    token,
+                    user_id=profile.inat_user_id,
+                    page=1,
+                    id_above=id_above,
                 )
                 items = _validated_page(payload)
                 pages_scanned += 1
@@ -939,7 +1084,8 @@ class ObservationCreationService:
                     raise ObservationCreationError(
                         "The destination account has too many observations to exhaustively "
                         "search live before creating; refusing to create without a confirmed "
-                        "complete search.", "duplicate_search_incomplete",
+                        "complete search.",
+                        "duplicate_search_incomplete",
                     )
 
         try:
@@ -952,16 +1098,24 @@ class ObservationCreationService:
             _full_account_scan()
         except (ReconciliationCancelled, ObservationCreationError):
             raise
-        except Exception as exc:  # noqa: BLE001 - fail closed on any read/pagination failure
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - fail closed on any read/pagination failure
             raise ObservationCreationError(
                 f"Could not complete a live search of the destination account for an existing "
                 f"match; refusing to create an observation without a confirmed clean search "
-                f"({exc}).", "duplicate_search_unavailable",
+                f"({exc}).",
+                "duplicate_search_unavailable",
             ) from exc
 
     def _photo_items(
-        self, source_site: str, destination_site: str, profile: Any, raw: dict[str, Any],
-        warnings: list[str], cancelled: Callable[[], bool],
+        self,
+        source_site: str,
+        destination_site: str,
+        profile: Any,
+        raw: dict[str, Any],
+        warnings: list[str],
+        cancelled: Callable[[], bool],
     ) -> list[ObservationCreationItem]:
         """Ownership-filtered photo listing for the preview, now also
         running Gate 1E's LICENSE/COPYRIGHT-HOLDER eligibility policy
@@ -1029,7 +1183,10 @@ class ObservationCreationService:
         if source_site == "mo" and destination_site == "inat":
             from .photo_license import map_mo_license_to_inat, photo_byte_fingerprint
             from .photos import _mo_photo_snapshots
-            account_holder = self.photo_service._account_holder(profile.profile_id)  # noqa: SLF001 - deliberate, documented reuse
+
+            account_holder = self.photo_service._account_holder(
+                profile.profile_id
+            )  # noqa: SLF001 - deliberate, documented reuse
             mo_observation_id = int(raw.get("id") or 0)
             source_photos = _mo_photo_snapshots(
                 self.mo_client.images_for_observation(mo_observation_id, cancelled),
@@ -1082,25 +1239,38 @@ class ObservationCreationService:
                     # could then only ever fail, after the destination
                     # observation, links and pair already existed.
                     try:
-                        image_bytes = self.photo_service._download(photo)  # noqa: SLF001 - deliberate, documented reuse
-                    except Exception as exc:  # noqa: BLE001 - PhotoSyncError or transport failure alike: exclude, never offer
+                        image_bytes = self.photo_service._download(
+                            photo
+                        )  # noqa: SLF001 - deliberate, documented reuse
+                    except (
+                        Exception
+                    ) as exc:  # noqa: BLE001 - PhotoSyncError or transport failure alike: exclude, never offer
                         warnings.append(
                             f"MO photo {photo.photo_id} could not be downloaded for review and is "
                             f"excluded ({exc})."
                         )
                         continue
                     reviewed_byte_fingerprint = photo_byte_fingerprint(image_bytes)
-                items.append(ObservationCreationItem(
-                    item_type="photo", source_site=RemoteSite.MO, source_identity=photo.photo_id,
-                    description=f"MO photo {photo.photo_id} (license {photo.license_label or 'unknown'})",
-                    metadata_fingerprint=public_fingerprint(photo.photo_id, photo.license_label, photo.copyright_holder),
-                    source_url=photo.source_url, license_label=photo.license_label,
-                    copyright_holder=photo.copyright_holder,
-                    reviewed_byte_fingerprint=reviewed_byte_fingerprint,
-                    enabled=not disabled_reason, disabled_reason=disabled_reason,
-                ))
+                items.append(
+                    ObservationCreationItem(
+                        item_type="photo",
+                        source_site=RemoteSite.MO,
+                        source_identity=photo.photo_id,
+                        description=f"MO photo {photo.photo_id} (license {photo.license_label or 'unknown'})",
+                        metadata_fingerprint=public_fingerprint(
+                            photo.photo_id, photo.license_label, photo.copyright_holder
+                        ),
+                        source_url=photo.source_url,
+                        license_label=photo.license_label,
+                        copyright_holder=photo.copyright_holder,
+                        reviewed_byte_fingerprint=reviewed_byte_fingerprint,
+                        enabled=not disabled_reason,
+                        disabled_reason=disabled_reason,
+                    )
+                )
         else:
             from .photos import _inat_photo_snapshots
+
             photos = _inat_photo_snapshots(raw, int(raw.get("id") or 0))
             if photos:
                 warnings.append(
@@ -1113,22 +1283,33 @@ class ObservationCreationService:
     # Execution ------------------------------------------------------------
 
     def execute_group(
-        self, profile_id: int, group_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        group_id: int,
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> list[Any]:
         rows = self.db.action_group_rows(profile_id, group_id)
         if not rows:
-            raise ObservationCreationError("The creation journal group is empty.", "empty_group")
+            raise ObservationCreationError(
+                "The creation journal group is empty.", "empty_group"
+            )
         create_row = rows[0]
         create_state = str(create_row["state"])
         results: list[Any] = []
         if create_state == "outcome_unknown":
-            results.append(self.verify_unknown(profile_id, int(create_row["action_id"]), cancelled))
-            create_row = self.db.action(profile_id, int(create_row["action_id"])) or create_row
+            results.append(
+                self.verify_unknown(profile_id, int(create_row["action_id"]), cancelled)
+            )
+            create_row = (
+                self.db.action(profile_id, int(create_row["action_id"])) or create_row
+            )
             create_state = str(create_row["state"])
         elif create_state == "pending":
             results.append(self._execute_create(create_row, cancelled, progress))
-            create_row = self.db.action(profile_id, int(create_row["action_id"])) or create_row
+            create_row = (
+                self.db.action(profile_id, int(create_row["action_id"])) or create_row
+            )
             create_state = str(create_row["state"])
         elif create_state == "running":
             # Round-8 review finding: a create row left 'running' by a crash or
@@ -1139,12 +1320,15 @@ class ObservationCreationService:
             # create write may or may not have been sent — that is precisely
             # what verify_unknown exists to settle), so say so explicitly
             # instead of failing silently.
-            results.append(ObservationCreationResult(
-                int(create_row["action_id"]), "running",
-                "This creation is recorded as still running (the app most likely stopped mid-write). "
-                "It cannot be retried automatically, because a second create could duplicate an "
-                "observation that already exists — verify this action to resolve it.",
-            ))
+            results.append(
+                ObservationCreationResult(
+                    int(create_row["action_id"]),
+                    "running",
+                    "This creation is recorded as still running (the app most likely stopped mid-write). "
+                    "It cannot be retried automatically, because a second create could duplicate an "
+                    "observation that already exists — verify this action to resolve it.",
+                )
+            )
         if create_state != "succeeded":
             return results
 
@@ -1159,10 +1343,14 @@ class ObservationCreationService:
         # provisional pair; running population only after finalize succeeds
         # means the existing, unmodified confirmed-pair services never see a
         # provisional pair at all.
-        link_results = self._execute_link_and_finalize(profile_id, group_id, mo_id, inat_id, cancelled, progress)
+        link_results = self._execute_link_and_finalize(
+            profile_id, group_id, mo_id, inat_id, cancelled, progress
+        )
         results.extend(link_results)
         rows = self.db.action_group_rows(profile_id, group_id)
-        finalize_row = next((r for r in rows if str(r["action_type"]) == "pair_finalize"), None)
+        finalize_row = next(
+            (r for r in rows if str(r["action_type"]) == "pair_finalize"), None
+        )
         if finalize_row is None or str(finalize_row["state"]) != "succeeded":
             return results
 
@@ -1171,12 +1359,20 @@ class ObservationCreationService:
         # terminal state), and a preparation failure now stops the tail
         # immediately with a real, durable action row — see
         # _execute_population_items's docstring.
-        results.extend(self._execute_population_items(profile_id, group_id, create_row, cancelled, progress))
+        results.extend(
+            self._execute_population_items(
+                profile_id, group_id, create_row, cancelled, progress
+            )
+        )
         return results
 
     def _execute_followup_row(
-        self, profile_id: int, group_id: int, row: dict[str, Any],
-        cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        profile_id: int,
+        group_id: int,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> Any:
         action_type = str(row["action_type"])
         action_id = int(row["action_id"])
@@ -1190,24 +1386,40 @@ class ObservationCreationService:
         if str(row["state"]) == "outcome_unknown":
             try:
                 if action_type == PhotoActionType.INAT_PHOTO_ATTACH.value:
-                    result = self.photo_service.verify_unknown(profile_id, action_id, cancelled)
-                elif action_type in (PhotoActionType.MO_PHOTO_ATTACH.value, "pair_finalize"):
+                    result = self.photo_service.verify_unknown(
+                        profile_id, action_id, cancelled
+                    )
+                elif action_type in (
+                    PhotoActionType.MO_PHOTO_ATTACH.value,
+                    "pair_finalize",
+                ):
                     # Neither type can legitimately reach outcome_unknown:
                     # mo_photo_attach is rejected before any write, and
                     # pair_finalize makes no ambiguous remote write (it is a
                     # local decision after re-reading both sides). Report
                     # rather than silently no-op if one somehow does.
                     return ObservationCreationResult(
-                        action_id, "outcome_unknown",
+                        action_id,
+                        "outcome_unknown",
                         f"'{action_type}' rows do not have a verify_unknown recovery path.",
                     )
                 else:
-                    result = self.link_service.verify_unknown(profile_id, action_id, cancelled)
+                    result = self.link_service.verify_unknown(
+                        profile_id, action_id, cancelled
+                    )
                 if result.state != "outcome_unknown":
-                    self._settle_creation_item(profile_id, group_id, action_id, result.state)
-                return ObservationCreationResult(action_id, result.state, result.message)
-            except Exception as exc:  # noqa: BLE001 - a recovery READ failing is never itself a write
-                return ObservationCreationResult(action_id, "outcome_unknown", str(exc)[:200])
+                    self._settle_creation_item(
+                        profile_id, group_id, action_id, result.state
+                    )
+                return ObservationCreationResult(
+                    action_id, result.state, result.message
+                )
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - a recovery READ failing is never itself a write
+                return ObservationCreationResult(
+                    action_id, "outcome_unknown", str(exc)[:200]
+                )
         try:
             if action_type == PhotoActionType.MO_PHOTO_ATTACH.value:
                 # No working executor: PhotoSyncService._write is hardcoded
@@ -1218,23 +1430,37 @@ class ObservationCreationService:
                 # misdirect the write. PhotoSyncService._execute has its own
                 # identical, independent guard as a second backstop.
                 self.db.finish_action(
-                    profile_id, int(row["action_id"]), "failed", phase="preview",
+                    profile_id,
+                    int(row["action_id"]),
+                    "failed",
+                    phase="preview",
                     error_code="unsupported_photo_direction",
                 )
                 result = ObservationCreationResult(
-                    int(row["action_id"]), "failed",
+                    int(row["action_id"]),
+                    "failed",
                     "iNaturalist->Mushroom Observer photo transfer is not supported; no network "
                     "request was made.",
                 )
             elif action_type == PhotoActionType.INAT_PHOTO_ATTACH.value:
-                result = self.photo_service._execute(row, cancelled, progress)  # noqa: SLF001 - deliberate, documented reuse
+                result = self.photo_service._execute(
+                    row, cancelled, progress
+                )  # noqa: SLF001 - deliberate, documented reuse
             elif action_type == "pair_finalize":
                 result = self._execute_pair_finalize(row, cancelled, progress)
             else:
-                result = self.link_service._execute_action(profile_id, row, cancelled, progress)  # noqa: SLF001
-            self._settle_creation_item(profile_id, group_id, int(row["action_id"]), result.state)
-            return ObservationCreationResult(int(row["action_id"]), result.state, result.message)
-        except Exception as exc:  # noqa: BLE001 - surfaced as a failed/blocked row, never silently swallowed
+                result = self.link_service._execute_action(
+                    profile_id, row, cancelled, progress
+                )  # noqa: SLF001
+            self._settle_creation_item(
+                profile_id, group_id, int(row["action_id"]), result.state
+            )
+            return ObservationCreationResult(
+                int(row["action_id"]), result.state, result.message
+            )
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - surfaced as a failed/blocked row, never silently swallowed
             # Finding 10: an unexpected exception (network error, parsing
             # failure, ...) that happens AFTER the owning service already
             # sent the remote write must never be reported as a definitive,
@@ -1259,17 +1485,28 @@ class ObservationCreationService:
             settled_state = str(current.get("state") or "")
             if settled_state in {"succeeded", "failed", "cancelled", "outcome_unknown"}:
                 return ObservationCreationResult(
-                    int(row["action_id"]), settled_state,
+                    int(row["action_id"]),
+                    settled_state,
                     f"The action finished as '{settled_state}', but recording its creation-item "
                     f"bookkeeping failed: {exc}",
                 )
             ambiguous = bool(current.get("write_started_at"))
             state = "outcome_unknown" if ambiguous else "failed"
-            self.db.finish_action(profile_id, int(row["action_id"]), state, phase="unsafe_write", error_code=str(exc)[:80])
+            self.db.finish_action(
+                profile_id,
+                int(row["action_id"]),
+                state,
+                phase="unsafe_write",
+                error_code=str(exc)[:80],
+            )
             return ObservationCreationResult(int(row["action_id"]), state, str(exc))
 
     def _settle_creation_item(
-        self, profile_id: int, group_id: int, action_id: int, action_state: str,
+        self,
+        profile_id: int,
+        group_id: int,
+        action_id: int,
+        action_state: str,
     ) -> None:
         """Mirror a finished action's outcome onto its ``sync_creation_items``
         row, if it has one (reciprocal-link and pair_finalize rows do not).
@@ -1297,9 +1534,13 @@ class ObservationCreationService:
             # try block (and with it the action's own settled outcome); leave
             # the item pending for a resume to re-evaluate.
             return
-        self.db.finish_creation_item(profile_id, int(item["creation_item_id"]), item_state)
+        self.db.finish_creation_item(
+            profile_id, int(item["creation_item_id"]), item_state
+        )
 
-    def _creation_item_for_action(self, profile_id: int, group_id: int, action_id: int) -> Optional[dict[str, Any]]:
+    def _creation_item_for_action(
+        self, profile_id: int, group_id: int, action_id: int
+    ) -> Optional[dict[str, Any]]:
         ledger = self.db.creation_ledger_for_group(profile_id, group_id)
         if not ledger:
             return None
@@ -1309,17 +1550,34 @@ class ObservationCreationService:
         return None
 
     def _execute_create(
-        self, row: dict[str, Any], cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> ObservationCreationResult:
         profile_id = int(row["profile_id"])
         action_id = int(row["action_id"])
         if not self.db.claim_action(profile_id, action_id, "resource_preflight"):
             current = self.db.action(profile_id, action_id) or row
-            return ObservationCreationResult(action_id, str(current["state"]), "This creation action is no longer pending.")
-        ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
+            return ObservationCreationResult(
+                action_id,
+                str(current["state"]),
+                "This creation action is no longer pending.",
+            )
+        ledger = self.db.creation_ledger_for_group(
+            profile_id, int(row["action_group_id"])
+        )
         if not ledger:
-            self.db.finish_action(profile_id, action_id, "failed", phase="resource_preflight", error_code="missing_ledger")
-            return ObservationCreationResult(action_id, "failed", "The creation ledger row is missing.")
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                "failed",
+                phase="resource_preflight",
+                error_code="missing_ledger",
+            )
+            return ObservationCreationResult(
+                action_id, "failed", "The creation ledger row is missing."
+            )
         destination_site = str(row["site"])
         source_site = str(row["source_site"])
         source_observation_id = int(row["source_record_id"])
@@ -1336,27 +1594,42 @@ class ObservationCreationService:
             # journal_observation_creation_actions itself performed at
             # journal time — never trusted as still true just because it was
             # true once.
-            record = self.db.record_detail(profile_id, source_site, source_observation_id)
-            expected_state = "confirmed_missing_on_mo" if destination_site == "mo" else "confirmed_missing_on_inat"
+            record = self.db.record_detail(
+                profile_id, source_site, source_observation_id
+            )
+            expected_state = (
+                "confirmed_missing_on_mo"
+                if destination_site == "mo"
+                else "confirmed_missing_on_inat"
+            )
             if not record or str(record.get("unpaired_state")) != expected_state:
                 raise ObservationCreationError(
                     "This record is no longer confirmed missing on the destination site; nothing "
-                    "was created. Request a fresh preview.", "not_confirmed_missing",
+                    "was created. Request a fresh preview.",
+                    "not_confirmed_missing",
                 )
             current_source_fingerprint = public_fingerprint(
-                "record", source_site, source_observation_id,
-                record.get("unpaired_state"), record.get("remote_updated_at") or record.get("last_seen_at"),
+                "record",
+                source_site,
+                source_observation_id,
+                record.get("unpaired_state"),
+                record.get("remote_updated_at") or record.get("last_seen_at"),
             )
-            if current_source_fingerprint != str(ledger.get("source_fingerprint") or ""):
+            if current_source_fingerprint != str(
+                ledger.get("source_fingerprint") or ""
+            ):
                 raise ObservationCreationError(
                     "The source record changed since this attempt was reviewed; nothing was "
-                    "created. Request a fresh preview.", "source_changed",
+                    "created. Request a fresh preview.",
+                    "source_changed",
                 )
             # Re-fetch and re-derive the fields fresh, immediately before the
             # write — never trust values cached since the (possibly much
             # earlier) preview. Mirrors Gate 1E's "no race between review and
             # write" discipline.
-            raw, inventory, hydrated = self._fetch_source(profile, source_site, source_observation_id, cancelled)
+            raw, inventory, hydrated = self._fetch_source(
+                profile, source_site, source_observation_id, cancelled
+            )
             # Finding 3 (round 2) / finding 1 (round 4): re-run the duplicate
             # search immediately before the write, not only once at preview
             # time — a plausible destination match created since preview
@@ -1365,8 +1638,12 @@ class ObservationCreationService:
             # destination), not the local inventory cache; fails closed on
             # any read/pagination failure exactly as the preview-time call
             # does.
-            self._search_for_existing_match(profile, destination_site, inventory, cancelled)
-            fields = self._derive_creation_fields(source_site, destination_site, raw, inventory, hydrated)
+            self._search_for_existing_match(
+                profile, destination_site, inventory, cancelled
+            )
+            fields = self._derive_creation_fields(
+                source_site, destination_site, raw, inventory, hydrated
+            )
             if destination_site == "inat":
                 # Section 5: the create request must use the STORED reviewed
                 # taxon id, never a freshly recomputed one. _derive_creation_
@@ -1380,17 +1657,20 @@ class ObservationCreationService:
                 if pinned_taxon_id is None:
                     raise ObservationCreationError(
                         "This attempt has no pinned reviewed taxon on record; refusing to create "
-                        "with a taxon that was never durably reviewed.", "taxon_not_pinned",
+                        "with a taxon that was never durably reviewed.",
+                        "taxon_not_pinned",
                     )
                 if (
                     inventory.taxon_name != str(ledger["reviewed_source_taxon_name"])
-                    or fields["taxon_resolution_fingerprint"] != str(ledger["taxon_resolution_fingerprint"])
+                    or fields["taxon_resolution_fingerprint"]
+                    != str(ledger["taxon_resolution_fingerprint"])
                     or fields["taxon_id"] != int(pinned_taxon_id)
                 ):
                     raise ObservationCreationError(
                         "The source taxon has changed (or its resolution/availability has changed) "
                         "since this attempt was reviewed. Nothing was created; request a fresh "
-                        "preview.", "taxon_drift",
+                        "preview.",
+                        "taxon_drift",
                     )
                 fields = dict(fields)
                 fields["taxon_id"] = int(pinned_taxon_id)
@@ -1403,17 +1683,21 @@ class ObservationCreationService:
             # nobody reviewed. Recompute the same payload fingerprint fresh
             # and require an exact match against what was pinned at journal
             # time.
-            pinned_payload_fingerprint = str(ledger.get("reviewed_payload_fingerprint") or "")
+            pinned_payload_fingerprint = str(
+                ledger.get("reviewed_payload_fingerprint") or ""
+            )
             if not pinned_payload_fingerprint:
                 raise ObservationCreationError(
                     "This attempt has no pinned reviewed payload on record; refusing to create "
-                    "from a proposal that was never durably reviewed.", "payload_not_pinned",
+                    "from a proposal that was never durably reviewed.",
+                    "payload_not_pinned",
                 )
             if fields["reviewed_payload_fingerprint"] != pinned_payload_fingerprint:
                 raise ObservationCreationError(
                     "The reviewed observed date, locality, coordinates, description, or attribution "
                     "changed since this attempt was reviewed. Nothing was created; request a fresh "
-                    "preview.", "payload_drift",
+                    "preview.",
+                    "payload_drift",
                 )
             # Finding 4: prove the credential context, not just that a token
             # exists. A token that authenticates but belongs to a DIFFERENT
@@ -1424,9 +1708,16 @@ class ObservationCreationService:
                 auth = self.auth_provider()
                 token = auth.api_token if auth.is_authenticated else ""
                 if not token:
-                    raise ObservationCreationError("iNaturalist authentication is required.", "inat_auth_missing")
-                current_user = _first_result(self.inat_client.get_current_user_v2(token))
-                if positive_int(current_user.get("id") if current_user else None) != profile.inat_user_id:
+                    raise ObservationCreationError(
+                        "iNaturalist authentication is required.", "inat_auth_missing"
+                    )
+                current_user = _first_result(
+                    self.inat_client.get_current_user_v2(token)
+                )
+                if (
+                    positive_int(current_user.get("id") if current_user else None)
+                    != profile.inat_user_id
+                ):
                     raise ObservationCreationError(
                         "The authenticated iNaturalist account does not match the profile.",
                         "inat_auth_mismatch",
@@ -1434,7 +1725,8 @@ class ObservationCreationService:
             else:
                 if not self.mo_key_provider(profile.profile_id):
                     raise ObservationCreationError(
-                        "Mushroom Observer credentials are required.", "mo_key_missing",
+                        "Mushroom Observer credentials are required.",
+                        "mo_key_missing",
                     )
             progress(f"Creation action {action_id}: sending the create request")
             if not self.db.mark_action_write_started(profile_id, action_id):
@@ -1445,7 +1737,8 @@ class ObservationCreationService:
                 )
             if destination_site == "inat":
                 payload = self.inat_client.create_observation_v2(
-                    token, client_uuid=str(ledger["correlation_marker"]),
+                    token,
+                    client_uuid=str(ledger["correlation_marker"]),
                     taxon_id=fields["taxon_id"],
                     # Round-4 finding 9: species_guess must agree with the
                     # explicit taxon_id above, never the raw, possibly
@@ -1456,33 +1749,64 @@ class ObservationCreationService:
                     # identities at once. Use the PINNED resolved name
                     # (reviewed at journal time, same source as taxon_id
                     # above), never a freshly recomputed one.
-                    species_guess=str(ledger["reviewed_destination_taxon_name"] or "") or None,
+                    species_guess=str(ledger["reviewed_destination_taxon_name"] or "")
+                    or None,
                     observed_on_string=fields["observed_on_string"] or None,
                     place_guess=fields["place_guess"] or None,
                     description=fields["description"] or None,
-                    latitude=fields["latitude"], longitude=fields["longitude"],
+                    latitude=fields["latitude"],
+                    longitude=fields["longitude"],
                     positional_accuracy=fields["positional_accuracy"],
                     geoprivacy=fields["geoprivacy"] or None,
                 )
                 created = _first_result(payload)
                 destination_id = positive_int(created.get("id")) if created else None
                 destination_uuid = str(created.get("uuid") or "") if created else ""
-                if not destination_id or destination_uuid != str(ledger["correlation_marker"]):
-                    self.db.finish_action(profile_id, action_id, "outcome_unknown", phase="unsafe_write", error_code="unconfirmed_create_response")
-                    self.db.finish_creation_attempt(profile_id, int(ledger["attempt_id"]), "outcome_unknown")
-                    return ObservationCreationResult(action_id, "outcome_unknown", "The create response was not conclusive; verify before retrying.")
+                if not destination_id or destination_uuid != str(
+                    ledger["correlation_marker"]
+                ):
+                    self.db.finish_action(
+                        profile_id,
+                        action_id,
+                        "outcome_unknown",
+                        phase="unsafe_write",
+                        error_code="unconfirmed_create_response",
+                    )
+                    self.db.finish_creation_attempt(
+                        profile_id, int(ledger["attempt_id"]), "outcome_unknown"
+                    )
+                    return ObservationCreationResult(
+                        action_id,
+                        "outcome_unknown",
+                        "The create response was not conclusive; verify before retrying.",
+                    )
             else:
                 notes = fields["description"] or ""
                 marker = str(ledger["correlation_marker"])
                 notes = f"{notes}\n\n{marker}".strip() if notes else marker
-                destination_id, destination_uuid = self._create_and_locate_mo_observation(
-                    profile, ledger, fields, notes, cancelled,
+                destination_id, destination_uuid = (
+                    self._create_and_locate_mo_observation(
+                        profile,
+                        ledger,
+                        fields,
+                        notes,
+                        cancelled,
+                    )
                 )
                 if destination_id is None:
-                    self.db.finish_action(profile_id, action_id, "outcome_unknown", phase="unsafe_write", error_code="mo_id_not_yet_located")
-                    self.db.finish_creation_attempt(profile_id, int(ledger["attempt_id"]), "outcome_unknown")
+                    self.db.finish_action(
+                        profile_id,
+                        action_id,
+                        "outcome_unknown",
+                        phase="unsafe_write",
+                        error_code="mo_id_not_yet_located",
+                    )
+                    self.db.finish_creation_attempt(
+                        profile_id, int(ledger["attempt_id"]), "outcome_unknown"
+                    )
                     return ObservationCreationResult(
-                        action_id, "outcome_unknown",
+                        action_id,
+                        "outcome_unknown",
                         "The Mushroom Observer create request was sent, but the new observation could "
                         "not yet be located by its marker. Verify before retrying — a retry could "
                         "create a duplicate that Mushroom Observer will not deduplicate.",
@@ -1492,21 +1816,48 @@ class ObservationCreationService:
             # across the action group, and the provisional pair — never
             # several separate statements a crash could interrupt partway.
             self.db.settle_creation_write_success(
-                profile_id, action_id, int(ledger["attempt_id"]), int(ledger["creation_id"]),
-                int(row["action_group_id"]), destination_site=destination_site,
-                destination_id=destination_id, destination_uuid=destination_uuid,
+                profile_id,
+                action_id,
+                int(ledger["attempt_id"]),
+                int(ledger["creation_id"]),
+                int(row["action_group_id"]),
+                destination_site=destination_site,
+                destination_id=destination_id,
+                destination_uuid=destination_uuid,
                 source_record_id=int(row["source_record_id"]),
             )
-            return ObservationCreationResult(action_id, "succeeded", f"Created destination observation {destination_id}.")
+            return ObservationCreationResult(
+                action_id,
+                "succeeded",
+                f"Created destination observation {destination_id}.",
+            )
         except ReconciliationCancelled:
-            self.db.finish_action(profile_id, action_id, "cancelled", phase="preview", error_code="user_cancelled")
-            self.db.finish_creation_attempt(profile_id, int(ledger["attempt_id"]), "cancelled")
-            return ObservationCreationResult(action_id, "cancelled", "Cancelled before the create request was sent.")
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="preview",
+                error_code="user_cancelled",
+            )
+            self.db.finish_creation_attempt(
+                profile_id, int(ledger["attempt_id"]), "cancelled"
+            )
+            return ObservationCreationResult(
+                action_id, "cancelled", "Cancelled before the create request was sent."
+            )
         except (INatAPIError, MOAPIError, ObservationCreationError) as exc:
             outcome_unknown = bool(getattr(exc, "outcome_unknown", False))
             state = "outcome_unknown" if outcome_unknown else "failed"
-            self.db.finish_action(profile_id, action_id, state, phase="unsafe_write", error_code=str(exc)[:80])
-            self.db.finish_creation_attempt(profile_id, int(ledger["attempt_id"]), state)
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                state,
+                phase="unsafe_write",
+                error_code=str(exc)[:80],
+            )
+            self.db.finish_creation_attempt(
+                profile_id, int(ledger["attempt_id"]), state
+            )
             return ObservationCreationResult(action_id, state, str(exc))
         except Exception as exc:  # noqa: BLE001 - round-4 finding 3: never let an
             # unexpected exception (response-parsing failure, a missing
@@ -1522,12 +1873,26 @@ class ObservationCreationService:
             # failure that occurred before any write is safely 'failed'.
             current = self.db.action(profile_id, action_id) or row
             state = "outcome_unknown" if current.get("write_started_at") else "failed"
-            self.db.finish_action(profile_id, action_id, state, phase="unsafe_write", error_code=str(exc)[:80])
-            self.db.finish_creation_attempt(profile_id, int(ledger["attempt_id"]), state)
-            return ObservationCreationResult(action_id, state, f"Unexpected error: {exc}")
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                state,
+                phase="unsafe_write",
+                error_code=str(exc)[:80],
+            )
+            self.db.finish_creation_attempt(
+                profile_id, int(ledger["attempt_id"]), state
+            )
+            return ObservationCreationResult(
+                action_id, state, f"Unexpected error: {exc}"
+            )
 
     def _create_and_locate_mo_observation(
-        self, profile: Any, ledger: dict[str, Any], fields: dict[str, Any], notes: str,
+        self,
+        profile: Any,
+        ledger: dict[str, Any],
+        fields: dict[str, Any],
+        notes: str,
         cancelled: Callable[[], bool],
     ) -> tuple[Optional[int], str]:
         """MO's create response never carries a usable id (live-proven,
@@ -1535,19 +1900,28 @@ class ObservationCreationService:
         create, on the happy path, not only on an ambiguous outcome."""
         mo_key = self.mo_key_provider(profile.profile_id)
         self.mo_client.create_observation(
-            mo_key, cancelled,
-            date=fields["observed_on_string"] or "", name=fields["taxon_name"] or "",
-            location=fields["place_guess"] or "", notes=notes,
-            latitude=fields["latitude"], longitude=fields["longitude"],
+            mo_key,
+            cancelled,
+            date=fields["observed_on_string"] or "",
+            name=fields["taxon_name"] or "",
+            location=fields["place_guess"] or "",
+            notes=notes,
+            latitude=fields["latitude"],
+            longitude=fields["longitude"],
             gps_hidden=fields["gps_hidden"],
         )
         try:
             found = self.mo_client.find_observation_by_marker(
-                mo_key, str(ledger["correlation_marker"]), cancelled, user_id=profile.mo_user_id,
+                mo_key,
+                str(ledger["correlation_marker"]),
+                cancelled,
+                user_id=profile.mo_user_id,
             )
         except ReconciliationCancelled:
             raise
-        except Exception:  # noqa: BLE001 - section 8: a search failure is never a second write
+        except (
+            Exception
+        ):  # noqa: BLE001 - section 8: a search failure is never a second write
             # The create write above already happened and is NOT retried here.
             # A failure of the FOLLOW-UP SEARCH proves nothing about whether
             # that create succeeded — it must never be conflated with an
@@ -1556,12 +1930,18 @@ class ObservationCreationService:
             # outcome_unknown path as a clean-but-empty search result, below.
             return None, ""
         from .mo_client import results_from_payload
+
         rows = results_from_payload(found)
-        destination_id = self._require_unambiguous_mo_match(rows, profile.mo_user_id, str(ledger["correlation_marker"]))
+        destination_id = self._require_unambiguous_mo_match(
+            rows, profile.mo_user_id, str(ledger["correlation_marker"])
+        )
         return destination_id, ""
 
     def _require_unambiguous_mo_match(
-        self, rows: list[dict[str, Any]], expected_owner_id: int, expected_marker: str = "",
+        self,
+        rows: list[dict[str, Any]],
+        expected_owner_id: int,
+        expected_marker: str = "",
     ) -> Optional[int]:
         """Finding 7 (round 2): never resolve a marker search by blindly
         taking the first result. The marker search is already server-side
@@ -1581,7 +1961,11 @@ class ObservationCreationService:
         is unsupported — see the module docstring); fixed as scaffolding so
         it fails safely if that direction is ever built out.
         """
-        owned = [r for r in rows if positive_int((r.get("owner") or {}).get("id")) == expected_owner_id]
+        owned = [
+            r
+            for r in rows
+            if positive_int((r.get("owner") or {}).get("id")) == expected_owner_id
+        ]
         if len(owned) != 1:
             return None
         candidate = owned[0]
@@ -1590,30 +1974,55 @@ class ObservationCreationService:
         return positive_int(candidate.get("id"))
 
     def _execute_pair_finalize(
-        self, row: dict[str, Any], cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> ObservationCreationResult:
         profile_id = int(row["profile_id"])
         action_id = int(row["action_id"])
         if not self.db.claim_action(profile_id, action_id, "verification"):
             current = self.db.action(profile_id, action_id) or row
-            return ObservationCreationResult(action_id, str(current["state"]), "Finalize is no longer pending.")
+            return ObservationCreationResult(
+                action_id, str(current["state"]), "Finalize is no longer pending."
+            )
         progress(f"Finalize action {action_id}: verifying the completed saga")
         try:
-            ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
+            ledger = self.db.creation_ledger_for_group(
+                profile_id, int(row["action_group_id"])
+            )
             pair_id = int(row["pair_id"])
-            approved_gaps = set(json.loads(str(ledger["approved_field_gaps"] or "[]"))) if ledger else set()
-            pair = self.db.pair_detail(profile_id, pair_id) if hasattr(self.db, "pair_detail") else None
+            approved_gaps = (
+                set(json.loads(str(ledger["approved_field_gaps"] or "[]")))
+                if ledger
+                else set()
+            )
+            pair = (
+                self.db.pair_detail(profile_id, pair_id)
+                if hasattr(self.db, "pair_detail")
+                else None
+            )
             profile = self.db.profile(profile_id)
             from .inat_reader import INatReconciliationReader
             from .specimen_state import evaluate_specimen_state
+
             auth = self.auth_provider()
             token = auth.api_token if auth.is_authenticated else ""
             inat_detail = _first_result(
-                self.inat_client.get_reconciliation_detail(int(row["inat_observation_id"]), token, deep=True)
+                self.inat_client.get_reconciliation_detail(
+                    int(row["inat_observation_id"]), token, deep=True
+                )
             )
-            mo_detail = _first_result(self.mo_client.observation(int(row["mo_observation_id"]), cancelled, detail="high"))
+            mo_detail = _first_result(
+                self.mo_client.observation(
+                    int(row["mo_observation_id"]), cancelled, detail="high"
+                )
+            )
             if not inat_detail or not mo_detail:
-                raise ObservationCreationError("The finalized pair could not be re-read on both sites.", "finalize_reread_failed")
+                raise ObservationCreationError(
+                    "The finalized pair could not be re-read on both sites.",
+                    "finalize_reread_failed",
+                )
             # Section 5/11: evaluate_specimen_state never compares taxon
             # identity between the two records at all (it only checks fungal
             # SCOPE, owner, date, vouchers, coordinates) — without this
@@ -1631,8 +2040,14 @@ class ObservationCreationService:
             # reviewed.
             if ledger and str(ledger["destination_site"]) == "inat":
                 expected_taxon_id = ledger["reviewed_destination_taxon_id"]
-                actual_taxon = inat_detail.get("taxon") if isinstance(inat_detail.get("taxon"), dict) else None
-                actual_taxon_id = positive_int(actual_taxon.get("id")) if actual_taxon else None
+                actual_taxon = (
+                    inat_detail.get("taxon")
+                    if isinstance(inat_detail.get("taxon"), dict)
+                    else None
+                )
+                actual_taxon_id = (
+                    positive_int(actual_taxon.get("id")) if actual_taxon else None
+                )
                 if expected_taxon_id is None:
                     raise ObservationCreationError(
                         "This attempt has no pinned reviewed taxon on record; finalize refuses to "
@@ -1642,7 +2057,8 @@ class ObservationCreationService:
                 if actual_taxon_id != int(expected_taxon_id):
                     raise ObservationCreationError(
                         "Final verification found the created iNaturalist observation's taxon does "
-                        "not match the reviewed taxon.", "finalize_taxon_mismatch",
+                        "not match the reviewed taxon.",
+                        "finalize_taxon_mismatch",
                     )
             # evaluate_specimen_state re-parses mo_detail fresh via its own
             # parse_mo_observation call, and MO's observation payload carries no
@@ -1662,15 +2078,28 @@ class ObservationCreationService:
             # single creation saga, 100% of the time. All other fields (link_state,
             # updated_at, exclusion status) still come from the real persisted row
             # so those checks stay meaningful.
-            pair_row = dict(pair) if pair else {
-                "pair_id": pair_id, "mo_observation_id": int(row["mo_observation_id"]),
-                "inat_observation_id": int(row["inat_observation_id"]),
-                "link_state": "", "updated_at": "",
-            }
+            pair_row = (
+                dict(pair)
+                if pair
+                else {
+                    "pair_id": pair_id,
+                    "mo_observation_id": int(row["mo_observation_id"]),
+                    "inat_observation_id": int(row["inat_observation_id"]),
+                    "link_state": "",
+                    "updated_at": "",
+                }
+            )
             pair_row["review_state"] = "confirmed"
             message, _fp, _warnings = evaluate_specimen_state(
-                self.db, profile, pair_row, inat_detail, mo_detail, reader,
-                mo_client=self.mo_client, cancelled=cancelled, include_coordinates=True,
+                self.db,
+                profile,
+                pair_row,
+                inat_detail,
+                mo_detail,
+                reader,
+                mo_client=self.mo_client,
+                cancelled=cancelled,
+                include_coordinates=True,
             )
             if message:
                 # Expected-gap tolerance (saga-architecture-rules rule 7): each
@@ -1684,7 +2113,9 @@ class ObservationCreationService:
                 for gap in approved_gaps:
                     tolerated_reasons.update(_GAP_TOLERATED_REASONS.get(gap, ()))
                 unresolved = [
-                    reason for reason in message.split("; ") if reason not in tolerated_reasons
+                    reason
+                    for reason in message.split("; ")
+                    if reason not in tolerated_reasons
                 ]
                 if unresolved:
                     raise ObservationCreationError(
@@ -1699,16 +2130,23 @@ class ObservationCreationService:
             # finalize action stayed 'running' forever, with no way for a
             # resume to tell what had actually completed.
             settled = self.db.settle_pair_finalize_success(
-                profile_id, action_id, int(row["action_group_id"]), pair_id,
-                mo_observation_id=int(row["mo_observation_id"]), inat_observation_id=int(row["inat_observation_id"]),
+                profile_id,
+                action_id,
+                int(row["action_group_id"]),
+                pair_id,
+                mo_observation_id=int(row["mo_observation_id"]),
+                inat_observation_id=int(row["inat_observation_id"]),
             )
             if not settled:
                 raise ObservationCreationError(
                     "The provisional pair could not be promoted (it no longer matches, is excluded, "
                     "or another confirmed pair already claims one of these records) — resolve the "
-                    "conflict manually.", "finalize_promote_conflict",
+                    "conflict manually.",
+                    "finalize_promote_conflict",
                 )
-            return ObservationCreationResult(action_id, "succeeded", "Creation saga complete; the pair is confirmed.")
+            return ObservationCreationResult(
+                action_id, "succeeded", "Creation saga complete; the pair is confirmed."
+            )
         except ObservationCreationError as exc:
             # Round-8 review finding: separate a DETERMINISTIC refusal from a
             # TRANSIENT one. A taxon mismatch, an unexpected specimen conflict
@@ -1721,28 +2159,50 @@ class ObservationCreationService:
             # ReconciliationDB.release_finalize_action_to_pending). Finalize
             # performs no remote write, so returning it to 'pending' is always
             # safe.
-            if exc.code in _RETRYABLE_FINALIZE_CODES and self.db.release_finalize_action_to_pending(
-                profile_id, action_id,
+            if (
+                exc.code in _RETRYABLE_FINALIZE_CODES
+                and self.db.release_finalize_action_to_pending(
+                    profile_id,
+                    action_id,
+                )
             ):
                 return ObservationCreationResult(
-                    action_id, "pending",
+                    action_id,
+                    "pending",
                     f"{exc} Finalize was not completed and remains pending — resume this creation "
                     "to try again (nothing was written remotely).",
                 )
-            self.db.finish_action(profile_id, action_id, "failed", phase="verification", error_code=exc.code)
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
+                error_code=exc.code,
+            )
             return ObservationCreationResult(action_id, "failed", str(exc))
         except ReconciliationCancelled:
             # Cancelling a step that makes no remote write should leave it
             # retryable, not burn the only chance to finish the saga.
             if self.db.release_finalize_action_to_pending(profile_id, action_id):
                 return ObservationCreationResult(
-                    action_id, "pending",
+                    action_id,
+                    "pending",
                     "Cancelled before finalize completed; it remains pending — resume this creation "
                     "to finish it (nothing was written remotely).",
                 )
-            self.db.finish_action(profile_id, action_id, "cancelled", phase="verification", error_code="user_cancelled")
-            return ObservationCreationResult(action_id, "cancelled", "Cancelled before finalize completed.")
-        except Exception as exc:  # noqa: BLE001 - finding 13: never leave this row stuck
+            self.db.finish_action(
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="verification",
+                error_code="user_cancelled",
+            )
+            return ObservationCreationResult(
+                action_id, "cancelled", "Cancelled before finalize completed."
+            )
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - finding 13: never leave this row stuck
             # 'running' forever. pair_finalize performs no remote write of its
             # own (it only rereads both sides and makes a local
             # promote-or-not decision), so nothing here is ever ambiguous and
@@ -1754,18 +2214,29 @@ class ObservationCreationService:
             # whose remote observation already exists.
             if self.db.release_finalize_action_to_pending(profile_id, action_id):
                 return ObservationCreationResult(
-                    action_id, "pending",
+                    action_id,
+                    "pending",
                     f"Finalize could not complete and remains pending — resume this creation to try "
                     f"again (nothing was written remotely): {exc}",
                 )
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="verification", error_code=str(exc)[:80],
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
+                error_code=str(exc)[:80],
             )
-            return ObservationCreationResult(action_id, "failed", f"Finalize could not complete: {exc}")
+            return ObservationCreationResult(
+                action_id, "failed", f"Finalize could not complete: {exc}"
+            )
 
     def _execute_population_items(
-        self, profile_id: int, group_id: int, create_row: dict[str, Any],
-        cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        profile_id: int,
+        group_id: int,
+        create_row: dict[str, Any],
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> list[Any]:
         """Mint AND execute the per-item rows (photo attach) ONE AT A TIME.
         Called AFTER the reciprocal links and ``pair_finalize`` already
@@ -1803,7 +2274,9 @@ class ObservationCreationService:
         items = self.db.creation_items(profile_id, int(ledger["attempt_id"]))
         results: list[Any] = []
 
-        def _fail_item_durably(item: dict[str, Any], reason: str, pair_id_for_mint: Optional[int]) -> Any:
+        def _fail_item_durably(
+            item: dict[str, Any], reason: str, pair_id_for_mint: Optional[int]
+        ) -> Any:
             """Round-7 review finding (safety-critical): the previous version
             of this helper checked an existing action's state, then called
             ``mint_creation_item_action`` (which silently RETURNS an
@@ -1824,7 +2297,8 @@ class ObservationCreationService:
             """
             item_type = str(item.get("item_type") or "")
             action_type = (
-                PhotoActionType.INAT_PHOTO_ATTACH.value if item_type == "photo"
+                PhotoActionType.INAT_PHOTO_ATTACH.value
+                if item_type == "photo"
                 else LinkActionType.INAT_OFV_ADD.value
             )
             item_label = f"{item_type or 'item'} {item.get('source_item_identity', '')}"
@@ -1834,18 +2308,31 @@ class ObservationCreationService:
                 # be unreachable in practice (create success always sets
                 # co.pair_id), but must still degrade safely rather than
                 # crash on a NOT NULL column.
-                self.db.finish_creation_item(profile_id, int(item["creation_item_id"]), "failed")
+                self.db.finish_creation_item(
+                    profile_id, int(item["creation_item_id"]), "failed"
+                )
                 return ObservationCreationResult(0, "failed", f"{item_label}: {reason}")
             existing_rows = self.db.action_group_rows(profile_id, group_id)
-            next_ordinal = max((int(r["ordinal"]) for r in existing_rows), default=0) + 1
+            next_ordinal = (
+                max((int(r["ordinal"]) for r in existing_rows), default=0) + 1
+            )
             outcome = self.db.fail_creation_item_preflight(
-                profile_id, group_id, int(item["creation_item_id"]), action_type,
-                reason=reason, next_ordinal=next_ordinal, pair_id=pair_id_for_mint,
-                mo_observation_id=mo_id, inat_observation_id=inat_id, site="inat",
+                profile_id,
+                group_id,
+                int(item["creation_item_id"]),
+                action_type,
+                reason=reason,
+                next_ordinal=next_ordinal,
+                pair_id=pair_id_for_mint,
+                mo_observation_id=mo_id,
+                inat_observation_id=inat_id,
+                site="inat",
             )
             action_id = int(outcome["action_id"])
             if outcome["downgraded"]:
-                return ObservationCreationResult(action_id, "failed", f"{item_label}: {reason}")
+                return ObservationCreationResult(
+                    action_id, "failed", f"{item_label}: {reason}"
+                )
             # The atomic conditional update affected zero rows: another
             # worker already claimed/started/finished this exact action
             # between whatever earlier check the caller made and this call.
@@ -1854,7 +2341,8 @@ class ObservationCreationService:
             # handling (identical to the pre-existing ambiguous-action path
             # above) takes over instead.
             return ObservationCreationResult(
-                action_id, str(outcome["state"]),
+                action_id,
+                str(outcome["state"]),
                 f"{item_label}: preflight check found {reason!r}, but this item's action was already "
                 "claimed or is in flight -- resume to verify it (never auto-failed).",
             )
@@ -1870,7 +2358,11 @@ class ObservationCreationService:
         # became excluded or lost its confirmation between finalize and
         # this call would otherwise go unnoticed.
         ledger_pair_id = ledger.get("pair_id")
-        pair = self.db.pair_detail(profile_id, int(ledger_pair_id)) if ledger_pair_id is not None else None
+        pair = (
+            self.db.pair_detail(profile_id, int(ledger_pair_id))
+            if ledger_pair_id is not None
+            else None
+        )
         pair_ok = (
             pair is not None
             and int(pair.get("mo_observation_id") or 0) == mo_id
@@ -1915,34 +2407,47 @@ class ObservationCreationService:
                         # Local pair drift does not resolve remote
                         # uncertainty — stop the tail and require an
                         # explicit resume/verify instead of guessing.
-                        results.append(ObservationCreationResult(
-                            int(existing_action_id), action_state,
-                            "The confirmed creation pair could not be re-verified, but this item has "
-                            "an existing ambiguous or in-flight action — resume to verify it (never "
-                            "auto-failed) before continuing.",
-                        ))
+                        results.append(
+                            ObservationCreationResult(
+                                int(existing_action_id),
+                                action_state,
+                                "The confirmed creation pair could not be re-verified, but this item has "
+                                "an existing ambiguous or in-flight action — resume to verify it (never "
+                                "auto-failed) before continuing.",
+                            )
+                        )
                         return results
                     if action_state in ("failed", "cancelled"):
                         # Preserve existing terminal history; nothing to do.
                         continue
-                    if action_state == "pending" and action_row is not None and action_row["write_started_at"] is not None:
+                    if (
+                        action_state == "pending"
+                        and action_row is not None
+                        and action_row["write_started_at"] is not None
+                    ):
                         # Contradiction that should be unreachable ('pending'
                         # implies no write attempt) -- degrade safely by
                         # treating it exactly like an in-flight write rather
                         # than ever failing it.
-                        results.append(ObservationCreationResult(
-                            int(existing_action_id), action_state,
-                            "This item's action is pending but recorded a write start; refusing to "
-                            "mark it failed. Resume/verify instead.",
-                        ))
+                        results.append(
+                            ObservationCreationResult(
+                                int(existing_action_id),
+                                action_state,
+                                "This item's action is pending but recorded a write start; refusing to "
+                                "mark it failed. Resume/verify instead.",
+                            )
+                        )
                         return results
                     # action_state == 'pending' with no write_started_at: no
                     # remote write could possibly have started, so it is
                     # safe for _fail_item_durably to close it out below.
-                results.append(_fail_item_durably(
-                    item, "the confirmed creation pair could not be re-verified",
-                    int(ledger_pair_id) if ledger_pair_id is not None else None,
-                ))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "the confirmed creation pair could not be re-verified",
+                        int(ledger_pair_id) if ledger_pair_id is not None else None,
+                    )
+                )
                 return results
             return results
         pair_id = int(ledger_pair_id)
@@ -1956,15 +2461,25 @@ class ObservationCreationService:
                 if state == "succeeded":
                     continue
                 if state in {"failed", "cancelled"}:
-                    results.append(ObservationCreationResult(
-                        int(existing_action_id), state,
-                        "A failed or cancelled predecessor blocks the rest of this creation saga.",
-                    ))
+                    results.append(
+                        ObservationCreationResult(
+                            int(existing_action_id),
+                            state,
+                            "A failed or cancelled predecessor blocks the rest of this creation saga.",
+                        )
+                    )
                     return results
-                result = self._execute_followup_row(profile_id, group_id, row, cancelled, progress)
+                result = self._execute_followup_row(
+                    profile_id, group_id, row, cancelled, progress
+                )
                 results.append(result)
                 if result.state != "succeeded":
-                    self.db.cancel_action_group_tail(profile_id, group_id, int(row["ordinal"]), f"predecessor_{result.state}")
+                    self.db.cancel_action_group_tail(
+                        profile_id,
+                        group_id,
+                        int(row["ordinal"]),
+                        f"predecessor_{result.state}",
+                    )
                     return results
                 continue
 
@@ -1974,7 +2489,11 @@ class ObservationCreationService:
                 # executor (see prepare_preview's disclosure) and must never
                 # reach here — prepare_preview no longer generates them, so
                 # this only fires for a stale/pre-fix ledger row.
-                results.append(_fail_item_durably(item, "this item type has no supported executor", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item, "this item type has no supported executor", pair_id
+                    )
+                )
                 return results
 
             # Only the proven Gate 1E MO->iNat photo-attach direction is
@@ -1996,13 +2515,22 @@ class ObservationCreationService:
             # item's own write (mint/execute below), so honoring
             # cancellation here can only ever produce a durable
             # cancelled/preflight result, never touch an in-flight write.
-            live_photo = self.photo_service._refresh(profile, pair, cancelled)  # noqa: SLF001 - deliberate, documented reuse
+            live_photo = self.photo_service._refresh(
+                profile, pair, cancelled
+            )  # noqa: SLF001 - deliberate, documented reuse
             source_photo_id = str(item["source_item_identity"])
             source = next(
-                (p for p in live_photo.source_photos if p.photo_id == source_photo_id), None
+                (p for p in live_photo.source_photos if p.photo_id == source_photo_id),
+                None,
             )
             if source is None or not source.source_url:
-                results.append(_fail_item_durably(item, "the source photo is no longer readable on the source observation", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "the source photo is no longer readable on the source observation",
+                        pair_id,
+                    )
+                )
                 return results
             # Round-4 finding 6: the byte fingerprint alone proves the
             # pixel content is unchanged, but says nothing about the
@@ -2011,12 +2539,25 @@ class ObservationCreationService:
             # Reconstruct the SAME fingerprint _photo_items computed at
             # preview time from the CURRENT live snapshot and require an
             # exact match before trusting today's license/holder values.
-            reviewed_metadata_fingerprint = str(item.get("reviewed_metadata_fingerprint") or "")
-            current_metadata_fingerprint = public_fingerprint(
-                source.photo_id, source.license_label, source.copyright_holder,
+            reviewed_metadata_fingerprint = str(
+                item.get("reviewed_metadata_fingerprint") or ""
             )
-            if not reviewed_metadata_fingerprint or current_metadata_fingerprint != reviewed_metadata_fingerprint:
-                results.append(_fail_item_durably(item, "the photo's license or copyright holder changed since it was reviewed", pair_id))
+            current_metadata_fingerprint = public_fingerprint(
+                source.photo_id,
+                source.license_label,
+                source.copyright_holder,
+            )
+            if (
+                not reviewed_metadata_fingerprint
+                or current_metadata_fingerprint != reviewed_metadata_fingerprint
+            ):
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "the photo's license or copyright holder changed since it was reviewed",
+                        pair_id,
+                    )
+                )
                 return results
             pinned_byte_fingerprint = str(item.get("reviewed_byte_fingerprint") or "")
             if not pinned_byte_fingerprint:
@@ -2026,7 +2567,13 @@ class ObservationCreationService:
                 # that failed to download it) — never treat a
                 # freshly-downloaded image as retroactively "the
                 # reviewed one."
-                results.append(_fail_item_durably(item, "no reviewed byte fingerprint was pinned for this photo at preview time", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "no reviewed byte fingerprint was pinned for this photo at preview time",
+                        pair_id,
+                    )
+                )
                 return results
             # Round-7 review finding: cancellation is checked around
             # ``_refresh`` above, but the SEPARATE full-image ``_download``
@@ -2039,7 +2586,13 @@ class ObservationCreationService:
             # cancelled/preflight result here, never touch an in-flight
             # write.
             if cancelled():
-                results.append(_fail_item_durably(item, "cancellation requested before the photo could be downloaded for verification", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "cancellation requested before the photo could be downloaded for verification",
+                        pair_id,
+                    )
+                )
                 return results
             try:
                 # Finding 8: Gate 2A must enter Gate 1E's FULL journaling
@@ -2049,25 +2602,46 @@ class ObservationCreationService:
                 # is a VERIFICATION against the fingerprint already
                 # pinned during prepare_preview (finding 4), never the
                 # establishment of a new "reviewed" baseline this late.
-                image_bytes = self.photo_service._download(source)  # noqa: SLF001 - deliberate, documented reuse
+                image_bytes = self.photo_service._download(
+                    source
+                )  # noqa: SLF001 - deliberate, documented reuse
             except Exception:
-                results.append(_fail_item_durably(item, "the photo could not be re-downloaded for verification", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "the photo could not be re-downloaded for verification",
+                        pair_id,
+                    )
+                )
                 return results
             # Immediately after ``_download()`` returns: still strictly
             # before mint/write, so this can only ever produce a durable
             # cancelled/preflight result too -- never treated as a failure
             # of anything that might already be in flight.
             if cancelled():
-                results.append(_fail_item_durably(item, "cancellation requested after the photo was downloaded for verification, before minting", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "cancellation requested after the photo was downloaded for verification, before minting",
+                        pair_id,
+                    )
+                )
                 return results
             from .photo_license import photo_byte_fingerprint, photo_md5
+
             fingerprint = photo_byte_fingerprint(image_bytes)
             digest = photo_md5(image_bytes)
             if fingerprint != pinned_byte_fingerprint:
                 # The MO image changed after the user visually reviewed
                 # it in the preview dialog — refuse to mint an action for
                 # content that was never actually approved.
-                results.append(_fail_item_durably(item, "the photo's content changed since it was reviewed", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "the photo's content changed since it was reviewed",
+                        pair_id,
+                    )
+                )
                 return results
 
             # Immediately before minting the action -- the last checkpoint
@@ -2075,7 +2649,13 @@ class ObservationCreationService:
             # pre-write, so a durable cancelled/preflight result is always
             # safe here.
             if cancelled():
-                results.append(_fail_item_durably(item, "cancellation requested immediately before minting this item's action", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "cancellation requested immediately before minting this item's action",
+                        pair_id,
+                    )
+                )
                 return results
 
             existing_rows = self.db.action_group_rows(profile_id, group_id)
@@ -2086,17 +2666,30 @@ class ObservationCreationService:
                 # rather than being silently overwritten — see
                 # mint_creation_photo_item_action's docstring.
                 action_id = self.db.mint_creation_photo_item_action(
-                    profile_id, group_id, int(item["creation_item_id"]), ordinal,
-                    pair_id=pair_id, mo_observation_id=mo_id, inat_observation_id=inat_id,
-                    source_site=str(ledger["source_site"]), source_photo_id=source_photo_id,
+                    profile_id,
+                    group_id,
+                    int(item["creation_item_id"]),
+                    ordinal,
+                    pair_id=pair_id,
+                    mo_observation_id=mo_id,
+                    inat_observation_id=inat_id,
+                    source_site=str(ledger["source_site"]),
+                    source_photo_id=source_photo_id,
                     planned_observation_photo_uuid=new_observation_photo_uuid(),
-                    reviewed_byte_fingerprint=fingerprint, byte_fingerprint=fingerprint, md5=digest,
-                    source_license_label=source.license_label, source_copyright_holder=source.copyright_holder,
+                    reviewed_byte_fingerprint=fingerprint,
+                    byte_fingerprint=fingerprint,
+                    md5=digest,
+                    source_license_label=source.license_label,
+                    source_copyright_holder=source.copyright_holder,
                     preview_inat_record_fingerprint=live_photo.inat_record_fingerprint,
                     preview_mo_record_fingerprint=live_photo.mo_record_fingerprint,
                 )
             except ValueError as exc:
-                results.append(_fail_item_durably(item, f"could not mint the photo action ({exc})", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item, f"could not mint the photo action ({exc})", pair_id
+                    )
+                )
                 return results
 
             # Mint, then EXECUTE THIS ONE ITEM IMMEDIATELY — never mint the
@@ -2115,24 +2708,45 @@ class ObservationCreationService:
             # the item's real (ambiguous/in-flight) state is preserved and
             # reported instead, exactly as required.
             if cancelled():
-                results.append(_fail_item_durably(item, "cancellation requested immediately before this item's upload began", pair_id))
+                results.append(
+                    _fail_item_durably(
+                        item,
+                        "cancellation requested immediately before this item's upload began",
+                        pair_id,
+                    )
+                )
                 return results
             row = self.db.action(profile_id, action_id)
             if row is None:
-                raise ObservationCreationError("The just-minted photo action row is missing.", "mint_lost")
-            result = self._execute_followup_row(profile_id, group_id, row, cancelled, progress)
+                raise ObservationCreationError(
+                    "The just-minted photo action row is missing.", "mint_lost"
+                )
+            result = self._execute_followup_row(
+                profile_id, group_id, row, cancelled, progress
+            )
             results.append(result)
             if result.state != "succeeded":
-                self.db.cancel_action_group_tail(profile_id, group_id, int(row["ordinal"]), f"predecessor_{result.state}")
+                self.db.cancel_action_group_tail(
+                    profile_id,
+                    group_id,
+                    int(row["ordinal"]),
+                    f"predecessor_{result.state}",
+                )
                 return results
             # Only now, after this item's own write has actually completed
             # (or was already-satisfied on resume), does the loop move on
             # to prepare the next selected item.
 
         return results
+
     def _execute_link_and_finalize(
-        self, profile_id: int, group_id: int, mo_id: int, inat_id: int,
-        cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        profile_id: int,
+        group_id: int,
+        mo_id: int,
+        inat_id: int,
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> list[Any]:
         """Reciprocal links + pair_finalize, minted ONE AT A TIME immediately
         before each executes — never upfront together.
@@ -2158,19 +2772,34 @@ class ObservationCreationService:
         profile = self.db.profile(profile_id)
 
         for action_type, binding_attr, desired_target, site in (
-            (LinkActionType.MO_EXTERNAL_LINK_ADD.value, "mo_external_site_id", inat_id, "mo"),
+            (
+                LinkActionType.MO_EXTERNAL_LINK_ADD.value,
+                "mo_external_site_id",
+                inat_id,
+                "mo",
+            ),
             (LinkActionType.INAT_OFV_ADD.value, "inat_field_id", mo_id, "inat"),
         ):
             rows = self.db.action_group_rows(profile_id, group_id)
             row = next((r for r in rows if str(r["action_type"]) == action_type), None)
             if row is None:
                 live = self.link_service._refresh_state(  # noqa: SLF001 - deliberate, documented reuse
-                    profile, mo_id, inat_id, cancelled, require_mo_key=True,
+                    profile,
+                    mo_id,
+                    inat_id,
+                    cancelled,
+                    require_mo_key=True,
                 )
                 ordinal = max((int(r["ordinal"]) for r in rows), default=0) + 1
                 action_id = self.db.mint_creation_followup_action(
-                    profile_id, group_id, ordinal, action_type,
-                    pair_id=pair_id, mo_observation_id=mo_id, inat_observation_id=inat_id, site=site,
+                    profile_id,
+                    group_id,
+                    ordinal,
+                    action_type,
+                    pair_id=pair_id,
+                    mo_observation_id=mo_id,
+                    inat_observation_id=inat_id,
+                    site=site,
                     inat_observation_uuid=live.inat_observation_uuid,
                     binding_id=getattr(live, binding_attr),
                     desired_target_id=desired_target,
@@ -2181,54 +2810,90 @@ class ObservationCreationService:
                 )
                 row = self.db.action(profile_id, action_id)
                 if row is None:
-                    raise ObservationCreationError("The just-minted link action row is missing.", "mint_lost")
+                    raise ObservationCreationError(
+                        "The just-minted link action row is missing.", "mint_lost"
+                    )
             state = str(row["state"])
             if state == "succeeded":
                 continue
             if state in {"failed", "cancelled"}:
-                results.append(ObservationCreationResult(
-                    int(row["action_id"]), state,
-                    "A failed or cancelled predecessor blocks the rest of this creation saga.",
-                ))
+                results.append(
+                    ObservationCreationResult(
+                        int(row["action_id"]),
+                        state,
+                        "A failed or cancelled predecessor blocks the rest of this creation saga.",
+                    )
+                )
                 return results
-            result = self._execute_followup_row(profile_id, group_id, row, cancelled, progress)
+            result = self._execute_followup_row(
+                profile_id, group_id, row, cancelled, progress
+            )
             results.append(result)
             if result.state != "succeeded":
                 return results
 
         rows = self.db.action_group_rows(profile_id, group_id)
-        finalize_row = next((r for r in rows if str(r["action_type"]) == "pair_finalize"), None)
+        finalize_row = next(
+            (r for r in rows if str(r["action_type"]) == "pair_finalize"), None
+        )
         if finalize_row is None:
             ordinal = max((int(r["ordinal"]) for r in rows), default=0) + 1
             action_id = self.db.mint_creation_followup_action(
-                profile_id, group_id, ordinal, "pair_finalize",
-                pair_id=pair_id, mo_observation_id=mo_id, inat_observation_id=inat_id, site="inat",
+                profile_id,
+                group_id,
+                ordinal,
+                "pair_finalize",
+                pair_id=pair_id,
+                mo_observation_id=mo_id,
+                inat_observation_id=inat_id,
+                site="inat",
             )
             finalize_row = self.db.action(profile_id, action_id)
             if finalize_row is None:
-                raise ObservationCreationError("The just-minted pair_finalize row is missing.", "mint_lost")
+                raise ObservationCreationError(
+                    "The just-minted pair_finalize row is missing.", "mint_lost"
+                )
         if str(finalize_row["state"]) != "succeeded":
-            results.append(self._execute_followup_row(profile_id, group_id, finalize_row, cancelled, progress))
+            results.append(
+                self._execute_followup_row(
+                    profile_id, group_id, finalize_row, cancelled, progress
+                )
+            )
         return results
 
     # Recovery -------------------------------------------------------------
 
     def verify_unknown(
-        self, profile_id: int, action_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        action_id: int,
+        cancelled: Callable[[], bool],
     ) -> ObservationCreationResult:
         row = self.db.action(profile_id, action_id)
         if not row:
-            raise ObservationCreationError("The selected journal row is unavailable.", "invalid_action")
+            raise ObservationCreationError(
+                "The selected journal row is unavailable.", "invalid_action"
+            )
         if str(row["state"]) != "outcome_unknown":
-            return ObservationCreationResult(action_id, str(row["state"]), "No unknown outcome remains to verify.")
+            return ObservationCreationResult(
+                action_id, str(row["state"]), "No unknown outcome remains to verify."
+            )
         action_type = str(row["action_type"])
         if action_type not in ("inat_observation_create", "mo_observation_create"):
             # Per-item/link/finalize rows already have their own verify_unknown
             # via the sibling service; this method only ever owns the create row.
-            return ObservationCreationResult(action_id, "outcome_unknown", "This row is verified by its owning service.")
-        ledger = self.db.creation_ledger_for_group(profile_id, int(row["action_group_id"]))
+            return ObservationCreationResult(
+                action_id,
+                "outcome_unknown",
+                "This row is verified by its owning service.",
+            )
+        ledger = self.db.creation_ledger_for_group(
+            profile_id, int(row["action_group_id"])
+        )
         if not ledger:
-            return ObservationCreationResult(action_id, "outcome_unknown", "The creation ledger row is missing.")
+            return ObservationCreationResult(
+                action_id, "outcome_unknown", "The creation ledger row is missing."
+            )
         profile = self.db.profile(profile_id)
         marker = str(ledger["correlation_marker"])
         try:
@@ -2241,22 +2906,35 @@ class ObservationCreationService:
                 # existing photo-verification read (it already fetches by
                 # uuid and returns id+uuid) rather than adding a near-duplicate
                 # client method.
-                found = _first_result(self.inat_client.get_observation_photos_v2(marker, token))
+                found = _first_result(
+                    self.inat_client.get_observation_photos_v2(marker, token)
+                )
                 destination_id = positive_int(found.get("id")) if found else None
                 destination_uuid = marker if destination_id else ""
             else:
                 found = self.mo_client.find_observation_by_marker(
-                    self.mo_key_provider(profile_id), marker, cancelled, user_id=profile.mo_user_id,
+                    self.mo_key_provider(profile_id),
+                    marker,
+                    cancelled,
+                    user_id=profile.mo_user_id,
                 )
                 from .mo_client import results_from_payload
+
                 rows = results_from_payload(found)
-                destination_id = self._require_unambiguous_mo_match(rows, profile.mo_user_id, marker)
+                destination_id = self._require_unambiguous_mo_match(
+                    rows, profile.mo_user_id, marker
+                )
                 destination_uuid = ""
         except Exception:
-            return ObservationCreationResult(action_id, "outcome_unknown", "Destination reread is still unavailable; the create was not retried.")
+            return ObservationCreationResult(
+                action_id,
+                "outcome_unknown",
+                "Destination reread is still unavailable; the create was not retried.",
+            )
         if destination_id is None:
             return ObservationCreationResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "No matching destination observation was found yet. This does not prove the create "
                 "failed — do not retry, or a duplicate that cannot be reliably deduplicated may result.",
             )
@@ -2268,10 +2946,19 @@ class ObservationCreationService:
         # on the identity, so the very next execute_group() call crashed on
         # int(create_row["mo_observation_id"]) still being NULL.
         self.db.settle_creation_write_success(
-            profile_id, action_id, int(ledger["attempt_id"]), int(ledger["creation_id"]),
-            int(row["action_group_id"]), destination_site=str(row["site"]),
-            destination_id=destination_id, destination_uuid=destination_uuid,
+            profile_id,
+            action_id,
+            int(ledger["attempt_id"]),
+            int(ledger["creation_id"]),
+            int(row["action_group_id"]),
+            destination_site=str(row["site"]),
+            destination_id=destination_id,
+            destination_uuid=destination_uuid,
             source_record_id=int(row["source_record_id"]),
             verification_state="verified_after_unknown",
         )
-        return ObservationCreationResult(action_id, "succeeded", "Verified the prior create landed; it was not sent again.")
+        return ObservationCreationResult(
+            action_id,
+            "succeeded",
+            "Verified the prior create landed; it was not sent again.",
+        )
