@@ -9,6 +9,7 @@ Shows:
 - Leading/disagreement indicators
 - Observation URL (clickable)
 """
+
 from __future__ import annotations
 
 import html
@@ -17,7 +18,13 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.models import StudyObservation
@@ -104,7 +111,9 @@ class MetadataPanel(QWidget):
         button_row.addWidget(self._open_btn, 1)
 
         self._copy_url_btn = QPushButton("Copy Obs URL")
-        self._copy_url_btn.setToolTip("Copy the current observation URL to the clipboard")
+        self._copy_url_btn.setToolTip(
+            "Copy the current observation URL to the clipboard"
+        )
         self._copy_url_btn.clicked.connect(self.copy_obs_url_requested)
         self._copy_url_btn.setEnabled(False)
         button_row.addWidget(self._copy_url_btn, 1)
@@ -152,9 +161,13 @@ class MetadataPanel(QWidget):
         obs_taxon = obs.taxon
         s2 = _Section("Observation")
         if community:
-            s2.add_row("Community ID", _taxon_html(community.display_name, community.name))
+            s2.add_row(
+                "Community ID", _taxon_html(community.display_name, community.name)
+            )
         elif obs_taxon:
-            s2.add_row("Obs. taxon", _taxon_html(obs_taxon.display_name, obs_taxon.name))
+            s2.add_row(
+                "Obs. taxon", _taxon_html(obs_taxon.display_name, obs_taxon.name)
+            )
         s2.add_row("Observer", _escape(obs.observer_login))
         if obs.observed_on:
             s2.add_row("Observed", _escape(obs.display_date))
@@ -166,7 +179,9 @@ class MetadataPanel(QWidget):
                 grade = f"<span style='color:#66aa66'>{grade}</span>"
             s2.add_row("Quality", grade)
         if obs.provisional_species_name:
-            s2.add_row("Provisional Species Name", _escape(obs.provisional_species_name))
+            s2.add_row(
+                "Provisional Species Name", _escape(obs.provisional_species_name)
+            )
         if obs.species_name_override:
             s2.add_row("Species Name Override", _escape(obs.species_name_override))
         if obs.num_identification_agreements or obs.num_identification_disagreements:
@@ -188,7 +203,10 @@ class MetadataPanel(QWidget):
         idents = list(obs.all_identifications)
         idents.sort(key=lambda i: (i.created_at or "", i.ident_id), reverse=True)
         if not idents:
-            ids.add_row("", "<span style='color:#888'>No identification history in payload.</span>")
+            ids.add_row(
+                "",
+                "<span style='color:#888'>No identification history in payload.</span>",
+            )
         for idx, item in enumerate(idents):
             ids.add_row("", _ident_html(item, idx == 0, authenticated_login))
         self._layout.addWidget(ids)
@@ -196,7 +214,9 @@ class MetadataPanel(QWidget):
         self._layout.addWidget(_divider())
         comments = _Section("Observation Comments")
         if not obs.comments:
-            comments.add_row("", "<span style='color:#888'>No comments in payload.</span>")
+            comments.add_row(
+                "", "<span style='color:#888'>No comments in payload.</span>"
+            )
         for comment in obs.comments:
             comments.add_row("", _comment_html(comment))
         self._layout.addWidget(comments)
@@ -245,15 +265,30 @@ def _ident_html(ident, most_recent: bool, authenticated_login: str) -> str:
         bits.append("disagreement")
     if ident.is_provisional:
         bits.append("<span style='color:#f0c674'>provisional</span>")
-    own = authenticated_login and ident.user_login.casefold() == authenticated_login.casefold()
+    own = (
+        authenticated_login
+        and ident.user_login.casefold() == authenticated_login.casefold()
+    )
 
     user = _escape(ident.user_login or "?")
     if own:
         user = f"<span style='color:#80cbc4; font-weight:bold'>{user} (you)</span>"
     taxon = _taxon_html(ident.taxon.display_name, ident.taxon.name)
-    rank = f" <span style='color:#999'>[{_escape(ident.taxon.rank)}]</span>" if ident.taxon.rank else ""
-    date = f" <span style='color:#999'>{_escape(ident.created_at[:19])}</span>" if ident.created_at else ""
-    body = f"<br><span style='color:#bbb'>{_escape(ident.body)}</span>" if ident.body else ""
+    rank = (
+        f" <span style='color:#999'>[{_escape(ident.taxon.rank)}]</span>"
+        if ident.taxon.rank
+        else ""
+    )
+    date = (
+        f" <span style='color:#999'>{_escape(ident.created_at[:19])}</span>"
+        if ident.created_at
+        else ""
+    )
+    body = (
+        f"<br><span style='color:#bbb'>{_escape(ident.body)}</span>"
+        if ident.body
+        else ""
+    )
     status = " · ".join(bits)
     if status:
         status = f"<br><span style='color:#999'>{status}</span>"
@@ -262,7 +297,11 @@ def _ident_html(ident, most_recent: bool, authenticated_login: str) -> str:
 
 def _comment_html(comment) -> str:
     user = _escape(comment.user_login or "?")
-    date = f" <span style='color:#999'>{_escape(comment.created_at[:19])}</span>" if comment.created_at else ""
+    date = (
+        f" <span style='color:#999'>{_escape(comment.created_at[:19])}</span>"
+        if comment.created_at
+        else ""
+    )
     hidden = " <span style='color:#999'>(hidden)</span>" if comment.hidden else ""
     body = _escape(comment.body)
     return f"<b>{user}</b>{date}{hidden}<br><span style='color:#ddd'>{body}</span>"

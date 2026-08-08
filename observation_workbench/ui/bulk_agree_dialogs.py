@@ -1,4 +1,5 @@
 """Dialogs for supervised provisional-name agreement workflow."""
+
 from __future__ import annotations
 
 from typing import Callable, List, Optional
@@ -126,8 +127,7 @@ class BulkAgreeSetupDialog(QDialog):
         self._current_radio.setEnabled(self._current_query_available)
         grid.addWidget(self._current_radio, 1, 0)
         self._current_label = QLabel(
-            current_query_description
-            or "No query is loaded in the viewer yet."
+            current_query_description or "No query is loaded in the viewer yet."
         )
         self._current_label.setWordWrap(True)
         grid.addWidget(self._current_label, 1, 1)
@@ -390,7 +390,9 @@ class BulkAgreePreviewDialog(QDialog):
             "again immediately before posting, and you can skip or cancel during execution."
         )
         if dry_run:
-            warning.setText(warning.text() + " Dry run is enabled, so no writes will be posted.")
+            warning.setText(
+                warning.text() + " Dry run is enabled, so no writes will be posted."
+            )
         warning.setWordWrap(True)
         layout.addWidget(warning)
 
@@ -416,7 +418,9 @@ class BulkAgreePreviewDialog(QDialog):
         enable_click_sorting(self._table)
         layout.addWidget(self._table, 1)
 
-        self._agree_label = QLabel("Type <b>AGREE</b> in the box below to enable the Start button:")
+        self._agree_label = QLabel(
+            "Type <b>AGREE</b> in the box below to enable the Start button:"
+        )
         layout.addWidget(self._agree_label)
 
         self._agree_edit = QLineEdit()
@@ -489,8 +493,12 @@ class BulkAgreePreviewDialog(QDialog):
             require_source_taxon_match=False,
             default_comment="",
             dry_run=self._dry_run,
-            on_skip_forever=self._skip_forever_adapter(by_obs_id, self._on_skip_forever),
-            on_unskip_forever=self._skip_forever_adapter(by_obs_id, self._on_unskip_forever),
+            on_skip_forever=self._skip_forever_adapter(
+                by_obs_id, self._on_skip_forever
+            ),
+            on_unskip_forever=self._skip_forever_adapter(
+                by_obs_id, self._on_unskip_forever
+            ),
             request_reauthentication=(
                 self._request_photo_browser_reauthentication
                 if self._request_reauthentication is not None
@@ -501,7 +509,9 @@ class BulkAgreePreviewDialog(QDialog):
         )
         dlg.exec()
         kept_ids = [c.observation.obs_id for c in dlg.candidates()]
-        self._candidates = [by_obs_id[obs_id] for obs_id in kept_ids if obs_id in by_obs_id]
+        self._candidates = [
+            by_obs_id[obs_id] for obs_id in kept_ids if obs_id in by_obs_id
+        ]
         self._populate_table()
         self._update_start_enabled()
 
@@ -549,9 +559,7 @@ class BulkAgreePreviewDialog(QDialog):
         self._agree_label.setVisible(needs_confirmation)
         self._agree_edit.setVisible(needs_confirmation)
         confirmed = (
-            self._agree_edit.text().strip() == "AGREE"
-            if needs_confirmation
-            else True
+            self._agree_edit.text().strip() == "AGREE" if needs_confirmation else True
         )
         self._start_btn.setEnabled(count > 0 and confirmed)
 
@@ -605,10 +613,14 @@ class BulkAgreeProgressDialog(QDialog):
 
         pause_label = QLabel("Move to end for human review when:")
         layout.addWidget(pause_label)
-        self._pause_recent_cb = QCheckBox("Most recent identification is not provisional")
+        self._pause_recent_cb = QCheckBox(
+            "Most recent identification is not provisional"
+        )
         self._pause_recent_cb.setChecked(True)
         layout.addWidget(self._pause_recent_cb)
-        self._pause_comments_cb = QCheckBox("Comments have been added since the provisional name was proposed")
+        self._pause_comments_cb = QCheckBox(
+            "Comments have been added since the provisional name was proposed"
+        )
         self._pause_comments_cb.setChecked(True)
         layout.addWidget(self._pause_comments_cb)
 
@@ -621,7 +633,9 @@ class BulkAgreeProgressDialog(QDialog):
         self._delay_max_spin = QSpinBox()
         self._delay_max_spin.setRange(0, 3600)
         self._delay_max_spin.setSuffix("s max")
-        self._delay_max_spin.setValue(max(int(delay_min_seconds), int(delay_max_seconds)))
+        self._delay_max_spin.setValue(
+            max(int(delay_min_seconds), int(delay_max_seconds))
+        )
         self._delay_min_spin.valueChanged.connect(self._on_delay_min_changed)
         self._delay_max_spin.valueChanged.connect(self._on_delay_max_changed)
         delay_row.addWidget(self._delay_label)
@@ -687,7 +701,9 @@ class BulkAgreeProgressDialog(QDialog):
         layout.addLayout(self._review_actions)
         self._set_review_actions_visible(False)
 
-        comment_label = QLabel("Comment to post with this identification (edit as needed):")
+        comment_label = QLabel(
+            "Comment to post with this identification (edit as needed):"
+        )
         layout.addWidget(comment_label)
 
         self._comment_edit = QTextEdit()
@@ -790,7 +806,14 @@ class BulkAgreeProgressDialog(QDialog):
     def delay_max_seconds(self) -> int:
         return self._delay_max_spin.value()
 
-    def show_candidate(self, index: int, total: int, candidate: BulkAgreeCandidate, *, comment: str = "") -> None:
+    def show_candidate(
+        self,
+        index: int,
+        total: int,
+        candidate: BulkAgreeCandidate,
+        *,
+        comment: str = "",
+    ) -> None:
         obs = candidate.observation
         self._observation_url = obs.url
         self._set_review_actions_visible(False)
@@ -817,13 +840,17 @@ class BulkAgreeProgressDialog(QDialog):
         return self._comment_edit.toPlainText().strip()
 
     def set_status(self, status: str) -> None:
-        self._details.setPlainText(self._details.toPlainText().split("\nStatus:")[0] + f"\nStatus: {status}")
+        self._details.setPlainText(
+            self._details.toPlainText().split("\nStatus:")[0] + f"\nStatus: {status}"
+        )
 
     def set_countdown(self, seconds: int) -> None:
         if seconds <= 0:
             self._countdown.setText("Posting as soon as the API allows.")
             return
-        self._countdown.setText(f"Posting this ID automatically in {seconds}s — click 'Post now / skip delay' to post immediately, or 'Skip this ID' to pass.")
+        self._countdown.setText(
+            f"Posting this ID automatically in {seconds}s — click 'Post now / skip delay' to post immediately, or 'Skip this ID' to pass."
+        )
 
     def set_posting(self) -> None:
         """Disable interactive controls while a write request is in flight."""
@@ -855,9 +882,7 @@ class BulkAgreeProgressDialog(QDialog):
         self._paused = True
         self._pause_btn.setText("Resume")
         self.set_waiting()
-        self._review_banner.setText(
-            f"HUMAN REVIEW REQUIRED\n{reason}"
-        )
+        self._review_banner.setText(f"HUMAN REVIEW REQUIRED\n{reason}")
         self._review_banner.setVisible(True)
         self._set_review_actions_visible(True)
         self.set_status(f"Paused for human review: {reason}")
@@ -878,7 +903,13 @@ class BulkAgreeProgressDialog(QDialog):
         state = "Cancelled" if cancelled else "Complete"
         self._finished = True
         self._title.setText(state)
-        lines = [f"{state}", "", f"Posted: {posted}", f"Skipped: {skipped}", f"Failed: {failed}"]
+        lines = [
+            f"{state}",
+            "",
+            f"Posted: {posted}",
+            f"Skipped: {skipped}",
+            f"Failed: {failed}",
+        ]
         if skipped_no_dna:
             lines.append(f"Skipped (no DNA Barcode ITS): {skipped_no_dna}")
         if skipped_previously_withdrew:

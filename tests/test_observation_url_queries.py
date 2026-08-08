@@ -39,7 +39,9 @@ class ObservationURLParserTests(unittest.TestCase):
             "verifiable=any&place_id=any&field:Provisional%20Species%20Name=Clavaria%20sp."
         )
         assert query is not None
-        self.assertIsNone(extract_optional_single_taxon_id_from_observation_query(query))
+        self.assertIsNone(
+            extract_optional_single_taxon_id_from_observation_query(query)
+        )
 
     def test_optional_taxon_id_returns_single_value(self) -> None:
         query = parse_observations_url(
@@ -74,7 +76,9 @@ class ObservationURLParserTests(unittest.TestCase):
             "https://www.inaturalist.org/observations?taxon_id=63421"
         )
         assert query is not None
-        self.assertIsNone(extract_provisional_species_name_from_observation_query(query))
+        self.assertIsNone(
+            extract_provisional_species_name_from_observation_query(query)
+        )
 
 
 class _FakeClient:

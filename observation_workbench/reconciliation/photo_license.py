@@ -24,6 +24,7 @@ MO also requires a **numeric License id** on write and returns only the license
 **name** on read, and exposes no ``/api2/licenses`` endpoint, so both directions
 of the mapping have to live here as a reviewed constant.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -44,9 +45,9 @@ INAT_LICENSE_CODES = frozenset(
 class LicensePreservation:
     """How exactly a source license can be reproduced at the destination."""
 
-    EXACT = "exact"                       # same license, same version
-    VERSION_SHIFTED = "version_shifted"   # same CC clauses, different version
-    UNSUPPORTED = "unsupported"           # all-rights-reserved, unknown, unmappable
+    EXACT = "exact"  # same license, same version
+    VERSION_SHIFTED = "version_shifted"  # same CC clauses, different version
+    UNSUPPORTED = "unsupported"  # all-rights-reserved, unknown, unmappable
 
 
 @dataclass(frozen=True)
@@ -93,28 +94,57 @@ class MOLicense:
 # mis-states the license. Do not "simplify" this table from the names.
 MO_LICENSES: dict[int, MOLicense] = {
     # by-nc-sa/2.5 -- ShareAlike, despite the name
-    1: MOLicense(1, "Creative Commons Non-commercial v2.5", "cc-by-nc-sa",
-                 LicensePreservation.VERSION_SHIFTED),
+    1: MOLicense(
+        1,
+        "Creative Commons Non-commercial v2.5",
+        "cc-by-nc-sa",
+        LicensePreservation.VERSION_SHIFTED,
+    ),
     # by-nc-sa/3.0 -- ShareAlike, despite the name
-    2: MOLicense(2, "Creative Commons Non-commercial v3.0", "cc-by-nc-sa",
-                 LicensePreservation.VERSION_SHIFTED),
+    2: MOLicense(
+        2,
+        "Creative Commons Non-commercial v3.0",
+        "cc-by-nc-sa",
+        LicensePreservation.VERSION_SHIFTED,
+    ),
     # by-sa/3.0
-    3: MOLicense(3, "Creative Commons Wikipedia Compatible v3.0", "cc-by-sa",
-                 LicensePreservation.VERSION_SHIFTED),
+    3: MOLicense(
+        3,
+        "Creative Commons Wikipedia Compatible v3.0",
+        "cc-by-sa",
+        LicensePreservation.VERSION_SHIFTED,
+    ),
     # public-domain/cc0
-    4: MOLicense(4, "Public Domain (Wikipedia compatible)", INAT_CC0,
-                 LicensePreservation.EXACT),
+    4: MOLicense(
+        4, "Public Domain (Wikipedia compatible)", INAT_CC0, LicensePreservation.EXACT
+    ),
     # by/4.0
-    5: MOLicense(5, "Creative Commons Attribution v4.0 (Wikipedia compatible)",
-                 "cc-by", LicensePreservation.EXACT),
+    5: MOLicense(
+        5,
+        "Creative Commons Attribution v4.0 (Wikipedia compatible)",
+        "cc-by",
+        LicensePreservation.EXACT,
+    ),
     # by-nc/4.0 -- note this one really is plain NC, unlike ids 1-2
-    6: MOLicense(6, "Creative Commons Attribution Non-commercial v4.0",
-                 "cc-by-nc", LicensePreservation.EXACT),
+    6: MOLicense(
+        6,
+        "Creative Commons Attribution Non-commercial v4.0",
+        "cc-by-nc",
+        LicensePreservation.EXACT,
+    ),
     # Ids 7-8 postdate the fixtures, but their names state every clause.
-    7: MOLicense(7, "Creative Commons Attribution Non-commercial NoDerivs v.4.0",
-                 "cc-by-nc-nd", LicensePreservation.EXACT),
-    8: MOLicense(8, "Creative Commons Attribution Non-commercial ShareAlike v4.0",
-                 "cc-by-nc-sa", LicensePreservation.EXACT),
+    7: MOLicense(
+        7,
+        "Creative Commons Attribution Non-commercial NoDerivs v.4.0",
+        "cc-by-nc-nd",
+        LicensePreservation.EXACT,
+    ),
+    8: MOLicense(
+        8,
+        "Creative Commons Attribution Non-commercial ShareAlike v4.0",
+        "cc-by-nc-sa",
+        LicensePreservation.EXACT,
+    ),
 }
 
 # Exact-match name lookup. Deliberately not fuzzy: an unrecognised name must
@@ -254,7 +284,10 @@ def inat_code_to_mo_license_id(
         return None
     # Exact-version rows first, then lowest id for determinism.
     candidates.sort(
-        key=lambda entry: (entry.preservation != LicensePreservation.EXACT, entry.license_id)
+        key=lambda entry: (
+            entry.preservation != LicensePreservation.EXACT,
+            entry.license_id,
+        )
     )
     return candidates[0].license_id
 
@@ -322,7 +355,8 @@ def normalized_pixel_fingerprint(data: bytes) -> str:
     if image.isNull():
         return ""
     scaled = image.convertToFormat(QImage.Format.Format_Grayscale8).scaled(
-        9, 8,
+        9,
+        8,
         Qt.AspectRatioMode.IgnoreAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
@@ -341,7 +375,8 @@ def normalized_pixel_fingerprint(data: bytes) -> str:
 def pixel_fingerprint_distance(left: str, right: str) -> Optional[int]:
     """Return the 64-bit dHash Hamming distance, or ``None`` if invalid."""
     if (
-        not left or not right
+        not left
+        or not right
         or not left.startswith("dhash8:")
         or not right.startswith("dhash8:")
     ):

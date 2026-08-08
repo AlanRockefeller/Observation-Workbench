@@ -1,4 +1,5 @@
 """Credential-free pending Identify action management dialogs."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -31,7 +32,9 @@ from observation_workbench.ui.external_links import open_external_url_silently
 class IdentifyActionDetailsDialog(QDialog):
     """Explicit, plaintext-only view of one journal action."""
 
-    def __init__(self, action: IdentifyActionPresentation, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, action: IdentifyActionPresentation, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Identify action #{action.local_action_id} details")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -49,23 +52,33 @@ class IdentifyActionDetailsDialog(QDialog):
         self._add(form, "Updated", action.updated_text)
         self._add(form, "Confirmed", format_journal_time(action.confirmed_at))
         self._add(form, "Unsafe attempt count", str(action.attempt_count))
-        self._add(form, "Verification attempt count", str(action.verification_attempt_count))
+        self._add(
+            form, "Verification attempt count", str(action.verification_attempt_count)
+        )
         self._add(form, "Last operation phase", action.last_operation_phase or "—")
         self._add(form, "Outcome unknown", "Yes" if action.outcome_unknown else "No")
         self._add(form, "Server response ID", action.server_object_id or "—")
         self._add(form, "Server response UUID", action.server_object_uuid or "—")
         self._add(form, "Verification status", action.verification_status or "—")
-        self._add(form, "Verification diagnostic", action.verification_diagnostic or "—")
+        self._add(
+            form, "Verification diagnostic", action.verification_diagnostic or "—"
+        )
         self._add(form, "Last error diagnostic", action.error_summary or "—")
         if action.retry_lineage_text:
             self._add(form, "Retry lineage", action.retry_lineage_text)
         if action.action_type == "identification":
-            self._add(form, "Taxon ID", str(action.taxon_id) if action.taxon_id else "—")
+            self._add(
+                form, "Taxon ID", str(action.taxon_id) if action.taxon_id else "—"
+            )
         layout.addLayout(form)
 
         if action.action_type in {"identification", "comment"}:
             body_label = QLabel(
-                "Identification body" if action.action_type == "identification" else "Comment body",
+                (
+                    "Identification body"
+                    if action.action_type == "identification"
+                    else "Comment body"
+                ),
                 self,
             )
             body_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -112,7 +125,9 @@ class PendingIdentifyActionsDialog(QDialog):
         "Lineage",
     )
 
-    def __init__(self, manager: IdentifyActionManager, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, manager: IdentifyActionManager, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Pending Identify actions")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -121,7 +136,9 @@ class PendingIdentifyActionsDialog(QDialog):
         self._actions: list[IdentifyActionPresentation] = []
 
         layout = QVBoxLayout(self)
-        self._notice = QLabel("Queued actions remain paused until you explicitly resume them.", self)
+        self._notice = QLabel(
+            "Queued actions remain paused until you explicitly resume them.", self
+        )
         self._notice.setWordWrap(True)
         layout.addWidget(self._notice)
 
@@ -149,9 +166,13 @@ class PendingIdentifyActionsDialog(QDialog):
         self._resume_button = self._button("Resume queued actions", self._resume_queued)
         self._submit_button = self._button("Submit selected", self._submit_selected)
         self._pause_button = self._button("Pause", self._pause)
-        self._cancel_button = self._button("Cancel queued action", self._cancel_selected)
+        self._cancel_button = self._button(
+            "Cancel queued action", self._cancel_selected
+        )
         self._verify_button = self._button("Verify again", self._verify_selected)
-        self._retry_button = self._button("Retry (re-queue)", self._retry_definite_failure)
+        self._retry_button = self._button(
+            "Retry (re-queue)", self._retry_definite_failure
+        )
         self._retry_anyway_button = self._button("Retry anyway", self._retry_anyway)
         self._open_button = self._button("Open observation", self._open_selected)
         self._details_button = self._button("Details", self._show_details)
@@ -195,7 +216,9 @@ class PendingIdentifyActionsDialog(QDialog):
         if selected_action_id is None:
             selected = self._selected_action()
             selected_action_id = selected.local_action_id if selected else None
-        self._actions = [present_identify_action(action) for action in self._manager.list_actions()]
+        self._actions = [
+            present_identify_action(action) for action in self._manager.list_actions()
+        ]
         self._table.setRowCount(len(self._actions))
         selected_row = -1
         for row, action in enumerate(self._actions):
@@ -208,7 +231,9 @@ class PendingIdentifyActionsDialog(QDialog):
                 action.state_text,
                 action.created_text,
                 str(action.attempt_count),
-                action.error_summary or action.verification_diagnostic or action.verification_status,
+                action.error_summary
+                or action.verification_diagnostic
+                or action.verification_status,
                 action.retry_lineage_text,
             )
             for column, value in enumerate(values):
@@ -255,10 +280,16 @@ class PendingIdentifyActionsDialog(QDialog):
         elif self._manager.is_paused:
             suffix = ""
             if not eligible and other and queue.other_account_logins:
-                suffix = f" Sign in as {queue.other_account_logins[0]} to submit its rows."
-            self._notice.setText(f"Identify action manager is paused · {queue_text}.{suffix}")
+                suffix = (
+                    f" Sign in as {queue.other_account_logins[0]} to submit its rows."
+                )
+            self._notice.setText(
+                f"Identify action manager is paused · {queue_text}.{suffix}"
+            )
         else:
-            self._notice.setText(f"Identify action manager has authorized dispatch · {queue_text}.")
+            self._notice.setText(
+                f"Identify action manager has authorized dispatch · {queue_text}."
+            )
 
     def _update_controls(self) -> None:
         action = self._selected_action()
@@ -266,14 +297,26 @@ class PendingIdentifyActionsDialog(QDialog):
         self._resume_button.setEnabled(bool(queue.eligible_for_current_account))
         can_submit = False
         if action is not None:
-            can_submit, _reason = self._manager.can_request_dispatch(action.local_action_id)
+            can_submit, _reason = self._manager.can_request_dispatch(
+                action.local_action_id
+            )
         self._submit_button.setEnabled(can_submit)
         self._pause_button.setEnabled(not self._manager.is_paused)
         self._cancel_button.setEnabled(bool(action and action.can_cancel))
-        self._cancel_button.setText(action.cancel_label if action else "Cancel queued action")
-        self._verify_button.setEnabled(bool(action and action.can_verify and not self._manager.is_running))
-        self._verify_button.setText("Check iNaturalist again" if action and action.can_verify else "Verify again")
-        self._retry_button.setEnabled(bool(action and action.can_retry_definite_failure))
+        self._cancel_button.setText(
+            action.cancel_label if action else "Cancel queued action"
+        )
+        self._verify_button.setEnabled(
+            bool(action and action.can_verify and not self._manager.is_running)
+        )
+        self._verify_button.setText(
+            "Check iNaturalist again"
+            if action and action.can_verify
+            else "Verify again"
+        )
+        self._retry_button.setEnabled(
+            bool(action and action.can_retry_definite_failure)
+        )
         self._retry_anyway_button.setEnabled(bool(action and action.can_retry_anyway))
         self._open_button.setEnabled(bool(action and action.can_open_observation))
         self._details_button.setEnabled(action is not None)
@@ -295,9 +338,10 @@ class PendingIdentifyActionsDialog(QDialog):
                     "write that definitely failed."
                 )
             allowed, reason = self._manager.can_request_dispatch(action.local_action_id)
-            return (
-                "This action has not been sent. "
-                + (reason if not allowed and reason else "Authenticate as the action's account to submit it.")
+            return "This action has not been sent. " + (
+                reason
+                if not allowed and reason
+                else "Authenticate as the action's account to submit it."
             )
         if action.state == "failed_retryable":
             return (
@@ -398,7 +442,11 @@ class PendingIdentifyActionsDialog(QDialog):
         action = self._selected_action()
         if action is None or not action.can_retry_anyway:
             return
-        noun = "identification" if action.action_type == "identification" else "comment" if action.action_type == "comment" else "action"
+        noun = (
+            "identification"
+            if action.action_type == "identification"
+            else "comment" if action.action_type == "comment" else "action"
+        )
         box = QMessageBox(
             QMessageBox.Icon.Warning,
             "Retry anyway despite duplicate risk?",
@@ -413,7 +461,9 @@ class PendingIdentifyActionsDialog(QDialog):
         box.setDefaultButton(cancel)
         box.exec()
         if box.clickedButton() is retry:
-            retry_id = self._manager.retry_anyway(action.local_action_id, duplicate_risk_confirmed=True)
+            retry_id = self._manager.retry_anyway(
+                action.local_action_id, duplicate_risk_confirmed=True
+            )
             if retry_id is not None:
                 self.refresh(retry_id)
 
@@ -455,7 +505,9 @@ class PendingIdentifyActionsDialog(QDialog):
 
 def _open_observation(observation_id: int) -> None:
     if observation_id > 0:
-        open_external_url_silently(f"https://www.inaturalist.org/observations/{observation_id}")
+        open_external_url_silently(
+            f"https://www.inaturalist.org/observations/{observation_id}"
+        )
 
 
 def _action_id_text(value: int | None) -> str:

@@ -8,6 +8,7 @@ field it is intentionally reconciling and blocks on every other conflict.
 The heavy hydration and fingerprint helpers live in ``its.py`` and
 ``coordinator.py``; they are imported lazily here to avoid a module import cycle.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -21,7 +22,8 @@ from .types import InventoryObservation, ReconciliationProfile, RemoteSite
 
 
 def resolve_mo_fungi_status(
-    mo_client: MOClient, inventory: InventoryObservation,
+    mo_client: MOClient,
+    inventory: InventoryObservation,
     cancelled: Callable[[], bool] = lambda: False,
 ) -> InventoryObservation:
     """Enrich an MO record's fungal scope from ``/names``.
@@ -51,10 +53,17 @@ def resolve_mo_fungi_status(
 
 
 def evaluate_specimen_state(
-    db: ReconciliationDB, profile: ReconciliationProfile, pair: dict[str, Any],
-    inat_raw: dict[str, Any], mo_raw: dict[str, Any], reader: INatReconciliationReader,
-    *, mo_client: MOClient, cancelled: Callable[[], bool] = lambda: False,
-    include_coordinates: bool = True, tolerate_unknown_inat_scope: bool = False,
+    db: ReconciliationDB,
+    profile: ReconciliationProfile,
+    pair: dict[str, Any],
+    inat_raw: dict[str, Any],
+    mo_raw: dict[str, Any],
+    reader: INatReconciliationReader,
+    *,
+    mo_client: MOClient,
+    cancelled: Callable[[], bool] = lambda: False,
+    include_coordinates: bool = True,
+    tolerate_unknown_inat_scope: bool = False,
 ) -> tuple[str, str, tuple[str, ...]]:
     """Full fresh specimen-identity validation reusing the shared conflict logic.
 
@@ -74,18 +83,28 @@ def evaluate_specimen_state(
     # Imported lazily to avoid a module import cycle (coordinator imports the
     # write services, which import this module).
     from .coordinator import _hydrate_record
-    from .its import _hydrate_mo_specimen, _normalized_locality, _specimen_evidence_fingerprint
+    from .its import (
+        _hydrate_mo_specimen,
+        _normalized_locality,
+        _specimen_evidence_fingerprint,
+    )
 
     inat_inventory = reader.parse_inventory(inat_raw, profile.inat_user_id, None, None)
     mo_inventory = resolve_mo_fungi_status(
-        mo_client, parse_mo_observation(mo_raw, profile.mo_user_id), cancelled,
+        mo_client,
+        parse_mo_observation(mo_raw, profile.mo_user_id),
+        cancelled,
     )
-    inat_hydrated = _hydrate_record(inat_inventory, inat_raw, authorized=True, include_its=True)
+    inat_hydrated = _hydrate_record(
+        inat_inventory, inat_raw, authorized=True, include_its=True
+    )
     # iNaturalist and MO high-detail payloads have different shapes; MO specimen
     # fields need a dedicated site-aware hydrator.
     mo_hydrated = _hydrate_mo_specimen(mo_inventory, mo_raw)
     conflicts, unavailable = specimen_identity_conflicts(
-        mo_hydrated, inat_hydrated, include_coordinates=include_coordinates,
+        mo_hydrated,
+        inat_hydrated,
+        include_coordinates=include_coordinates,
     )
     if tolerate_unknown_inat_scope:
         tolerated = scope_unknown_message(RemoteSite.INAT)
@@ -94,7 +113,10 @@ def evaluate_specimen_state(
     # Unavailable/unknown required specimen evidence is write-blocking: we cannot
     # prove these records are the same collection.
     reasons.extend(f"required evidence unavailable: {item}" for item in unavailable)
-    if not inat_hydrated.required_values_available or not mo_hydrated.required_values_available:
+    if (
+        not inat_hydrated.required_values_available
+        or not mo_hydrated.required_values_available
+    ):
         reasons.append("a required specimen-identity value is hidden or unavailable")
     # The pair's aggregate ``link_confirmed_with_metadata_conflicts`` state was
     # computed at pairing time and may exist SOLELY because the coordinates
@@ -103,10 +125,15 @@ def evaluate_specimen_state(
     # recomputed, coordinate-excluded conflicts above rather than this stale
     # aggregate. ITS/name operations keep coordinates included, so the aggregate
     # still blocks there.
-    if include_coordinates and str(pair.get("link_state")) == "link_confirmed_with_metadata_conflicts":
+    if (
+        include_coordinates
+        and str(pair.get("link_state")) == "link_confirmed_with_metadata_conflicts"
+    ):
         reasons.append("the confirmed pair has unresolved specimen-identity conflicts")
     if db.confirmed_pair_conflict(
-        profile.profile_id, int(pair["mo_observation_id"]), int(pair["inat_observation_id"]),
+        profile.profile_id,
+        int(pair["mo_observation_id"]),
+        int(pair["inat_observation_id"]),
     ):
         reasons.append("another confirmed one-to-one pairing conflicts with this pair")
     if db.pair_is_excluded(profile.profile_id, int(pair["pair_id"])):
@@ -132,6 +159,12 @@ def evaluate_specimen_state(
     # locality, coordinates, or availability is detected even when it produces no
     # new conflict. Values are fed into a non-reversible hash, never stored raw.
     fingerprint = _specimen_evidence_fingerprint(
-        mo_inventory, inat_inventory, mo_hydrated, inat_hydrated, mo_loc, inat_loc, deduped,
+        mo_inventory,
+        inat_inventory,
+        mo_hydrated,
+        inat_hydrated,
+        mo_loc,
+        inat_loc,
+        deduped,
     )
     return message, fingerprint, tuple(warnings)

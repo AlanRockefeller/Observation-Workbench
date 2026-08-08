@@ -10,6 +10,7 @@ same shape ``INatReconciliationReader.parse_inventory``/
 calls — this module never performs the fetch itself (that's the
 coordinator's job), so it is fully testable this way.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -21,13 +22,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from observation_workbench.reconciliation.consolidation import (  # noqa: E402
-    ConsolidationError, _evidence_unavailable_notices, _hydrate_candidate,
-    _supporting_evidence, check_duplicate_set_eligibility, prepare_preview,
+    ConsolidationError,
+    _evidence_unavailable_notices,
+    _hydrate_candidate,
+    _supporting_evidence,
+    check_duplicate_set_eligibility,
+    prepare_preview,
     select_canonical,
 )
 from observation_workbench.reconciliation.db import ReconciliationDB  # noqa: E402
-from observation_workbench.reconciliation.inat_reader import INatReconciliationReader  # noqa: E402
-from observation_workbench.reconciliation.types import ReconciliationProfile, RemoteSite  # noqa: E402
+from observation_workbench.reconciliation.inat_reader import (
+    INatReconciliationReader,
+)  # noqa: E402
+from observation_workbench.reconciliation.types import (
+    ReconciliationProfile,
+    RemoteSite,
+)  # noqa: E402
 
 PROFILE_ID = 1
 INAT_USER_ID = 500
@@ -36,64 +46,119 @@ MO_USER_ID = 900
 
 def _profile() -> ReconciliationProfile:
     return ReconciliationProfile(
-        profile_id=PROFILE_ID, inat_user_id=INAT_USER_ID, inat_login="inat_user",
-        mo_user_id=MO_USER_ID, mo_login="mo_user", created_at="", last_used_at="",
+        profile_id=PROFILE_ID,
+        inat_user_id=INAT_USER_ID,
+        inat_login="inat_user",
+        mo_user_id=MO_USER_ID,
+        mo_login="mo_user",
+        created_at="",
+        last_used_at="",
     )
 
 
-def _inat_raw(obs_id: int, *, voucher: str = "", collection: str = "",
-              photo_id: str = "", taxon_id: int = 47000,
-              taxon_name: str = "Amanita muscaria", observed_on: str = "2026-06-01",
-              owner_id: int = INAT_USER_ID, latitude: float | None = None,
-              longitude: float | None = None, accuracy: float | None = None) -> dict:
+def _inat_raw(
+    obs_id: int,
+    *,
+    voucher: str = "",
+    collection: str = "",
+    photo_id: str = "",
+    taxon_id: int = 47000,
+    taxon_name: str = "Amanita muscaria",
+    observed_on: str = "2026-06-01",
+    owner_id: int = INAT_USER_ID,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
+) -> dict:
     ofvs = []
     if voucher:
         ofvs.append({"observation_field": {"name": "Voucher Number"}, "value": voucher})
     if collection:
-        ofvs.append({"observation_field": {"name": "Collection Number"}, "value": collection})
+        ofvs.append(
+            {"observation_field": {"name": "Collection Number"}, "value": collection}
+        )
     photos = []
     if photo_id:
         photos.append({"photo": {"id": photo_id, "url": f"https://x/{photo_id}.jpg"}})
     return {
-        "id": obs_id, "uuid": f"uuid-inat-{obs_id}",
+        "id": obs_id,
+        "uuid": f"uuid-inat-{obs_id}",
         "user": {"id": owner_id, "login": "inat_user"},
-        "taxon": {"id": taxon_id, "name": taxon_name, "rank": "species", "iconic_taxon_name": "Fungi"},
-        "observed_on": observed_on, "updated_at": "2026-07-01T00:00:00Z",
-        "place_guess": "Some Forest", "ofvs": ofvs, "observation_photos": photos,
+        "taxon": {
+            "id": taxon_id,
+            "name": taxon_name,
+            "rank": "species",
+            "iconic_taxon_name": "Fungi",
+        },
+        "observed_on": observed_on,
+        "updated_at": "2026-07-01T00:00:00Z",
+        "place_guess": "Some Forest",
+        "ofvs": ofvs,
+        "observation_photos": photos,
         "geoprivacy": "open",
         "geojson": (
             {"type": "Point", "coordinates": [longitude, latitude]}
-            if latitude is not None and longitude is not None else None
+            if latitude is not None and longitude is not None
+            else None
         ),
         "positional_accuracy": accuracy,
     }
 
 
-def _mo_raw(obs_id: int, *, voucher: str = "", photo_id: str = "", taxon_name: str = "Amanita muscaria",
-            observed_on: str = "2026-06-01", owner_id: int = MO_USER_ID,
-            collection: str = "", latitude: float | None = None,
-            longitude: float | None = None, accuracy: float | None = None) -> dict:
+def _mo_raw(
+    obs_id: int,
+    *,
+    voucher: str = "",
+    photo_id: str = "",
+    taxon_name: str = "Amanita muscaria",
+    observed_on: str = "2026-06-01",
+    owner_id: int = MO_USER_ID,
+    collection: str = "",
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
+) -> dict:
     collection_numbers = [{"number": collection}] if collection else []
     herbarium_records = [{"accession_number": voucher}] if voucher else []
     images = [{"id": photo_id, "url": f"https://y/{photo_id}.jpg"}] if photo_id else []
     return {
-        "id": obs_id, "owner_id": owner_id, "owner": {"login": "mo_user"},
-        "consensus": {"id": 111, "text_name": taxon_name, "rank": "Species", "classification": {"kingdom": "Fungi"}},
-        "location": {"id": 5, "name": "Some Forest"}, "date": observed_on,
-        "updated_at": "2026-07-01T00:00:00Z", "collection_numbers": collection_numbers,
-        "herbarium_records": herbarium_records, "images": images,
-        "latitude": latitude, "longitude": longitude, "gps_accuracy": accuracy,
+        "id": obs_id,
+        "owner_id": owner_id,
+        "owner": {"login": "mo_user"},
+        "consensus": {
+            "id": 111,
+            "text_name": taxon_name,
+            "rank": "Species",
+            "classification": {"kingdom": "Fungi"},
+        },
+        "location": {"id": 5, "name": "Some Forest"},
+        "date": observed_on,
+        "updated_at": "2026-07-01T00:00:00Z",
+        "collection_numbers": collection_numbers,
+        "herbarium_records": herbarium_records,
+        "images": images,
+        "latitude": latitude,
+        "longitude": longitude,
+        "gps_accuracy": accuracy,
     }
 
 
-def _pair(inat_raw: dict, mo_raw: dict, reader: INatReconciliationReader, profile: ReconciliationProfile):
-    return _hydrate_candidate(RemoteSite.INAT, inat_raw["id"], inat_raw, profile, reader), \
-        _hydrate_candidate(RemoteSite.MO, mo_raw["id"], mo_raw, profile, reader)
+def _pair(
+    inat_raw: dict,
+    mo_raw: dict,
+    reader: INatReconciliationReader,
+    profile: ReconciliationProfile,
+):
+    return _hydrate_candidate(
+        RemoteSite.INAT, inat_raw["id"], inat_raw, profile, reader
+    ), _hydrate_candidate(RemoteSite.MO, mo_raw["id"], mo_raw, profile, reader)
 
 
 def _eligibility(db, profile, hydrated):
     return check_duplicate_set_eligibility(
-        db, profile, hydrated,
+        db,
+        profile,
+        hydrated,
         evidence_edges=_supporting_evidence(hydrated),
     )
 
@@ -104,7 +169,9 @@ def main() -> int:
     db_path = Path(tmp.name)
     db = ReconciliationDB(path=db_path)
     profile = _profile()
-    reader = INatReconciliationReader(client=None)  # parse_inventory never touches self.client
+    reader = INatReconciliationReader(
+        client=None
+    )  # parse_inventory never touches self.client
 
     try:
         db.connection().execute(
@@ -126,10 +193,16 @@ def main() -> int:
         )
         assert elig1.eligible, elig1.blocking_reasons
         assert elig1.supporting_evidence
-        preview1 = prepare_preview(db, profile, [
-            (RemoteSite.INAT, 101, inat1), (RemoteSite.MO, 201, mo1),
-            (RemoteSite.MO, 202, mo1_donor),
-        ], reader)
+        preview1 = prepare_preview(
+            db,
+            profile,
+            [
+                (RemoteSite.INAT, 101, inat1),
+                (RemoteSite.MO, 201, mo1),
+                (RemoteSite.MO, 202, mo1_donor),
+            ],
+            reader,
+        )
         assert preview1.canonical_mo_observation_id is None
         assert preview1.canonical_inat_observation_id is None
         assert all(not item.enabled for item in preview1.unsupported_items)
@@ -138,7 +211,9 @@ def main() -> int:
         # Scenario 2: only taxon similarity -> blocked.
         inat2 = _inat_raw(102, taxon_name="Amanita muscaria", observed_on="2026-06-01")
         mo2 = _mo_raw(203, taxon_name="Amanita muscaria", observed_on="2026-06-01")
-        mo2_donor = _mo_raw(204, taxon_name="Amanita muscaria", observed_on="2026-06-01")
+        mo2_donor = _mo_raw(
+            204, taxon_name="Amanita muscaria", observed_on="2026-06-01"
+        )
         (inv_i2, hyd_i2), (inv_m2, hyd_m2) = _pair(inat2, mo2, reader, profile)
         inv_m2d, hyd_m2d = _hydrate_candidate(
             RemoteSite.MO, 204, mo2_donor, profile, reader
@@ -147,26 +222,32 @@ def main() -> int:
             db, profile, [(inv_i2, hyd_i2), (inv_m2, hyd_m2), (inv_m2d, hyd_m2d)]
         )
         assert not elig2.eligible
-        assert any(
-            "no strong identity evidence" in r
-            for r in elig2.blocking_reasons
-        )
+        assert any("no strong identity evidence" in r for r in elig2.blocking_reasons)
         print("scenario 2 (taxon-only, blocked): PASS")
 
         # Graph negatives: a strong pair never admits an unsupported third node,
         # and two internally strong components never become one specimen.
         strong_pair_plus_extra = [
             _hydrate_candidate(
-                RemoteSite.INAT, 110, _inat_raw(110, voucher="GRAPH-A"),
-                profile, reader,
+                RemoteSite.INAT,
+                110,
+                _inat_raw(110, voucher="GRAPH-A"),
+                profile,
+                reader,
             ),
             _hydrate_candidate(
-                RemoteSite.MO, 210, _mo_raw(210, voucher="GRAPH-A"),
-                profile, reader,
+                RemoteSite.MO,
+                210,
+                _mo_raw(210, voucher="GRAPH-A"),
+                profile,
+                reader,
             ),
             _hydrate_candidate(
-                RemoteSite.MO, 211, _mo_raw(211),
-                profile, reader,
+                RemoteSite.MO,
+                211,
+                _mo_raw(211),
+                profile,
+                reader,
             ),
         ]
         unsupported = _eligibility(db, profile, strong_pair_plus_extra)
@@ -178,20 +259,32 @@ def main() -> int:
 
         disconnected = [
             _hydrate_candidate(
-                RemoteSite.INAT, 120, _inat_raw(120, voucher="CLUSTER-A"),
-                profile, reader,
+                RemoteSite.INAT,
+                120,
+                _inat_raw(120, voucher="CLUSTER-A"),
+                profile,
+                reader,
             ),
             _hydrate_candidate(
-                RemoteSite.MO, 220, _mo_raw(220, voucher="CLUSTER-A"),
-                profile, reader,
+                RemoteSite.MO,
+                220,
+                _mo_raw(220, voucher="CLUSTER-A"),
+                profile,
+                reader,
             ),
             _hydrate_candidate(
-                RemoteSite.INAT, 121, _inat_raw(121, voucher="CLUSTER-B"),
-                profile, reader,
+                RemoteSite.INAT,
+                121,
+                _inat_raw(121, voucher="CLUSTER-B"),
+                profile,
+                reader,
             ),
             _hydrate_candidate(
-                RemoteSite.MO, 221, _mo_raw(221, voucher="CLUSTER-B"),
-                profile, reader,
+                RemoteSite.MO,
+                221,
+                _mo_raw(221, voucher="CLUSTER-B"),
+                profile,
+                reader,
             ),
         ]
         assert not _eligibility(db, profile, disconnected).eligible
@@ -214,7 +307,11 @@ def main() -> int:
         for label, raws in similarity_cases.items():
             hydrated_case = [
                 _hydrate_candidate(
-                    RemoteSite.MO, raw["id"], raw, profile, reader,
+                    RemoteSite.MO,
+                    raw["id"],
+                    raw,
+                    profile,
+                    reader,
                 )
                 for raw in raws
             ]
@@ -222,18 +319,25 @@ def main() -> int:
         malformed_base = _supporting_evidence(strong_pair_plus_extra[:2])[0]
         malformed = replace(malformed_base, reviewed_evidence_fingerprint="")
         malformed_result = check_duplicate_set_eligibility(
-            db, profile, strong_pair_plus_extra[:2],
+            db,
+            profile,
+            strong_pair_plus_extra[:2],
             evidence_edges=(malformed,),
         )
         assert not malformed_result.eligible
-        assert any("incomplete evidence" in reason for reason in malformed_result.blocking_reasons)
+        assert any(
+            "incomplete evidence" in reason
+            for reason in malformed_result.blocking_reasons
+        )
         forged_type = replace(
             malformed_base,
             evidence_type="made_up_proof",
             evidence_strength="strong",
         )
         forged_result = check_duplicate_set_eligibility(
-            db, profile, strong_pair_plus_extra[:2],
+            db,
+            profile,
+            strong_pair_plus_extra[:2],
             evidence_edges=(forged_type,),
         )
         assert not forged_result.eligible
@@ -246,7 +350,9 @@ def main() -> int:
             evidence_strength="corroborating",
         )
         wrong_strength_result = check_duplicate_set_eligibility(
-            db, profile, strong_pair_plus_extra[:2],
+            db,
+            profile,
+            strong_pair_plus_extra[:2],
             evidence_edges=(wrong_strength,),
         )
         assert not wrong_strength_result.eligible
@@ -265,7 +371,8 @@ def main() -> int:
         mo233 = _mo_raw(233, voucher="PATH-A", photo_id=999)
         mo234 = _mo_raw(234, photo_id=999)
         path_preview = prepare_preview(
-            db, profile,
+            db,
+            profile,
             [
                 (RemoteSite.MO, 232, mo232),
                 (RemoteSite.MO, 233, mo233),
@@ -275,7 +382,8 @@ def main() -> int:
         )
         path_selected = select_canonical(path_preview, 232, None)
         donor_234 = next(
-            path for path in path_selected.donor_evidence_paths
+            path
+            for path in path_selected.donor_evidence_paths
             if path.donor_observation_id == 234
         )
         assert len(donor_234.steps) == 2
@@ -286,10 +394,12 @@ def main() -> int:
         mo241 = _mo_raw(241, voucher="CANON-B")
         mo242 = _mo_raw(242)
         mo242["herbarium_records"] = [
-            {"accession_number": "CANON-A"}, {"accession_number": "CANON-B"},
+            {"accession_number": "CANON-A"},
+            {"accession_number": "CANON-B"},
         ]
         canonical_preview = prepare_preview(
-            db, profile,
+            db,
+            profile,
             [
                 (RemoteSite.MO, 240, mo240),
                 (RemoteSite.MO, 241, mo241),
@@ -304,7 +414,9 @@ def main() -> int:
             "direct reviewed specimen-identity edge" in reason
             for reason in bad_choice.eligibility.blocking_reasons
         )
-        print("graph positives (connected voucher/media path) and canonical-dependent block: PASS")
+        print(
+            "graph positives (connected voucher/media path) and canonical-dependent block: PASS"
+        )
 
         # Scenario 3: owner mismatch -> blocked.
         inat3 = _inat_raw(103, voucher="AR-003", owner_id=999999)
@@ -324,30 +436,44 @@ def main() -> int:
         # Scenario 4/5: select_canonical validation + donor recomputation.
         try:
             select_canonical(
-                preview1, canonical_mo_observation_id=999999,
+                preview1,
+                canonical_mo_observation_id=999999,
                 canonical_inat_observation_id=101,
             )
-            raise AssertionError("expected ConsolidationError for out-of-set canonical id")
+            raise AssertionError(
+                "expected ConsolidationError for out-of-set canonical id"
+            )
         except ConsolidationError as exc:
             assert exc.code == "canonical_not_in_set"
         print("scenario 4 (canonical not in set, raises): PASS")
 
-        confirmed = select_canonical(preview1, canonical_mo_observation_id=201, canonical_inat_observation_id=101)
+        confirmed = select_canonical(
+            preview1, canonical_mo_observation_id=201, canonical_inat_observation_id=101
+        )
         assert confirmed.canonical_mo_observation_id == 201
         assert confirmed.canonical_inat_observation_id == 101
         assert len(confirmed.donor_members) == 1
         assert len(confirmed.canonical_members) == 2
-        assert any("become the canonical pair" in c for c in confirmed.local_changes_preview)
+        assert any(
+            "become the canonical pair" in c for c in confirmed.local_changes_preview
+        )
         print("scenario 5 (canonical selected, donor list recomputed): PASS")
 
         # Scenario 6: a candidate already belongs to another unresolved consolidation.
         consolidation_id = db.create_consolidation_with_canonical(
-            PROFILE_ID, [("inat", 101), ("mo", 201), ("mo", 202)],
-            canonical_mo_observation_id=201, canonical_inat_observation_id=101,
+            PROFILE_ID,
+            [("inat", 101), ("mo", 201), ("mo", 202)],
+            canonical_mo_observation_id=201,
+            canonical_inat_observation_id=101,
         )
         assert consolidation_id > 0
-        membership = db.consolidation_membership_for_observation(PROFILE_ID, "inat", 101)
-        assert membership is not None and int(membership["consolidation_id"]) == consolidation_id
+        membership = db.consolidation_membership_for_observation(
+            PROFILE_ID, "inat", 101
+        )
+        assert (
+            membership is not None
+            and int(membership["consolidation_id"]) == consolidation_id
+        )
 
         inat4 = _inat_raw(101, voucher="AR-001")  # same #101, now already a member
         mo4 = _mo_raw(207, voucher="AR-001")
@@ -360,16 +486,24 @@ def main() -> int:
             db, profile, [(inv_i4, hyd_i4), (inv_m4, hyd_m4), (inv_m4d, hyd_m4d)]
         )
         assert not elig4.eligible
-        assert any("already belongs to consolidation" in r for r in elig4.blocking_reasons)
-        print("scenario 6 (already in unresolved consolidation, blocked pre-DB-constraint): PASS")
+        assert any(
+            "already belongs to consolidation" in r for r in elig4.blocking_reasons
+        )
+        print(
+            "scenario 6 (already in unresolved consolidation, blocked pre-DB-constraint): PASS"
+        )
 
         # Schema-level backstop still fires when a pre-check is bypassed.
         try:
             db.create_consolidation_with_canonical(
-                PROFILE_ID, [("inat", 101), ("mo", 207), ("mo", 208)],
-                canonical_mo_observation_id=207, canonical_inat_observation_id=101,
+                PROFILE_ID,
+                [("inat", 101), ("mo", 207), ("mo", 208)],
+                canonical_mo_observation_id=207,
+                canonical_inat_observation_id=101,
             )
-            raise AssertionError("expected sqlite3.IntegrityError for duplicate membership")
+            raise AssertionError(
+                "expected sqlite3.IntegrityError for duplicate membership"
+            )
         except sqlite3.IntegrityError:
             pass
         print("schema backstop (duplicate membership -> IntegrityError): PASS")
@@ -379,37 +513,55 @@ def main() -> int:
         # inat_mo_field_id=None, so no AuthoritativeLinkRow is ever produced and
         # the reciprocal-link evidence branch is never entered at all.
         inat_linked = _inat_raw(301, voucher="AR-700")
-        inat_linked["ofvs"].append({
-            "id": 5001, "uuid": "ofv-5001", "field_id": 77,
-            "value": "https://mushroomobserver.org/obs/900",
-        })
+        inat_linked["ofvs"].append(
+            {
+                "id": 5001,
+                "uuid": "ofv-5001",
+                "field_id": 77,
+                "value": "https://mushroomobserver.org/obs/900",
+            }
+        )
         inat_dupe = _inat_raw(302, voucher="AR-700")
         inv_l, hyd_l = _hydrate_candidate(
-            RemoteSite.INAT, 301, inat_linked, profile, reader, inat_mo_field_id=77,
+            RemoteSite.INAT,
+            301,
+            inat_linked,
+            profile,
+            reader,
+            inat_mo_field_id=77,
         )
         inv_d, hyd_d = _hydrate_candidate(
-            RemoteSite.INAT, 302, inat_dupe, profile, reader, inat_mo_field_id=77,
+            RemoteSite.INAT,
+            302,
+            inat_dupe,
+            profile,
+            reader,
+            inat_mo_field_id=77,
         )
         same_site = [(inv_l, hyd_l), (inv_d, hyd_d)]
         # Reaching this at all requires the inventory-link fallback to expose the
         # snapshot shape (fingerprint vs row_fingerprint).
         same_site_edges = _supporting_evidence(same_site)
-        assert any(e.evidence_type == "exact_voucher" for e in same_site_edges), same_site_edges
+        assert any(
+            e.evidence_type == "exact_voucher" for e in same_site_edges
+        ), same_site_edges
 
         same_site_preview = prepare_preview(
-            db, profile,
+            db,
+            profile,
             [(RemoteSite.INAT, 301, inat_linked), (RemoteSite.INAT, 302, inat_dupe)],
-            reader, inat_mo_field_id=77,
+            reader,
+            inat_mo_field_id=77,
         )
-        assert same_site_preview.eligibility.eligible, (
-            same_site_preview.eligibility.blocking_reasons
-        )
+        assert (
+            same_site_preview.eligibility.eligible
+        ), same_site_preview.eligibility.blocking_reasons
         # The linked record stays canonical: nothing is overwritten, and no link is
         # written at all for a same-site set.
         canonical_linked = select_canonical(same_site_preview, None, 301)
-        assert canonical_linked.eligibility.eligible, (
-            canonical_linked.eligibility.blocking_reasons
-        )
+        assert (
+            canonical_linked.eligibility.eligible
+        ), canonical_linked.eligibility.blocking_reasons
         print("scenario 7 (same-site set with linked canonical, allowed): PASS")
 
         # Scenario 8: the same record may NOT become a donor while it is still
@@ -417,12 +569,16 @@ def main() -> int:
         paired_preview = replace(
             same_site_preview,
             members=tuple(
-                replace(
-                    member,
-                    current_pair_partner_site=RemoteSite.MO,
-                    current_pair_partner_id=900,
-                    current_pair_review_state="confirmed",
-                ) if member.observation_id == 301 else member
+                (
+                    replace(
+                        member,
+                        current_pair_partner_site=RemoteSite.MO,
+                        current_pair_partner_id=900,
+                        current_pair_review_state="confirmed",
+                    )
+                    if member.observation_id == 301
+                    else member
+                )
                 for member in same_site_preview.members
             ),
         )
@@ -438,10 +594,18 @@ def main() -> int:
 
         # Scenario 9: every coordinate/date rejection explains itself.
         near = _inat_raw(
-            401, taxon_name="Amanita muscaria", latitude=47.1, longitude=-122.1, accuracy=10,
+            401,
+            taxon_name="Amanita muscaria",
+            latitude=47.1,
+            longitude=-122.1,
+            accuracy=10,
         )
         far = _inat_raw(
-            402, taxon_name="Amanita muscaria", latitude=47.1045, longitude=-122.1, accuracy=10,
+            402,
+            taxon_name="Amanita muscaria",
+            latitude=47.1045,
+            longitude=-122.1,
+            accuracy=10,
         )
         inv_n, hyd_n = _hydrate_candidate(RemoteSite.INAT, 401, near, profile, reader)
         inv_f, hyd_f = _hydrate_candidate(RemoteSite.INAT, 402, far, profile, reader)
@@ -451,7 +615,9 @@ def main() -> int:
             for e in _supporting_evidence(distant)
         )
         notices = _evidence_unavailable_notices(distant)
-        assert any("beyond the 100 m corroboration threshold" in n for n in notices), notices
+        assert any(
+            "beyond the 100 m corroboration threshold" in n for n in notices
+        ), notices
         print("scenario 9 (distance rejection is explained, not silent): PASS")
 
         integrity = db.connection().execute("PRAGMA integrity_check").fetchone()[0]

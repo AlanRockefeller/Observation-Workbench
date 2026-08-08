@@ -32,6 +32,7 @@ Usage
     python tools/gate_1e_proof_harness.py --mo-obs-id 123456 --image ... \
         --mo-write --run --i-own-these-records
 """
+
 from __future__ import annotations
 
 import argparse
@@ -123,7 +124,9 @@ class INatProof:
     ``Authorization`` header value — NOT ``Bearer <jwt>``, which iNaturalist
     treats as unauthenticated."""
 
-    def __init__(self, jwt: str, *, timeout: float = 60.0, verbose: bool = False) -> None:
+    def __init__(
+        self, jwt: str, *, timeout: float = 60.0, verbose: bool = False
+    ) -> None:
         self._jwt = _normalise_jwt(jwt)
         self._verbose = verbose
         self._last = 0.0
@@ -202,7 +205,9 @@ class INatProof:
                 params={"id": value, "fields": OBS_FIELDS},
             )
             if status >= 400:
-                raise RuntimeError(f"lookup of observation {value} failed: HTTP {status}")
+                raise RuntimeError(
+                    f"lookup of observation {value} failed: HTTP {status}"
+                )
             results = payload.get("results") or []
             if not results:
                 raise RuntimeError(f"no observation found with id {value}")
@@ -300,7 +305,9 @@ class INatProof:
 class MOProof:
     """MO spaces requests conservatively (>=5s, or the server's reported runtime)."""
 
-    def __init__(self, api_key: str = "", *, timeout: float = 60.0, verbose: bool = False) -> None:
+    def __init__(
+        self, api_key: str = "", *, timeout: float = 60.0, verbose: bool = False
+    ) -> None:
         self._key = api_key.strip()
         self._verbose = verbose
         self._last_finished = 0.0
@@ -443,7 +450,9 @@ def run_inat_checks(
     try:
         obs_uuid, observation = inat.resolve_observation(obs_uuid)
     except RuntimeError as exc:
-        record(Result("inat.baseline", "Target observation is readable", FAIL, str(exc)))
+        record(
+            Result("inat.baseline", "Target observation is readable", FAIL, str(exc))
+        )
         return results
 
     owner = (observation.get("user") or {}).get("login")
@@ -473,7 +482,9 @@ def run_inat_checks(
             {
                 "observation_id": observation.get("id"),
                 "uuid": obs_uuid,
-                "existing_observation_photo_uuids": sorted(x for x in baseline_ids if x),
+                "existing_observation_photo_uuids": sorted(
+                    x for x in baseline_ids if x
+                ),
             },
         )
     )
@@ -537,7 +548,10 @@ def run_inat_checks(
         if status >= 400:
             verdict, detail = UNKNOWN, f"re-POST rejected with HTTP {status}"
         elif dup_id == photo_id:
-            verdict, detail = PASS, f"same uuid returned the same photo id {dup_id} — de-duplicated"
+            verdict, detail = (
+                PASS,
+                f"same uuid returned the same photo id {dup_id} — de-duplicated",
+            )
         else:
             verdict, detail = (
                 FAIL,
@@ -555,7 +569,11 @@ def run_inat_checks(
             )
         )
     except Ambiguous as exc:
-        record(Result("inat.dedup", "Same-uuid re-POST is de-duplicated", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "inat.dedup", "Same-uuid re-POST is de-duplicated", UNKNOWN, str(exc)
+            )
+        )
 
     # --- 3. JSON attach of an already-uploaded photo -------------------------
     json_attach_uuid = str(uuidlib.uuid4())
@@ -596,14 +614,16 @@ def run_inat_checks(
                 "An attachment is re-findable by client uuid (lost-response recovery)",
                 PASS if match else FAIL,
                 (
-                    f"observation_photo uuid {json_attach_uuid} found on re-read — "
-                    "ambiguous writes can be resolved by re-reading the observation"
-                )
-                if match
-                else (
-                    f"client uuid {json_attach_uuid} did NOT appear as an "
-                    "observation_photo uuid; recovery must fall back to photo_id "
-                    "+ byte fingerprint matching"
+                    (
+                        f"observation_photo uuid {json_attach_uuid} found on re-read — "
+                        "ambiguous writes can be resolved by re-reading the observation"
+                    )
+                    if match
+                    else (
+                        f"client uuid {json_attach_uuid} did NOT appear as an "
+                        "observation_photo uuid; recovery must fall back to photo_id "
+                        "+ byte fingerprint matching"
+                    )
                 ),
                 {"observation_photo_uuids": [p.get("uuid") for p in current]},
             )
@@ -658,10 +678,13 @@ def run_inat_checks(
         ours = [
             p
             for p in current
-            if _int_or_none((p.get("photo") or {}).get("id")) in set(ledger.uploaded_photo_ids)
+            if _int_or_none((p.get("photo") or {}).get("id"))
+            in set(ledger.uploaded_photo_ids)
         ]
         licenses = {
-            _int_or_none((p.get("photo") or {}).get("id")): (p.get("photo") or {}).get("license_code")
+            _int_or_none((p.get("photo") or {}).get("id")): (p.get("photo") or {}).get(
+                "license_code"
+            )
             for p in ours
         }
         record(
@@ -779,7 +802,12 @@ def run_inat_checks(
             )
         except Ambiguous as exc:
             record(
-                Result("inat.detach", "DELETE /observation_photos/{uuid} detaches", UNKNOWN, str(exc))
+                Result(
+                    "inat.detach",
+                    "DELETE /observation_photos/{uuid} detaches",
+                    UNKNOWN,
+                    str(exc),
+                )
             )
 
     return results
@@ -862,10 +890,15 @@ def run_mo_write_checks(
         _print_result(res)
         return res
 
-    digest = hashlib.md5(image.read_bytes(), usedforsecurity=False).hexdigest()  # noqa: S324 — MO's md5sum contract requires MD5, not a security use
+    digest = hashlib.md5(
+        image.read_bytes(), usedforsecurity=False
+    ).hexdigest()  # noqa: S324 — MO's md5sum contract requires MD5, not a security use
 
     try:
-        before = {row.get("id") for row in _mo_results(mo.images_for_observation(observation_id)[1])}
+        before = {
+            row.get("id")
+            for row in _mo_results(mo.images_for_observation(observation_id)[1])
+        }
     except Ambiguous as exc:
         record(
             Result(
@@ -964,7 +997,11 @@ def run_mo_write_checks(
                 "license + copyright_holder round-trip exactly",
                 PASS if holder_ok and license_ok else UNKNOWN,
                 f"sent license id {license_id} → got {got_license!r} "
-                + ("(exact match)" if license_ok else f"(expected {MO_LICENSE_NAMES.get(license_id)!r})")
+                + (
+                    "(exact match)"
+                    if license_ok
+                    else f"(expected {MO_LICENSE_NAMES.get(license_id)!r})"
+                )
                 + f"; copyright_holder {got_holder!r} (sent {copyright_holder!r})"
                 + ("" if holder_ok else " — MISMATCH"),
                 {
@@ -991,7 +1028,10 @@ def run_mo_write_checks(
         try:
             status, payload = mo.delete_image(new_id)
             del_error = _mo_error_text(payload)
-            remaining = {row.get("id") for row in _mo_results(mo.images_for_observation(observation_id)[1])}
+            remaining = {
+                row.get("id")
+                for row in _mo_results(mo.images_for_observation(observation_id)[1])
+            }
             gone = new_id not in remaining
             if gone and new_id in ledger.mo_image_ids:
                 ledger.mo_image_ids.remove(new_id)
@@ -1011,7 +1051,12 @@ def run_mo_write_checks(
             )
         except Ambiguous as exc:
             record(
-                Result("mo.delete", "DELETE /api2/images removes a mis-created image", UNKNOWN, str(exc))
+                Result(
+                    "mo.delete",
+                    "DELETE /api2/images removes a mis-created image",
+                    UNKNOWN,
+                    str(exc),
+                )
             )
 
     return results
@@ -1108,7 +1153,9 @@ def _mo_errors(payload: Any) -> list[dict]:
     if not isinstance(payload, dict):
         return []
     errors = payload.get("errors")
-    return [e for e in errors if isinstance(e, dict)] if isinstance(errors, list) else []
+    return (
+        [e for e in errors if isinstance(e, dict)] if isinstance(errors, list) else []
+    )
 
 
 def _mo_error_text(payload: Any) -> str:
@@ -1130,7 +1177,9 @@ _ICON = {PASS: "PASS", FAIL: "FAIL", UNKNOWN: "????", SKIP: "SKIP"}
 def _print_result(res: Result) -> None:
     tag = _ICON[res.status]
     scope = "" if res.blocking else "  (informational)"
-    print(f"  [{tag}] {res.check_id}{scope}\n         {res.title}\n         {res.detail}")
+    print(
+        f"  [{tag}] {res.check_id}{scope}\n         {res.title}\n         {res.detail}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1241,19 +1290,36 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID_OR_UUID",
         help="A DISPOSABLE iNaturalist observation you own — numeric ID or UUID",
     )
-    parser.add_argument("--mo-obs-id", type=int, default=0, help="ID of a DISPOSABLE MO observation you own")
+    parser.add_argument(
+        "--mo-obs-id",
+        type=int,
+        default=0,
+        help="ID of a DISPOSABLE MO observation you own",
+    )
     parser.add_argument("--image", type=Path, help="Small test image to upload")
-    parser.add_argument("--mo-write", action="store_true", help="Also run MO create/delete write proofs")
-    parser.add_argument("--copyright-holder", default="", help="copyright_holder to send to MO")
-    parser.add_argument("--run", action="store_true", help="Actually execute (default is dry-run)")
+    parser.add_argument(
+        "--mo-write", action="store_true", help="Also run MO create/delete write proofs"
+    )
+    parser.add_argument(
+        "--copyright-holder", default="", help="copyright_holder to send to MO"
+    )
+    parser.add_argument(
+        "--run", action="store_true", help="Actually execute (default is dry-run)"
+    )
     parser.add_argument(
         "--i-own-these-records",
         action="store_true",
         help="Required with --run. Asserts every named record is yours and disposable.",
     )
-    parser.add_argument("--no-cleanup", action="store_true", help="Leave created records in place")
-    parser.add_argument("--json-out", type=Path, help="Write machine-readable results here")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Log every request/response")
+    parser.add_argument(
+        "--no-cleanup", action="store_true", help="Leave created records in place"
+    )
+    parser.add_argument(
+        "--json-out", type=Path, help="Write machine-readable results here"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Log every request/response"
+    )
     return parser
 
 
@@ -1262,7 +1328,9 @@ def plan(args: argparse.Namespace) -> None:
     if args.inat_obs_uuid:
         print(f"  iNaturalist, on observation {args.inat_obs_uuid}:")
         print("    - upload a photo twice with the same client uuid (dedup probe)")
-        print("    - attach an uploaded photo via the JSON shape, then re-read to verify")
+        print(
+            "    - attach an uploaded photo via the JSON shape, then re-read to verify"
+        )
         print("    - upload+attach via the multipart shape, then re-read to verify")
         print("    - probe PUT /photos/{id} license_code   (informational)")
         print("    - probe DELETE /photos/{id} absence     (informational)")
@@ -1283,7 +1351,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.inat_obs_uuid and not args.mo_obs_id:
-        print("Nothing to do: pass --inat-obs-uuid and/or --mo-obs-id.", file=sys.stderr)
+        print(
+            "Nothing to do: pass --inat-obs-uuid and/or --mo-obs-id.", file=sys.stderr
+        )
         return 2
 
     needs_image = bool(args.inat_obs_uuid) or args.mo_write
@@ -1314,7 +1384,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         if args.inat_obs_uuid:
-            jwt = os.environ.get("INAT_JWT", "") or getpass.getpass("iNaturalist JWT (hidden): ")
+            jwt = os.environ.get("INAT_JWT", "") or getpass.getpass(
+                "iNaturalist JWT (hidden): "
+            )
             if not jwt.strip():
                 print("No iNaturalist JWT supplied.", file=sys.stderr)
                 return 2
@@ -1323,7 +1395,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             results += run_inat_checks(inat, args.inat_obs_uuid, args.image, ledger)
 
         if args.mo_obs_id:
-            key = os.environ.get("MO_API_KEY", "") or getpass.getpass("Mushroom Observer API key (hidden): ")
+            key = os.environ.get("MO_API_KEY", "") or getpass.getpass(
+                "Mushroom Observer API key (hidden): "
+            )
             mo = MOProof(key, verbose=args.verbose)
             print("\n--- Mushroom Observer proofs ---")
             results += run_mo_read_checks(mo, args.mo_obs_id)
@@ -1344,7 +1418,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                         )
                     )
                 else:
-                    results += run_mo_write_checks(mo, args.mo_obs_id, args.image, holder, ledger)
+                    results += run_mo_write_checks(
+                        mo, args.mo_obs_id, args.image, holder, ledger
+                    )
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
     finally:

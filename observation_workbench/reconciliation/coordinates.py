@@ -15,6 +15,7 @@ change with ``updated_at``) and equality is checked by comparing freshly-read
 points in memory. Only IDs, action type, privacy states, and version
 fingerprints are stored.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,12 +29,22 @@ from observation_workbench.api.client import INatAPIError, INatClient
 from .db import ReconciliationDB
 from .inat_reader import INatReconciliationReader, inat_fungi_status
 from .mo_client import MOAPIError, MOClient, ReconciliationCancelled
-from .mo_parsing import mo_record_fingerprint, parse_mo_coordinate, parse_mo_observation, positive_int
+from .mo_parsing import (
+    mo_record_fingerprint,
+    parse_mo_coordinate,
+    parse_mo_observation,
+    positive_int,
+)
 from .normalization import public_fingerprint
 from .specimen_state import evaluate_specimen_state
 from .types import (
-    CoordinateActionOption, CoordinateActionType, CoordinateComparisonPreview,
-    CoordinatePrivacyState, CoordinateRecordSnapshot, ReconciliationProfile, RemoteSite,
+    CoordinateActionOption,
+    CoordinateActionType,
+    CoordinateComparisonPreview,
+    CoordinatePrivacyState,
+    CoordinateRecordSnapshot,
+    ReconciliationProfile,
+    RemoteSite,
 )
 
 # A copy whose source and destination points differ by more than this is flagged
@@ -97,8 +108,12 @@ class CoordinateSyncService:
     """Fresh-read comparison and single-write service for confirmed pairs only."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
     ) -> None:
@@ -113,7 +128,9 @@ class CoordinateSyncService:
     # Preview ----------------------------------------------------------
 
     def prepare_preview(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> CoordinateComparisonPreview:
         pair = self._eligible_pair(profile_id, pair_id)
@@ -127,9 +144,12 @@ class CoordinateSyncService:
             )
         options = self._options(live, warnings)
         if not options and not live.specimen_conflict and not warnings:
-            warnings.append("No safe coordinate copy is proposed for the current remote state.")
+            warnings.append(
+                "No safe coordinate copy is proposed for the current remote state."
+            )
         return CoordinateComparisonPreview(
-            profile_id=profile_id, pair_id=pair_id,
+            profile_id=profile_id,
+            pair_id=pair_id,
             auth_generation=live.auth_generation,
             mo_key_generation=live.mo_key_generation,
             source_fingerprint=_pair_fingerprint(pair),
@@ -140,11 +160,14 @@ class CoordinateSyncService:
             mo_record_fingerprint=live.mo_record_fingerprint,
             source=_public_snapshot(live.source),
             destination=_public_snapshot(live.destination),
-            options=tuple(options), warnings=tuple(warnings),
+            options=tuple(options),
+            warnings=tuple(warnings),
         )
 
     def _options(
-        self, live: _LiveCoordinateState, warnings: list[str],
+        self,
+        live: _LiveCoordinateState,
+        warnings: list[str],
     ) -> list[CoordinateActionOption]:
         source = live.source
         destination = live.destination
@@ -158,10 +181,14 @@ class CoordinateSyncService:
                     "The Mushroom Observer coordinate is private and not readable here; it cannot be copied."
                 )
             else:
-                warnings.append("Mushroom Observer exposes no readable coordinate to copy.")
+                warnings.append(
+                    "Mushroom Observer exposes no readable coordinate to copy."
+                )
             return []
         if source.privacy_state == CoordinatePrivacyState.UNKNOWN.value:
-            warnings.append("The Mushroom Observer coordinate privacy state is unknown; no copy is proposed.")
+            warnings.append(
+                "The Mushroom Observer coordinate privacy state is unknown; no copy is proposed."
+            )
             return []
         # An unknown or unrecognized destination privacy means we cannot reason
         # about what we would overwrite or whether visibility would change; block.
@@ -173,7 +200,9 @@ class CoordinateSyncService:
         proposed_privacy = source.privacy_state
         # The observation-level geoprivacy the write would set (distinct from the
         # effective visibility, which the destination taxon geoprivacy may clamp).
-        proposed_observation_geoprivacy = _normalize_geoprivacy(_INAT_GEOPRIVACY.get(proposed_privacy))
+        proposed_observation_geoprivacy = _normalize_geoprivacy(
+            _INAT_GEOPRIVACY.get(proposed_privacy)
+        )
         # Two independent disclosure concepts (they are NOT the same thing):
         #   * ``sends_nonpublic_source`` — the SOURCE point is private/obscured, so
         #     copying discloses that exact point to another service.
@@ -182,7 +211,8 @@ class CoordinateSyncService:
         #     post-write effective visibility (most restrictive of the proposed
         #     observation setting and the current taxon geoprivacy).
         sends_nonpublic_source = source.privacy_state in {
-            CoordinatePrivacyState.PRIVATE.value, CoordinatePrivacyState.OBSCURED.value,
+            CoordinatePrivacyState.PRIVATE.value,
+            CoordinatePrivacyState.OBSCURED.value,
         }
         broadens = _broadens_visibility(destination, proposed_observation_geoprivacy)
         if sends_nonpublic_source:
@@ -221,7 +251,9 @@ class CoordinateSyncService:
                 "on iNaturalist first if a copy is intended."
             )
             return []
-        large = bool(live.distance_m is not None and live.distance_m > LARGE_DISCREPANCY_M)
+        large = bool(
+            live.distance_m is not None and live.distance_m > LARGE_DISCREPANCY_M
+        )
         if large:
             warnings.append(
                 "The existing iNaturalist coordinate differs substantially from the source; review before replacing."
@@ -231,14 +263,18 @@ class CoordinateSyncService:
         # geoprivacy we control (not the effective visibility, which taxon
         # geoprivacy may further restrict) — consistent with _is_satisfied.
         if (
-            replaces and _same_point(destination, source)
+            replaces
+            and _same_point(destination, source)
             and _same_accuracy(source.accuracy_m, destination.accuracy_m)
             and destination.observation_geoprivacy == proposed_observation_geoprivacy
         ):
-            warnings.append("The iNaturalist coordinate already matches the source; no copy is needed.")
+            warnings.append(
+                "The iNaturalist coordinate already matches the source; no copy is needed."
+            )
             return []
         action_type = (
-            CoordinateActionType.INAT_COORDINATE_REPLACE if replaces
+            CoordinateActionType.INAT_COORDINATE_REPLACE
+            if replaces
             else CoordinateActionType.INAT_COORDINATE_SET
         )
         description = (
@@ -247,24 +283,38 @@ class CoordinateSyncService:
             f"(source privacy: {source.privacy_state}; proposed destination privacy: {proposed_privacy})"
         )
         option = CoordinateActionOption(
-            action_type=action_type, destination_site=RemoteSite.INAT, source_site=RemoteSite.MO,
-            source_record_id=source.observation_id, destination_record_id=destination.observation_id,
-            source_privacy_state=source.privacy_state, proposed_privacy_state=proposed_privacy,
-            accuracy_m=source.accuracy_m, replaces_data=replaces,
-            sends_nonpublic_source=sends_nonpublic_source, broadens_visibility=broadens,
-            large_discrepancy=large, description=description, destructive=replaces,
-            enabled=True, disabled_reason="",
+            action_type=action_type,
+            destination_site=RemoteSite.INAT,
+            source_site=RemoteSite.MO,
+            source_record_id=source.observation_id,
+            destination_record_id=destination.observation_id,
+            source_privacy_state=source.privacy_state,
+            proposed_privacy_state=proposed_privacy,
+            accuracy_m=source.accuracy_m,
+            replaces_data=replaces,
+            sends_nonpublic_source=sends_nonpublic_source,
+            broadens_visibility=broadens,
+            large_discrepancy=large,
+            description=description,
+            destructive=replaces,
+            enabled=True,
+            disabled_reason="",
         )
         return [option]
 
     # Execution --------------------------------------------------------
 
     def execute_group(
-        self, profile_id: int, group_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        group_id: int,
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> list[CoordinateActionResult]:
         rows = self.db.action_group_rows(profile_id, group_id)
-        if len(rows) != 1 or not _is_coordinate_action(rows[0].get("action_type") if rows else None):
+        if len(rows) != 1 or not _is_coordinate_action(
+            rows[0].get("action_type") if rows else None
+        ):
             raise CoordinateSyncError(
                 "A coordinate journal group must contain exactly one individually reviewed action.",
                 "invalid_coordinate_group",
@@ -276,64 +326,99 @@ class CoordinateSyncService:
         if state == "succeeded":
             return []
         if state != "pending":
-            return [CoordinateActionResult(
-                int(row["action_id"]), state,
-                "This coordinate action is terminal; create a fresh comparison for another copy.",
-            )]
+            return [
+                CoordinateActionResult(
+                    int(row["action_id"]),
+                    state,
+                    "This coordinate action is terminal; create a fresh comparison for another copy.",
+                )
+            ]
         return [self._execute(row, cancelled, progress)]
 
     def verify_unknown(
-        self, profile_id: int, action_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        action_id: int,
+        cancelled: Callable[[], bool],
     ) -> CoordinateActionResult:
         row = self.db.action(profile_id, action_id)
         if not row or not _is_coordinate_action(row.get("action_type")):
-            raise CoordinateSyncError("The selected journal row is not a coordinate action.", "invalid_coordinate_action")
+            raise CoordinateSyncError(
+                "The selected journal row is not a coordinate action.",
+                "invalid_coordinate_action",
+            )
         if str(row["state"]) != "outcome_unknown":
-            return CoordinateActionResult(action_id, str(row["state"]), "No unknown outcome remains to verify.")
+            return CoordinateActionResult(
+                action_id, str(row["state"]), "No unknown outcome remains to verify."
+            )
         profile = self.db.profile(profile_id)
         pair = self._pair_from_journal(profile_id, row)
         try:
             live = self._refresh(profile, pair, cancelled, verification_only=True)
         except Exception:
             return CoordinateActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "Destination reread is still unavailable; the action was not retried.",
             )
         if self._is_satisfied(row, live):
             self.db.finish_action(
-                profile_id, action_id, "succeeded", phase="verification",
+                profile_id,
+                action_id,
+                "succeeded",
+                phase="verification",
                 verification_state="verified_after_unknown",
             )
-            return CoordinateActionResult(action_id, "succeeded", "Verified the prior submission without retrying it.")
+            return CoordinateActionResult(
+                action_id,
+                "succeeded",
+                "Verified the prior submission without retrying it.",
+            )
         # The destination iNaturalist record version is unchanged since preview,
         # so the write was not applied.
         if live.inat_record_fingerprint == str(row["preview_inat_record_fingerprint"]):
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="verification",
-                error_code="verified_not_applied", verification_state="verified_not_applied",
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
+                error_code="verified_not_applied",
+                verification_state="verified_not_applied",
             )
             return CoordinateActionResult(
-                action_id, "failed",
+                action_id,
+                "failed",
                 "The iNaturalist observation is unchanged since preview; the write was not applied.",
             )
         self.db.finish_action(
-            profile_id, action_id, "outcome_unknown", phase="verification",
-            error_code="changed_not_proven", verification_state="changed_not_proven",
+            profile_id,
+            action_id,
+            "outcome_unknown",
+            phase="verification",
+            error_code="changed_not_proven",
+            verification_state="changed_not_proven",
         )
         return CoordinateActionResult(
-            action_id, "outcome_unknown",
+            action_id,
+            "outcome_unknown",
             "The destination changed but does not prove this write; run a fresh coordinate comparison.",
         )
 
     def _execute(
-        self, row: dict[str, Any], cancelled: Callable[[], bool],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> CoordinateActionResult:
         profile_id = int(row["profile_id"])
         action_id = int(row["action_id"])
         if not self.db.claim_action(profile_id, action_id, "resource_preflight"):
             current = self.db.action(profile_id, action_id) or row
-            return CoordinateActionResult(action_id, str(current["state"]), "The coordinate action is no longer pending.")
+            return CoordinateActionResult(
+                action_id,
+                str(current["state"]),
+                "The coordinate action is no longer pending.",
+            )
         write_started = False
         try:
             if cancelled():
@@ -345,10 +430,17 @@ class CoordinateSyncService:
             live = self._refresh(profile, pair, cancelled)
             if self._is_satisfied(row, live):
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
                     verification_state="already_correct",
                 )
-                return CoordinateActionResult(action_id, "succeeded", "Destination already matches; no write was sent.")
+                return CoordinateActionResult(
+                    action_id,
+                    "succeeded",
+                    "Destination already matches; no write was sent.",
+                )
             # Fresh specimen-identity evidence must still prove the same collection
             # (tolerating only the coordinate being reconciled).
             if live.specimen_conflict:
@@ -361,9 +453,19 @@ class CoordinateSyncService:
             # any source OR destination coordinate change via their updated_at).
             self._require_unchanged_context(row, live)
             if live.source.privacy_state != str(row["source_privacy_state"]):
-                raise CoordinateSyncError("The Mushroom Observer coordinate privacy state changed after preview.", "source_privacy_changed")
-            if not live.source.coordinates_available or live.source.latitude is None or live.source.longitude is None:
-                raise CoordinateSyncError("The Mushroom Observer source coordinate is no longer readable.", "source_changed")
+                raise CoordinateSyncError(
+                    "The Mushroom Observer coordinate privacy state changed after preview.",
+                    "source_privacy_changed",
+                )
+            if (
+                not live.source.coordinates_available
+                or live.source.latitude is None
+                or live.source.longitude is None
+            ):
+                raise CoordinateSyncError(
+                    "The Mushroom Observer source coordinate is no longer readable.",
+                    "source_changed",
+                )
 
             def begin_write() -> None:
                 """Stamp the durable write boundary immediately before the request.
@@ -383,7 +485,9 @@ class CoordinateSyncService:
                     )
                 write_started = True
 
-            progress(f"Coordinate action {action_id}: submitting one explicitly confirmed coordinate write")
+            progress(
+                f"Coordinate action {action_id}: submitting one explicitly confirmed coordinate write"
+            )
             write_error: Optional[Exception] = None
             http_status: Optional[int] = None
             try:
@@ -396,81 +500,138 @@ class CoordinateSyncService:
 
             progress(f"Coordinate action {action_id}: verifying destination coordinate")
             try:
-                verified = self._refresh(profile, pair, lambda: False, verification_only=True)
+                verified = self._refresh(
+                    profile, pair, lambda: False, verification_only=True
+                )
             except Exception:
                 self.db.finish_action(
-                    profile_id, action_id, "outcome_unknown", phase="verification",
-                    error_code="verification_unavailable", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    phase="verification",
+                    error_code="verification_unavailable",
+                    http_status=http_status,
                     verification_state="unavailable",
                 )
                 return CoordinateActionResult(
-                    action_id, "outcome_unknown",
+                    action_id,
+                    "outcome_unknown",
                     "The write may have been submitted, but destination verification is unavailable.",
                 )
             if self._is_satisfied(row, verified):
                 self.db.finish_action(
-                    profile_id, action_id, "succeeded", phase="verification",
-                    http_status=http_status, verification_state="verified_final_state",
+                    profile_id,
+                    action_id,
+                    "succeeded",
+                    phase="verification",
+                    http_status=http_status,
+                    verification_state="verified_final_state",
                 )
-                return CoordinateActionResult(action_id, "succeeded", "Verified the copied iNaturalist coordinate.")
-            unchanged = verified.inat_record_fingerprint == str(row["preview_inat_record_fingerprint"])
+                return CoordinateActionResult(
+                    action_id,
+                    "succeeded",
+                    "Verified the copied iNaturalist coordinate.",
+                )
+            unchanged = verified.inat_record_fingerprint == str(
+                row["preview_inat_record_fingerprint"]
+            )
             if unchanged:
                 self.db.finish_action(
-                    profile_id, action_id, "failed", phase="verification",
-                    error_code="verified_not_applied", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "failed",
+                    phase="verification",
+                    error_code="verified_not_applied",
+                    http_status=http_status,
                     verification_state="verified_not_applied",
                 )
-                return CoordinateActionResult(action_id, "failed", "Verification shows that the write was not applied.")
-            if write_error is not None and bool(getattr(write_error, "outcome_unknown", False)):
+                return CoordinateActionResult(
+                    action_id,
+                    "failed",
+                    "Verification shows that the write was not applied.",
+                )
+            if write_error is not None and bool(
+                getattr(write_error, "outcome_unknown", False)
+            ):
                 self.db.finish_action(
-                    profile_id, action_id, "outcome_unknown", phase="verification",
-                    error_code="write_outcome_unknown", http_status=http_status,
+                    profile_id,
+                    action_id,
+                    "outcome_unknown",
+                    phase="verification",
+                    error_code="write_outcome_unknown",
+                    http_status=http_status,
                     verification_state="changed_not_proven",
                 )
-                return CoordinateActionResult(action_id, "outcome_unknown", "Write outcome remains unknown.")
+                return CoordinateActionResult(
+                    action_id, "outcome_unknown", "Write outcome remains unknown."
+                )
             self.db.finish_action(
-                profile_id, action_id, "outcome_unknown", phase="verification",
-                error_code="changed_not_proven", http_status=http_status,
+                profile_id,
+                action_id,
+                "outcome_unknown",
+                phase="verification",
+                error_code="changed_not_proven",
+                http_status=http_status,
                 verification_state="changed_not_proven",
             )
             return CoordinateActionResult(
-                action_id, "outcome_unknown",
+                action_id,
+                "outcome_unknown",
                 "The destination changed but does not prove the requested coordinate; run a fresh comparison.",
             )
         except ReconciliationCancelled:
             self.db.finish_action(
-                profile_id, action_id, "cancelled", phase="resource_preflight",
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="resource_preflight",
                 error_code="user_cancelled",
             )
-            return CoordinateActionResult(action_id, "cancelled", "Cancelled before a coordinate write was sent.")
+            return CoordinateActionResult(
+                action_id, "cancelled", "Cancelled before a coordinate write was sent."
+            )
         except CoordinateSyncError as exc:
             self.db.finish_action(
-                profile_id, action_id,
+                profile_id,
+                action_id,
                 "outcome_unknown" if write_started else "failed",
                 phase="verification" if write_started else "resource_preflight",
                 error_code=exc.code,
             )
             if write_started:
                 return CoordinateActionResult(
-                    action_id, "outcome_unknown",
-                    "A write may have been submitted; verify before any retry. " + str(exc),
+                    action_id,
+                    "outcome_unknown",
+                    "A write may have been submitted; verify before any retry. "
+                    + str(exc),
                 )
             return CoordinateActionResult(action_id, "failed", str(exc))
         except Exception:
             terminal = "outcome_unknown" if write_started else "failed"
             self.db.finish_action(
-                profile_id, action_id, terminal,
+                profile_id,
+                action_id,
+                terminal,
                 phase="verification" if write_started else "resource_preflight",
-                error_code="local_journal_failure" if write_started else "preflight_failed",
+                error_code=(
+                    "local_journal_failure" if write_started else "preflight_failed"
+                ),
             )
             return CoordinateActionResult(
-                action_id, terminal,
-                "The write outcome must be verified before any retry."
-                if write_started else "Coordinate preflight failed before a write was sent.",
+                action_id,
+                terminal,
+                (
+                    "The write outcome must be verified before any retry."
+                    if write_started
+                    else "Coordinate preflight failed before a write was sent."
+                ),
             )
 
     def _write(
-        self, row: dict[str, Any], live: _LiveCoordinateState, cancelled: Callable[[], bool],
+        self,
+        row: dict[str, Any],
+        live: _LiveCoordinateState,
+        cancelled: Callable[[], bool],
         on_send: Callable[[], None],
     ) -> object:
         """Validate every local precondition, then send exactly one request.
@@ -484,15 +645,23 @@ class CoordinateSyncService:
         latitude = live.source.latitude
         longitude = live.source.longitude
         if latitude is None or longitude is None:
-            raise CoordinateSyncError("The source no longer contains a readable coordinate.", "source_changed")
+            raise CoordinateSyncError(
+                "The source no longer contains a readable coordinate.", "source_changed"
+            )
         geoprivacy = _INAT_GEOPRIVACY.get(str(row["proposed_privacy_state"]))
         if geoprivacy is None:
-            raise CoordinateSyncError("The proposed destination geoprivacy is unrecognised.", "invalid_geoprivacy")
+            raise CoordinateSyncError(
+                "The proposed destination geoprivacy is unrecognised.",
+                "invalid_geoprivacy",
+            )
         on_send()
         return self.inat_client.update_observation_coordinates_v2(
-            auth.api_token, live.inat_observation_uuid,
-            latitude=latitude, longitude=longitude,
-            positional_accuracy=live.source.accuracy_m, geoprivacy=geoprivacy,
+            auth.api_token,
+            live.inat_observation_uuid,
+            latitude=latitude,
+            longitude=longitude,
+            positional_accuracy=live.source.accuracy_m,
+            geoprivacy=geoprivacy,
         )
 
     def _recheck_inat_auth(self, live: _LiveCoordinateState) -> AuthState:
@@ -502,14 +671,25 @@ class CoordinateSyncService:
             or self.auth_generation_provider() != live.auth_generation
             or public_fingerprint(auth.api_token) != live.inat_token_marker
         ):
-            raise CoordinateSyncError("iNaturalist authentication changed after preflight.", "inat_auth_changed")
+            raise CoordinateSyncError(
+                "iNaturalist authentication changed after preflight.",
+                "inat_auth_changed",
+            )
         return auth
 
-    def _require_unchanged_context(self, row: dict[str, Any], live: _LiveCoordinateState) -> None:
+    def _require_unchanged_context(
+        self, row: dict[str, Any], live: _LiveCoordinateState
+    ) -> None:
         if str(row["preview_inat_record_fingerprint"]) != live.inat_record_fingerprint:
-            raise CoordinateSyncError("The iNaturalist observation changed after preview.", "inat_record_changed")
+            raise CoordinateSyncError(
+                "The iNaturalist observation changed after preview.",
+                "inat_record_changed",
+            )
         if str(row["preview_mo_record_fingerprint"]) != live.mo_record_fingerprint:
-            raise CoordinateSyncError("The Mushroom Observer observation changed after preview.", "mo_record_changed")
+            raise CoordinateSyncError(
+                "The Mushroom Observer observation changed after preview.",
+                "mo_record_changed",
+            )
 
     def _is_satisfied(self, row: dict[str, Any], live: _LiveCoordinateState) -> bool:
         # The intended target point is the source point read when the action was
@@ -525,8 +705,12 @@ class CoordinateSyncService:
         # taxon forces "obscured"); that is still a correct write, so we do not
         # require effective equality. A LESS restrictive effective result than
         # requested, however, would be wrong and is rejected below.
-        requested_geoprivacy = _normalize_geoprivacy(_INAT_GEOPRIVACY.get(str(row["proposed_privacy_state"])))
-        if not destination.coordinates_available or not _same_point(destination, live.source):
+        requested_geoprivacy = _normalize_geoprivacy(
+            _INAT_GEOPRIVACY.get(str(row["proposed_privacy_state"]))
+        )
+        if not destination.coordinates_available or not _same_point(
+            destination, live.source
+        ):
             return False
         # The accuracy must also round-trip: a right point with the wrong accuracy
         # is not synchronized.
@@ -538,7 +722,9 @@ class CoordinateSyncService:
         # post-write visibility, which already folds in the destination taxon
         # geoprivacy clamp (so a taxon-obscured result of an "open" request still
         # verifies, but a wrongly-less-restrictive result does not).
-        predicted = _more_restrictive(requested_geoprivacy, destination.taxon_geoprivacy)
+        predicted = _more_restrictive(
+            requested_geoprivacy, destination.taxon_geoprivacy
+        )
         effective_rank = _STATE_RANK.get(destination.privacy_state, 0)
         predicted_rank = _GEOPRIVACY_RANK.get(predicted, 0)
         return effective_rank >= predicted_rank
@@ -546,8 +732,12 @@ class CoordinateSyncService:
     # Fresh read -------------------------------------------------------
 
     def _refresh(
-        self, profile: ReconciliationProfile, pair: dict[str, Any],
-        cancelled: Callable[[], bool], *, verification_only: bool = False,
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
+        cancelled: Callable[[], bool],
+        *,
+        verification_only: bool = False,
     ) -> _LiveCoordinateState:
         if cancelled():
             raise ReconciliationCancelled("Coordinate comparison cancelled")
@@ -562,7 +752,10 @@ class CoordinateSyncService:
             )
         if not verification_only:
             current = _first_result(self.inat_client.get_current_user_v2(token))
-            if positive_int(current.get("id") if current else None) != profile.inat_user_id:
+            if (
+                positive_int(current.get("id") if current else None)
+                != profile.inat_user_id
+            ):
                 raise CoordinateSyncError(
                     "The authenticated iNaturalist account does not match the profile.",
                     "inat_auth_mismatch",
@@ -570,25 +763,44 @@ class CoordinateSyncService:
 
         inat_id = int(pair["inat_observation_id"])
         mo_id = int(pair["mo_observation_id"])
-        inat_raw = _first_result(self.inat_client.get_reconciliation_detail(inat_id, token, deep=False))
+        inat_raw = _first_result(
+            self.inat_client.get_reconciliation_detail(inat_id, token, deep=False)
+        )
         if not inat_raw or positive_int(inat_raw.get("id")) != inat_id:
-            raise CoordinateSyncError("The iNaturalist observation is unavailable.", "inat_unavailable")
+            raise CoordinateSyncError(
+                "The iNaturalist observation is unavailable.", "inat_unavailable"
+            )
         inat_uuid = str(inat_raw.get("uuid") or "").strip()
         inat_user_raw = inat_raw.get("user")
         inat_user = inat_user_raw if isinstance(inat_user_raw, dict) else {}
         if not inat_uuid or positive_int(inat_user.get("id")) != profile.inat_user_id:
-            raise CoordinateSyncError("The iNaturalist record identity or owner changed.", "inat_owner_changed")
+            raise CoordinateSyncError(
+                "The iNaturalist record identity or owner changed.",
+                "inat_owner_changed",
+            )
         if _fungi_status(inat_raw) == "nonfungal":
-            raise CoordinateSyncError("The iNaturalist observation is now known to be outside Fungi.", "inat_out_of_scope")
+            raise CoordinateSyncError(
+                "The iNaturalist observation is now known to be outside Fungi.",
+                "inat_out_of_scope",
+            )
 
-        mo_raw = _first_result(self.mo_client.observation(mo_id, cancelled, detail="high"))
+        mo_raw = _first_result(
+            self.mo_client.observation(mo_id, cancelled, detail="high")
+        )
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_id:
-            raise CoordinateSyncError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+            raise CoordinateSyncError(
+                "The Mushroom Observer observation is unavailable.", "mo_unavailable"
+            )
         mo_observation = parse_mo_observation(mo_raw, profile.mo_user_id)
         if mo_observation.owner_id != profile.mo_user_id:
-            raise CoordinateSyncError("The Mushroom Observer record owner changed.", "mo_owner_changed")
+            raise CoordinateSyncError(
+                "The Mushroom Observer record owner changed.", "mo_owner_changed"
+            )
         if mo_observation.fungi_status == "nonfungal":
-            raise CoordinateSyncError("The Mushroom Observer observation is now known to be outside Fungi.", "mo_out_of_scope")
+            raise CoordinateSyncError(
+                "The Mushroom Observer observation is now known to be outside Fungi.",
+                "mo_out_of_scope",
+            )
 
         inat_date = _parse_date(inat_raw.get("observed_on"))
         mo_date = mo_observation.observed_on
@@ -609,25 +821,42 @@ class CoordinateSyncService:
         specimen_warnings: tuple[str, ...] = ()
         if not verification_only:
             reader = INatReconciliationReader(self.inat_client)
-            specimen_conflict, _specimen_fp, specimen_warnings = evaluate_specimen_state(
-                self.db, profile, pair, inat_raw, mo_raw, reader,
-                mo_client=self.mo_client, cancelled=cancelled, include_coordinates=False,
+            specimen_conflict, _specimen_fp, specimen_warnings = (
+                evaluate_specimen_state(
+                    self.db,
+                    profile,
+                    pair,
+                    inat_raw,
+                    mo_raw,
+                    reader,
+                    mo_client=self.mo_client,
+                    cancelled=cancelled,
+                    include_coordinates=False,
+                )
             )
         if not verification_only and (
             auth_generation != self.auth_generation_provider()
             or mo_key_generation != self.mo_key_generation_provider()
         ):
-            raise CoordinateSyncError("Credential state changed during coordinate preflight.", "credential_context_changed")
+            raise CoordinateSyncError(
+                "Credential state changed during coordinate preflight.",
+                "credential_context_changed",
+            )
         return _LiveCoordinateState(
-            profile_id=profile.profile_id, pair_id=int(pair["pair_id"]),
-            mo_observation_id=mo_id, inat_observation_id=inat_id,
+            profile_id=profile.profile_id,
+            pair_id=int(pair["pair_id"]),
+            mo_observation_id=mo_id,
+            inat_observation_id=inat_id,
             inat_observation_uuid=inat_uuid,
             inat_record_fingerprint=_inat_record_fingerprint(inat_raw),
             mo_record_fingerprint=mo_record_fingerprint(mo_raw),
             inat_token_marker=public_fingerprint(token),
-            auth_generation=auth_generation, mo_key_generation=mo_key_generation,
-            source=source, destination=destination,
-            specimen_conflict=specimen_conflict, specimen_warnings=specimen_warnings,
+            auth_generation=auth_generation,
+            mo_key_generation=mo_key_generation,
+            source=source,
+            destination=destination,
+            specimen_conflict=specimen_conflict,
+            specimen_warnings=specimen_warnings,
             distance_m=distance,
         )
 
@@ -636,19 +865,34 @@ class CoordinateSyncService:
     def _eligible_pair(self, profile_id: int, pair_id: int) -> dict[str, Any]:
         pair = self.db.pair_detail(profile_id, pair_id)
         if not pair or pair.get("review_state") != "confirmed" or pair.get("excluded"):
-            raise CoordinateSyncError("Only a currently confirmed, non-excluded pair can produce coordinate actions.")
+            raise CoordinateSyncError(
+                "Only a currently confirmed, non-excluded pair can produce coordinate actions."
+            )
         if self.db.confirmed_pair_conflict(
-            profile_id, int(pair["mo_observation_id"]), int(pair["inat_observation_id"]),
+            profile_id,
+            int(pair["mo_observation_id"]),
+            int(pair["inat_observation_id"]),
         ):
-            raise CoordinateSyncError("Another confirmed one-to-one pairing conflicts with this pair.", "one_to_one_conflict")
+            raise CoordinateSyncError(
+                "Another confirmed one-to-one pairing conflicts with this pair.",
+                "one_to_one_conflict",
+            )
         return pair
 
-    def _require_current_source(self, row: dict[str, Any], pair: dict[str, Any]) -> None:
-        group = self.db.action_group(int(row["profile_id"]), int(row["action_group_id"]))
+    def _require_current_source(
+        self, row: dict[str, Any], pair: dict[str, Any]
+    ) -> None:
+        group = self.db.action_group(
+            int(row["profile_id"]), int(row["action_group_id"])
+        )
         if not group or _pair_fingerprint(pair) != str(group["source_fingerprint"]):
-            raise CoordinateSyncError("The confirmed pair changed after preview.", "pair_changed")
+            raise CoordinateSyncError(
+                "The confirmed pair changed after preview.", "pair_changed"
+            )
 
-    def _pair_from_journal(self, profile_id: int, row: dict[str, Any]) -> dict[str, Any]:
+    def _pair_from_journal(
+        self, profile_id: int, row: dict[str, Any]
+    ) -> dict[str, Any]:
         current = self.db.pair_detail(profile_id, int(row["pair_id"])) or {}
         return {
             "pair_id": int(row["pair_id"]),
@@ -663,17 +907,26 @@ class CoordinateSyncService:
 
 # Coordinate parsing (memory-only raw values) --------------------------
 
-def _mo_coordinate_snapshot(raw: dict[str, Any], observation_id: int) -> CoordinateRecordSnapshot:
+
+def _mo_coordinate_snapshot(
+    raw: dict[str, Any], observation_id: int
+) -> CoordinateRecordSnapshot:
     latitude, longitude, accuracy, privacy = parse_mo_coordinate(raw)
     available = latitude is not None and longitude is not None
     return CoordinateRecordSnapshot(
-        site=RemoteSite.MO, observation_id=observation_id, coordinates_available=available,
-        privacy_state=privacy, accuracy_m=accuracy,
-        latitude=latitude, longitude=longitude,
+        site=RemoteSite.MO,
+        observation_id=observation_id,
+        coordinates_available=available,
+        privacy_state=privacy,
+        accuracy_m=accuracy,
+        latitude=latitude,
+        longitude=longitude,
     )
 
 
-def _inat_coordinate_snapshot(raw: dict[str, Any], observation_id: int) -> CoordinateRecordSnapshot:
+def _inat_coordinate_snapshot(
+    raw: dict[str, Any], observation_id: int
+) -> CoordinateRecordSnapshot:
     latitude, longitude, point_source = _inat_point(raw)
     available = latitude is not None and longitude is not None
     # Only the authorized private point proves the exact coordinate; a public
@@ -708,15 +961,24 @@ def _inat_coordinate_snapshot(raw: dict[str, Any], observation_id: int) -> Coord
     else:
         privacy = CoordinatePrivacyState.ABSENT.value
     try:
-        accuracy = float(raw.get("positional_accuracy")) if raw.get("positional_accuracy") is not None else None
+        accuracy = (
+            float(raw.get("positional_accuracy"))
+            if raw.get("positional_accuracy") is not None
+            else None
+        )
     except (TypeError, ValueError):
         accuracy = None
     return CoordinateRecordSnapshot(
-        site=RemoteSite.INAT, observation_id=observation_id, coordinates_available=available,
-        privacy_state=privacy, observation_geoprivacy=observation_geoprivacy,
-        taxon_geoprivacy=taxon_geoprivacy, accuracy_m=accuracy,
+        site=RemoteSite.INAT,
+        observation_id=observation_id,
+        coordinates_available=available,
+        privacy_state=privacy,
+        observation_geoprivacy=observation_geoprivacy,
+        taxon_geoprivacy=taxon_geoprivacy,
+        accuracy_m=accuracy,
         exact_point_unreadable=exact_point_unreadable,
-        latitude=latitude, longitude=longitude,
+        latitude=latitude,
+        longitude=longitude,
     )
 
 
@@ -764,7 +1026,9 @@ def _inat_point(raw: dict[str, Any]) -> tuple[Optional[float], Optional[float], 
     location = raw.get("location")
     if isinstance(location, str) and "," in location:
         try:
-            latitude, longitude = (float(value.strip()) for value in location.split(",", 1))
+            latitude, longitude = (
+                float(value.strip()) for value in location.split(",", 1)
+            )
             return latitude, longitude, "location"
         except ValueError:
             pass
@@ -773,12 +1037,16 @@ def _inat_point(raw: dict[str, Any]) -> tuple[Optional[float], Optional[float], 
 
 def _same_point(a: CoordinateRecordSnapshot, b: CoordinateRecordSnapshot) -> bool:
     """In-memory point equality at ~1 m precision; no rounded point is stored."""
-    if a.latitude is None or a.longitude is None or b.latitude is None or b.longitude is None:
+    if (
+        a.latitude is None
+        or a.longitude is None
+        or b.latitude is None
+        or b.longitude is None
+    ):
         return False
-    return (
-        round(a.latitude, _POINT_PRECISION) == round(b.latitude, _POINT_PRECISION)
-        and round(a.longitude, _POINT_PRECISION) == round(b.longitude, _POINT_PRECISION)
-    )
+    return round(a.latitude, _POINT_PRECISION) == round(
+        b.latitude, _POINT_PRECISION
+    ) and round(a.longitude, _POINT_PRECISION) == round(b.longitude, _POINT_PRECISION)
 
 
 def _same_accuracy(a: Optional[float], b: Optional[float]) -> bool:
@@ -795,11 +1063,14 @@ def _same_accuracy(a: Optional[float], b: Optional[float]) -> bool:
 
 
 def _distance_m(
-    source: CoordinateRecordSnapshot, destination: CoordinateRecordSnapshot,
+    source: CoordinateRecordSnapshot,
+    destination: CoordinateRecordSnapshot,
 ) -> Optional[float]:
     if (
-        source.latitude is None or source.longitude is None
-        or destination.latitude is None or destination.longitude is None
+        source.latitude is None
+        or source.longitude is None
+        or destination.latitude is None
+        or destination.longitude is None
     ):
         return None
     radius = 6371000.0
@@ -820,7 +1091,8 @@ def _public_snapshot(snapshot: CoordinateRecordSnapshot) -> CoordinateRecordSnap
     coordinate-derived fingerprint is carried either.
     """
     return CoordinateRecordSnapshot(
-        site=snapshot.site, observation_id=snapshot.observation_id,
+        site=snapshot.site,
+        observation_id=snapshot.observation_id,
         coordinates_available=snapshot.coordinates_available,
         privacy_state=snapshot.privacy_state,
         observation_geoprivacy=snapshot.observation_geoprivacy,
@@ -839,7 +1111,8 @@ _STATE_RANK = {
 
 
 def _broadens_visibility(
-    destination: CoordinateRecordSnapshot, proposed_observation_geoprivacy: str,
+    destination: CoordinateRecordSnapshot,
+    proposed_observation_geoprivacy: str,
 ) -> bool:
     """True only when the copy makes the EXISTING destination coordinate more visible.
 
@@ -855,7 +1128,9 @@ def _broadens_visibility(
     current_rank = _STATE_RANK.get(destination.privacy_state)
     if current_rank is None:
         return False
-    predicted = _more_restrictive(proposed_observation_geoprivacy, destination.taxon_geoprivacy)
+    predicted = _more_restrictive(
+        proposed_observation_geoprivacy, destination.taxon_geoprivacy
+    )
     predicted_rank = _GEOPRIVACY_RANK.get(predicted, 0)
     if predicted_rank == 0:
         return False
@@ -903,13 +1178,22 @@ def _inat_record_fingerprint(raw: dict[str, Any]) -> str:
     user = raw.get("user") if isinstance(raw.get("user"), dict) else {}
     taxon = raw.get("taxon") if isinstance(raw.get("taxon"), dict) else {}
     return public_fingerprint(
-        raw.get("id"), raw.get("uuid"), user.get("id"), raw.get("observed_on"),
-        raw.get("updated_at"), taxon.get("id"), taxon.get("ancestry"),
+        raw.get("id"),
+        raw.get("uuid"),
+        user.get("id"),
+        raw.get("observed_on"),
+        raw.get("updated_at"),
+        taxon.get("id"),
+        taxon.get("ancestry"),
     )
 
 
 def _pair_fingerprint(pair: dict[str, Any]) -> str:
     return public_fingerprint(
-        "pair", pair.get("pair_id"), pair.get("updated_at"), pair.get("review_state"),
-        pair.get("link_state"), pair.get("confirmed_by"),
+        "pair",
+        pair.get("pair_id"),
+        pair.get("updated_at"),
+        pair.get("review_state"),
+        pair.get("link_state"),
+        pair.get("confirmed_by"),
     )

@@ -1,4 +1,5 @@
 """Planning and posting helpers for supervised bulk disagree-to-taxon runs."""
+
 from __future__ import annotations
 
 import logging
@@ -212,8 +213,9 @@ def observation_finished_at_target(
     push them to research grade.
     """
     return (
-        (obs.quality_grade or "").casefold() == "research"
-        and observation_matches_target_taxon(obs, target_taxon_id)
+        obs.quality_grade or ""
+    ).casefold() == "research" and observation_matches_target_taxon(
+        obs, target_taxon_id
     )
 
 
@@ -317,8 +319,8 @@ def plan_bulk_disagree_candidates(
     page = 1
     max_scan = max(1, int(max_observations))
     target_valid = int(target_taxon_id or 0) > 0
-    skip_present_dna_barcode_its = (
-        bool(skip_with_dna_barcode_its) and not bool(only_with_dna_barcode_its)
+    skip_present_dna_barcode_its = bool(skip_with_dna_barcode_its) and not bool(
+        only_with_dna_barcode_its
     )
 
     while stats.total_url_results_scanned < max_scan:
@@ -483,7 +485,9 @@ def plan_propose_name_candidates(
         if refresh_queue:
             refresh_failed_all = False
             try:
-                refreshed = refresh_observations(loader._client, api_token, refresh_queue)
+                refreshed = refresh_observations(
+                    loader._client, api_token, refresh_queue
+                )
             except Exception as exc:
                 if _is_auth_failure_error(exc):
                     raise
@@ -653,10 +657,7 @@ def post_bulk_disagreement(
         if _is_ambiguous_write_error(exc):
             return BulkDisagreeResult(
                 "ambiguous_write",
-                (
-                    str(exc)
-                    + "\n\nManual review is required before any retry."
-                ),
+                (str(exc) + "\n\nManual review is required before any retry."),
                 candidate=candidate,
                 refreshed_observation=refreshed,
             )
@@ -916,7 +917,9 @@ def _make_candidate(
         community_taxon_name=obs.community_taxon.name if obs.community_taxon else "",
         has_dna_barcode_its=bool(dna_value),
         dna_barcode_its_value=dna_value,
-        user_current_taxon=user_ident.taxon.name if user_ident and user_ident.taxon else "",
+        user_current_taxon=(
+            user_ident.taxon.name if user_ident and user_ident.taxon else ""
+        ),
         dqa_vote_planned=bool(dqa_vote_planned),
         explicit_disagreement=bool(explicit_disagreement),
     )

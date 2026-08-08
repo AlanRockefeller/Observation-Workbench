@@ -1,4 +1,5 @@
 """Dialogs for planning species-name observation field updates."""
+
 from __future__ import annotations
 
 import re
@@ -44,7 +45,6 @@ from observation_workbench.ui.table_sort import (
     enable_click_sorting,
     sorting_suspended,
 )
-
 
 _OBS_URL_ID_RE = re.compile(r"/observations/(\d+)")
 
@@ -141,9 +141,7 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
     def _make_card(self, row: SpeciesOverridePlanRow) -> QFrame:
         card = QFrame()
         card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet(
-            "QFrame { background: #ffffff; } QLabel { color: #000000; }"
-        )
+        card.setStyleSheet("QFrame { background: #ffffff; } QLabel { color: #000000; }")
         layout = QVBoxLayout(card)
         title = QLabel(
             f"<b>Observation {row.observation_id}</b> by {row.observer_login}"
@@ -164,7 +162,9 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
             lambda _checked=False, obs_id=row.observation_id: self._ignore(obs_id)
         )
         open_btn.clicked.connect(
-            lambda _checked=False, url=row.observation_url: open_external_url_silently(url)
+            lambda _checked=False, url=row.observation_url: open_external_url_silently(
+                url
+            )
         )
         for button in (keep_btn, ignore_btn, open_btn):
             actions.addWidget(button)
@@ -274,7 +274,9 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         if isinstance(label, _HoldToZoomLabel):
             label.set_full_pixmap(pixmap)
         scaled = pixmap.scaled(
-            520, 540, Qt.AspectRatioMode.KeepAspectRatio,
+            520,
+            540,
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
         label.setPixmap(scaled)
@@ -453,13 +455,13 @@ class SpeciesOverrideSetupDialog(QDialog):
             self._plan_btn.setEnabled(False)
             return
         if not self.override_name():
-            self._validation_label.setText(
-                f"Enter a {self._target_field_name} value."
-            )
+            self._validation_label.setText(f"Enter a {self._target_field_name} value.")
             self._plan_btn.setEnabled(False)
             return
         if self._genus_cb.isChecked() and not self.genus_filter():
-            self._validation_label.setText("Enter a genus name, or clear the genus gate.")
+            self._validation_label.setText(
+                "Enter a genus name, or clear the genus gate."
+            )
             self._plan_btn.setEnabled(False)
             return
         self._validation_label.setText("")
@@ -525,7 +527,9 @@ class SpeciesOverridePlanDialog(QDialog):
         self._start_btn = QPushButton("Start")
         buttons.addButton(self._check_all_btn, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.addButton(self._uncheck_all_btn, QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(self._open_selected_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton(
+            self._open_selected_btn, QDialogButtonBox.ButtonRole.ActionRole
+        )
         buttons.addButton(self._browse_btn, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.addButton(self._start_btn, QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.rejected.connect(self.reject)
@@ -539,7 +543,9 @@ class SpeciesOverridePlanDialog(QDialog):
         self._populate_table()
         self._update_start_enabled()
         self._update_open_enabled()
-        self._browse_btn.setEnabled(bool(client and disk_cache and self.selected_observation_ids()))
+        self._browse_btn.setEnabled(
+            bool(client and disk_cache and self.selected_observation_ids())
+        )
 
     def selected_observation_ids(self) -> list[int]:
         selected: list[int] = []
@@ -594,7 +600,9 @@ class SpeciesOverridePlanDialog(QDialog):
                         flags |= Qt.ItemFlag.ItemIsUserCheckable
                     check_item.setFlags(flags)
                     check_item.setCheckState(
-                        Qt.CheckState.Checked if row.update_allowed else Qt.CheckState.Unchecked
+                        Qt.CheckState.Checked
+                        if row.update_allowed
+                        else Qt.CheckState.Unchecked
                     )
                     self._table.setItem(row_index, 0, check_item)
 
@@ -609,7 +617,9 @@ class SpeciesOverridePlanDialog(QDialog):
                     ]
                     for col, value in enumerate(values, start=1):
                         item = SortableTableWidgetItem(value)
-                        item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                        item.setFlags(
+                            Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                        )
                         self._table.setItem(row_index, col, item)
         finally:
             self._populating = False
@@ -632,14 +642,17 @@ class SpeciesOverridePlanDialog(QDialog):
             f"{self._plan.skipped_row_count} skipped."
         )
         self._start_btn.setEnabled(selected > 0)
-        self._browse_btn.setEnabled(bool(self._client and self._disk_cache and selected))
+        self._browse_btn.setEnabled(
+            bool(self._client and self._disk_cache and selected)
+        )
 
     def _browse_photos(self) -> None:
         if not self._client or not self._disk_cache:
             return
         selected = set(self.selected_observation_ids())
         rows = [
-            row for row in self._plan.rows
+            row
+            for row in self._plan.rows
             if row.update_allowed and row.observation_id in selected
         ]
         dlg = SpeciesOverridePhotoBrowserDialog(

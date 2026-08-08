@@ -5,6 +5,7 @@ Rate limiting: 1 request/second (iNat recommends ~100/min).
 Retry: exponential backoff on 429/503.
 All methods are synchronous — designed to run inside QRunnable workers.
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,8 +71,7 @@ V2_RECONCILIATION_DEEP_FIELDS = (
 # Gate 1E photo transfer. ``license_code`` is requested for display only -- the
 # uploaded photo takes the account default and is never re-licensed by this app.
 V2_OBSERVATION_PHOTO_FIELDS = (
-    "(id:!t,uuid:!t,position:!t,"
-    "photo:(id:!t,license_code:!t,attribution:!t,url:!t))"
+    "(id:!t,uuid:!t,position:!t," "photo:(id:!t,license_code:!t,attribution:!t,url:!t))"
 )
 V2_OBSERVATION_PHOTOS_FIELDS = (
     f"(id:!t,uuid:!t,observation_photos:{V2_OBSERVATION_PHOTO_FIELDS})"
@@ -220,10 +220,12 @@ class INatClient:
                 self._increment_call_count()
                 resp = self._client.get(path, params=params)
                 if resp.status_code in (429, 503):
-                    wait_s = min(2 ** attempt * 2, 60)
+                    wait_s = min(2**attempt * 2, 60)
                     log.warning(
                         "Rate limited (%s) on %s, waiting %ss",
-                        resp.status_code, path, wait_s,
+                        resp.status_code,
+                        path,
+                        wait_s,
                     )
                     if self.on_rate_limited:
                         self.on_rate_limited(resp.status_code, wait_s)
@@ -243,8 +245,10 @@ class INatClient:
                         f"Timed out contacting iNaturalist after {MAX_RETRIES} attempts.",
                         endpoint=path,
                     ) from exc
-                wait_s = 2 ** attempt
-                log.warning("Timeout on %s (attempt %d), retrying in %ss", path, attempt, wait_s)
+                wait_s = 2**attempt
+                log.warning(
+                    "Timeout on %s (attempt %d), retrying in %ss", path, attempt, wait_s
+                )
                 time.sleep(wait_s)
             except httpx.TransportError as exc:
                 if attempt == MAX_RETRIES - 1:
@@ -252,7 +256,7 @@ class INatClient:
                         f"Network error contacting iNaturalist after {MAX_RETRIES} attempts.",
                         endpoint=path,
                     ) from exc
-                wait_s = 2 ** attempt
+                wait_s = 2**attempt
                 log.warning(
                     "Network error on %s (attempt %d): %s; retrying in %ss",
                     path,
@@ -291,7 +295,9 @@ class INatClient:
         if data is not None and json is not None:
             raise ValueError("Cannot specify both data and json parameters")
         method_upper = method.upper()
-        request_phase = "safe_read" if method_upper in {"GET", "HEAD"} else "unsafe_write"
+        request_phase = (
+            "safe_read" if method_upper in {"GET", "HEAD"} else "unsafe_write"
+        )
         if not api_token:
             raise INatAPIError(
                 "Missing iNaturalist API token",
@@ -319,10 +325,12 @@ class INatClient:
                     headers=headers,
                 )
                 if retry_safe and resp.status_code in (429, 503):
-                    wait_s = min(2 ** attempt * 2, 60)
+                    wait_s = min(2**attempt * 2, 60)
                     log.warning(
                         "Rate limited (%s) on %s, waiting %ss",
-                        resp.status_code, path, wait_s,
+                        resp.status_code,
+                        path,
+                        wait_s,
                     )
                     if self.on_rate_limited:
                         self.on_rate_limited(resp.status_code, wait_s)
@@ -344,7 +352,7 @@ class INatClient:
                         request_phase=request_phase,
                         method=method_upper,
                     ) from exc
-                wait_s = 2 ** attempt
+                wait_s = 2**attempt
                 log.warning(
                     "Timeout on authenticated %s %s (attempt %d), retrying in %ss",
                     method_upper,
@@ -363,7 +371,7 @@ class INatClient:
                         f"Network error contacting iNaturalist after {MAX_RETRIES} attempts: {exc}",
                         endpoint=path,
                     ) from exc
-                wait_s = 2 ** attempt
+                wait_s = 2**attempt
                 log.warning(
                     "Network error on authenticated %s %s (attempt %d): %s; retrying in %ss",
                     method_upper,
@@ -409,7 +417,9 @@ class INatClient:
         """
         token = _normalise_jwt(jwt)
         method_upper = method.upper()
-        request_phase = "safe_read" if method_upper in {"GET", "HEAD"} else "unsafe_write"
+        request_phase = (
+            "safe_read" if method_upper in {"GET", "HEAD"} else "unsafe_write"
+        )
         endpoint = _normalise_v2_path(path)
         if not token:
             raise INatAPIError(
@@ -472,7 +482,7 @@ class INatClient:
                     headers=headers,
                 )
                 if retry_safe and response.status_code in (429, 503):
-                    wait_s = min(2 ** attempt * 2, 60)
+                    wait_s = min(2**attempt * 2, 60)
                     log.warning(
                         "Rate limited (%s) on v2 %s; waiting %ss",
                         response.status_code,
@@ -485,10 +495,14 @@ class INatClient:
                     continue
 
                 if response.is_error:
-                    outcome_unknown = (
-                        not retry_safe
-                        and response.status_code not in {400, 401, 403, 404, 409, 422}
-                    )
+                    outcome_unknown = not retry_safe and response.status_code not in {
+                        400,
+                        401,
+                        403,
+                        404,
+                        409,
+                        422,
+                    }
                     raise INatAPIError(
                         f"iNaturalist returned HTTP {response.status_code}",
                         endpoint=endpoint,
@@ -552,7 +566,7 @@ class INatClient:
                         request_phase=request_phase,
                         method=method_upper,
                     ) from exc
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
             except httpx.TransportError as exc:
                 if not retry_safe:
                     raise UnsafeWriteOutcomeUnknown(
@@ -565,7 +579,7 @@ class INatClient:
                         request_phase=request_phase,
                         method=method_upper,
                     ) from exc
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
         raise INatAPIError(
             "Safe iNaturalist read exhausted its retry budget.",
@@ -598,7 +612,9 @@ class INatClient:
     ) -> Dict:
         """Fetch full details for one observation, optionally authenticated."""
         if api_token:
-            return self._request_auth("GET", f"/observations/{int(observation_id)}", api_token)
+            return self._request_auth(
+                "GET", f"/observations/{int(observation_id)}", api_token
+            )
         return self._get(f"/observations/{int(observation_id)}")
 
     def get_observations_by_ids(
@@ -615,12 +631,13 @@ class INatClient:
         for start in range(0, len(ids), MAX_OBSERVATION_DETAIL_IDS):
             batch_ids = ",".join(
                 str(obs_id)
-                for obs_id in ids[start:start + MAX_OBSERVATION_DETAIL_IDS]
+                for obs_id in ids[start : start + MAX_OBSERVATION_DETAIL_IDS]
             )
             path = f"/observations/{batch_ids}"
             raw = (
                 self._request_auth("GET", path, api_token)
-                if api_token else self._get(path)
+                if api_token
+                else self._get(path)
             )
             results.extend(raw.get("results") or [])
         return {"total_results": len(results), "results": results}
@@ -682,7 +699,9 @@ class INatClient:
             "fields": V2_OBSERVATION_IDENTITY_FIELDS,
         }
         if api_token:
-            return self._request_v2_auth("GET", "/observations", api_token, params=params)
+            return self._request_v2_auth(
+                "GET", "/observations", api_token, params=params
+            )
         return self._request_v2("GET", "/observations", params=params)
 
     def get_reconciliation_observations(
@@ -704,8 +723,14 @@ class INatClient:
         return self._request_v2("GET", "/observations", params=params)
 
     def get_creation_duplicate_search(
-        self, api_token: str, *, user_id: int, page: int = 1,
-        d1: str = "", d2: str = "", id_above: Optional[int] = None,
+        self,
+        api_token: str,
+        *,
+        user_id: int,
+        page: int = 1,
+        d1: str = "",
+        d2: str = "",
+        id_above: Optional[int] = None,
     ) -> V2Response:
         """Round-5 finding 1: an AUTHENTICATED, UNFILTERED search of one
         account's observations, purpose-built for Gate 2A's pre-creation
@@ -727,7 +752,8 @@ class INatClient:
         ``d1``/``d2`` — the caller picks one strategy per call).
         """
         params: dict[str, Any] = {
-            "user_id": int(user_id), "fields": V2_RECONCILIATION_DEEP_FIELDS,
+            "user_id": int(user_id),
+            "fields": V2_RECONCILIATION_DEEP_FIELDS,
         }
         if id_above is not None:
             params.update({"id_above": int(id_above), "order_by": "id", "order": "asc"})
@@ -739,7 +765,9 @@ class INatClient:
             if d2:
                 params["d2"] = d2
         paginated = _with_pagination(params, page=page, per_page=200)
-        return self._request_v2_auth("GET", "/observations", api_token, params=paginated)
+        return self._request_v2_auth(
+            "GET", "/observations", api_token, params=paginated
+        )
 
     def get_reconciliation_deleted(
         self,
@@ -770,12 +798,15 @@ class INatClient:
             "id": int(observation_id),
             "per_page": 1,
             "fields": (
-                V2_RECONCILIATION_DEEP_FIELDS if deep
+                V2_RECONCILIATION_DEEP_FIELDS
+                if deep
                 else V2_RECONCILIATION_VALIDATION_FIELDS
             ),
         }
         if api_token:
-            return self._request_v2_auth("GET", "/observations", api_token, params=params)
+            return self._request_v2_auth(
+                "GET", "/observations", api_token, params=params
+            )
         return self._request_v2("GET", "/observations", params=params)
 
     def get_reconciliation_validation(
@@ -804,7 +835,9 @@ class INatClient:
             # no-op filter, it serves the global observation index.
             return V2Response(
                 {"total_results": 0, "results": []},
-                V2ResponseMetadata(endpoint="/observations", method="GET", status_code=200),
+                V2ResponseMetadata(
+                    endpoint="/observations", method="GET", status_code=200
+                ),
             )
         params = {
             "id": ",".join(str(value) for value in ids),
@@ -812,7 +845,9 @@ class INatClient:
             "fields": V2_RECONCILIATION_VALIDATION_FIELDS,
         }
         if api_token:
-            return self._request_v2_auth("GET", "/observations", api_token, params=params)
+            return self._request_v2_auth(
+                "GET", "/observations", api_token, params=params
+            )
         return self._request_v2("GET", "/observations", params=params)
 
     def get_reconciliation_context(
@@ -830,7 +865,9 @@ class INatClient:
             # something entirely different from what was intended.
             return V2Response(
                 {"total_results": 0, "results": []},
-                V2ResponseMetadata(endpoint="/observations", method="GET", status_code=200),
+                V2ResponseMetadata(
+                    endpoint="/observations", method="GET", status_code=200
+                ),
             )
         params = {
             "id": ",".join(str(value) for value in ids),
@@ -838,42 +875,64 @@ class INatClient:
             "fields": V2_RECONCILIATION_CONTEXT_FIELDS,
         }
         if api_token:
-            return self._request_v2_auth("GET", "/observations", api_token, params=params)
+            return self._request_v2_auth(
+                "GET", "/observations", api_token, params=params
+            )
         return self._request_v2("GET", "/observations", params=params)
 
     def create_reconciliation_field_value_v2(
-        self, api_token: str, observation_uuid: str, observation_field_id: int, value: str,
+        self,
+        api_token: str,
+        observation_uuid: str,
+        observation_field_id: int,
+        value: str,
     ) -> V2Response:
         """Create one explicitly confirmed reconciliation field value."""
         return self._request_v2_auth(
-            "POST", "/observation_field_values", api_token,
-            json={"observation_field_value": {
-                "observation_id": observation_uuid,
-                "observation_field_id": int(observation_field_id),
-                "value": value,
-            }},
+            "POST",
+            "/observation_field_values",
+            api_token,
+            json={
+                "observation_field_value": {
+                    "observation_id": observation_uuid,
+                    "observation_field_id": int(observation_field_id),
+                    "value": value,
+                }
+            },
         )
 
     def update_reconciliation_field_value_v2(
-        self, api_token: str, field_value_uuid: str, observation_uuid: str,
-        observation_field_id: int, value: str,
+        self,
+        api_token: str,
+        field_value_uuid: str,
+        observation_uuid: str,
+        observation_field_id: int,
+        value: str,
     ) -> V2Response:
         """Repair one exact iNaturalist observation-field-value UUID."""
         return self._request_v2_auth(
-            "PUT", f"/observation_field_values/{field_value_uuid}", api_token,
-            json={"observation_field_value": {
-                "observation_id": observation_uuid,
-                "observation_field_id": int(observation_field_id),
-                "value": value,
-            }},
+            "PUT",
+            f"/observation_field_values/{field_value_uuid}",
+            api_token,
+            json={
+                "observation_field_value": {
+                    "observation_id": observation_uuid,
+                    "observation_field_id": int(observation_field_id),
+                    "value": value,
+                }
+            },
         )
 
     def delete_reconciliation_field_value_v2(
-        self, api_token: str, field_value_uuid: str,
+        self,
+        api_token: str,
+        field_value_uuid: str,
     ) -> V2Response:
         """Remove one exact, explicitly reviewed iNaturalist field-value row."""
         return self._request_v2_auth(
-            "DELETE", f"/observation_field_values/{field_value_uuid}", api_token,
+            "DELETE",
+            f"/observation_field_values/{field_value_uuid}",
+            api_token,
         )
 
     def update_observation_coordinates_v2(
@@ -976,7 +1035,9 @@ class INatClient:
             },
         )
 
-    def delete_observation_v2(self, api_token: str, observation_uuid: str) -> V2Response:
+    def delete_observation_v2(
+        self, api_token: str, observation_uuid: str
+    ) -> V2Response:
         """Gate 2A: ``DELETE /observations/{uuid}``.
 
         Live-proven 2026-07-23 that v2 exposes this for the owning user,
@@ -986,9 +1047,13 @@ class INatClient:
         deleted — this method exists for completeness and for tooling
         (e.g. the proof harness's own cleanup), not for saga recovery logic.
         """
-        return self._request_v2_auth("DELETE", f"/observations/{observation_uuid}", api_token)
+        return self._request_v2_auth(
+            "DELETE", f"/observations/{observation_uuid}", api_token
+        )
 
-    def get_observation_photos_v2(self, observation_uuid: str, api_token: str) -> V2Response:
+    def get_observation_photos_v2(
+        self, observation_uuid: str, api_token: str
+    ) -> V2Response:
         """Read exactly the observation_photo rows needed to verify a transfer.
 
         This is the mandatory post-write re-read: a photo transfer is only ever
@@ -1071,7 +1136,9 @@ class INatClient:
             payload["identification"]["body"] = body
         if disagreement is not None:
             payload["identification"]["disagreement"] = bool(disagreement)
-        return self._request_v2_auth("POST", "/identifications", api_token, json=payload)
+        return self._request_v2_auth(
+            "POST", "/identifications", api_token, json=payload
+        )
 
     def create_comment_v2(
         self,
@@ -1174,7 +1241,9 @@ class INatClient:
         if observation_id is not None:
             payload["observation_field_value[observation_id]"] = int(observation_id)
         if observation_field_id is not None:
-            payload["observation_field_value[observation_field_id]"] = int(observation_field_id)
+            payload["observation_field_value[observation_field_id]"] = int(
+                observation_field_id
+            )
         return self._request_auth(
             "PUT",
             f"{WWW_BASE_URL}/observation_field_values/{observation_field_value_id}.json",
@@ -1349,7 +1418,7 @@ class INatClient:
                 if resp.status_code == 404:
                     raise FileNotFoundError(f"Image not found: {url}")
                 if resp.status_code in (429, 503):
-                    wait_s = 2 ** attempt
+                    wait_s = 2**attempt
                     time.sleep(wait_s)
                     continue
                 resp.raise_for_status()
@@ -1357,7 +1426,7 @@ class INatClient:
             except httpx.TransportError:
                 if attempt == MAX_RETRIES - 1:
                     raise
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         raise RuntimeError(f"Max retries exceeded for image {url}")
 
 
@@ -1383,7 +1452,9 @@ def _fixed_endpoint_name(endpoint: str) -> str:
     """Return a log-only fixed path without hosts or remote row identities."""
     path = urlsplit(endpoint).path
     path = re.sub(
-        r"(?<=/observation_field_values/)[^/]+", "{field_value_id}", path,
+        r"(?<=/observation_field_values/)[^/]+",
+        "{field_value_id}",
+        path,
     )
     path = re.sub(r"(?<=/observations/)[^/]+", "{observation_id}", path)
     return path or "/v2"

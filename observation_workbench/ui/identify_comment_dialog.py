@@ -1,4 +1,5 @@
 """Focused, journal-first Comment entry for one captured observation."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal

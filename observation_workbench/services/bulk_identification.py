@@ -1,4 +1,5 @@
 """Planning helpers for supervised bulk provisional-name agreements."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -88,7 +89,7 @@ def plan_provisional_candidates(
         if not observations:
             break
         if max_scan is not None:
-            observations = observations[:max_scan - stats.total_results_scanned]
+            observations = observations[: max_scan - stats.total_results_scanned]
         stats.total_results_scanned += len(observations)
         if progress:
             progress(stats.total_results_scanned, total)
@@ -133,7 +134,9 @@ def plan_provisional_candidates(
                 obs = fresh
                 # Re-derive the provisional target from the fresh payload.
                 ident = most_recent_non_self_current_identification(
-                    obs, login, provisional_only=True,
+                    obs,
+                    login,
+                    provisional_only=True,
                 )
                 if ident is None:
                     stats.skipped_no_provisional_id += 1

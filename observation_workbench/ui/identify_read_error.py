@@ -1,4 +1,5 @@
 """Shared Retry/Cancel presentation for user-initiated, read-only requests."""
+
 from __future__ import annotations
 
 from typing import Callable

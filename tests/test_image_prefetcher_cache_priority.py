@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 import os
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QIODevice

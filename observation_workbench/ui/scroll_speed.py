@@ -1,4 +1,5 @@
 """Application-wide mouse-wheel scroll speed adjustment."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QEvent, Qt

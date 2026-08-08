@@ -4,6 +4,7 @@ Disk-based image cache with LRU eviction.
 Layout: <cache_dir>/<photo_id>_<size>.<ext>
 Eviction: remove least-recently-accessed files when total size exceeds limit.
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,7 +54,9 @@ class ImageCache:
         p = self._path(photo_id, size, ext)
         try:
             with self._lock:
-                fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), prefix=f".{p.name}.")
+                fd, tmp_name = tempfile.mkstemp(
+                    dir=str(self._dir), prefix=f".{p.name}."
+                )
                 try:
                     with os.fdopen(fd, "wb") as f:
                         f.write(data)

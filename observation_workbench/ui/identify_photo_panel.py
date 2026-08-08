@@ -1,4 +1,5 @@
 """Identity-aware image panel used only by the read-only Identify window."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -331,7 +332,11 @@ class IdentifyPhotoPanel(QWidget):
             self._brightness_overlay.setPen(Qt.PenStyle.NoPen)
             return
         alpha = min(180, abs(self._brightness) * 18)
-        color = QColor(255, 255, 255, alpha) if self._brightness > 0 else QColor(0, 0, 0, alpha)
+        color = (
+            QColor(255, 255, 255, alpha)
+            if self._brightness > 0
+            else QColor(0, 0, 0, alpha)
+        )
         self._brightness_overlay.setRect(self._scene.sceneRect())
         self._brightness_overlay.setBrush(color)
         self._brightness_overlay.setPen(Qt.PenStyle.NoPen)

@@ -44,6 +44,7 @@ Usage
     python tools/gate_2a_proof_harness.py --mo --taxon-name "Amanita muscaria" \
         --run --i-own-these-records
 """
+
 from __future__ import annotations
 
 import argparse
@@ -115,7 +116,9 @@ class INatProof:
     header value — NOT ``Bearer <jwt>``, which iNaturalist treats as
     unauthenticated."""
 
-    def __init__(self, jwt: str, *, timeout: float = 60.0, verbose: bool = False) -> None:
+    def __init__(
+        self, jwt: str, *, timeout: float = 60.0, verbose: bool = False
+    ) -> None:
         self._jwt = _normalise_jwt(jwt)
         self._verbose = verbose
         self._last = 0.0
@@ -220,7 +223,9 @@ class INatProof:
 class MOProof:
     """MO spaces requests conservatively (>=5s, or the server's reported runtime)."""
 
-    def __init__(self, api_key: str = "", *, timeout: float = 60.0, verbose: bool = False) -> None:
+    def __init__(
+        self, api_key: str = "", *, timeout: float = 60.0, verbose: bool = False
+    ) -> None:
         self._key = api_key.strip()
         self._verbose = verbose
         self._last_finished = 0.0
@@ -253,7 +258,9 @@ class MOProof:
             if method == "GET":
                 response = self._client.get(f"/{endpoint}", params=body)
             else:
-                response = self._client.request(method, f"/{endpoint}", data=body, files=files)
+                response = self._client.request(
+                    method, f"/{endpoint}", data=body, files=files
+                )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             self._last_finished = time.monotonic()
             raise Ambiguous(f"MO {method} /{endpoint}: {type(exc).__name__}") from exc
@@ -284,20 +291,30 @@ class MOProof:
         return self._request("POST", "observations", payload)
 
     def get_observation(self, observation_id: int) -> tuple[int, Any]:
-        return self._request("GET", "observations", {"id": int(observation_id), "detail": "high"})
+        return self._request(
+            "GET", "observations", {"id": int(observation_id), "detail": "high"}
+        )
 
-    def search_observations_by_notes(self, *, user_id: Optional[int], marker: str) -> tuple[int, Any]:
+    def search_observations_by_notes(
+        self, *, user_id: Optional[int], marker: str
+    ) -> tuple[int, Any]:
         """Probe whether MO's list endpoint can filter by account + free text,
         which is exactly the M4 fallback recovery mechanism this run must
         prove viable (or not) before Mushroom Observer may ship as a creation
         destination."""
-        payload: dict[str, Any] = {"api_key": self._key, "notes_has": marker, "detail": "low"}
+        payload: dict[str, Any] = {
+            "api_key": self._key,
+            "notes_has": marker,
+            "detail": "low",
+        }
         if user_id:
             payload["user"] = int(user_id)
         return self._request("GET", "observations", payload)
 
     def delete_observation(self, observation_id: int) -> tuple[int, Any]:
-        return self._request("DELETE", "observations", {"api_key": self._key, "id": int(observation_id)})
+        return self._request(
+            "DELETE", "observations", {"api_key": self._key, "id": int(observation_id)}
+        )
 
     def whoami(self) -> tuple[int, Any]:
         payload: dict[str, Any] = {"api_key": self._key, "detail": "high"}
@@ -329,7 +346,14 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
         )
         return results
     me = (payload.get("results") or [{}])[0]
-    record(Result("inat.auth", "JWT authenticates against v2", PASS, f"authenticated as {me.get('login')!r}"))
+    record(
+        Result(
+            "inat.auth",
+            "JWT authenticates against v2",
+            PASS,
+            f"authenticated as {me.get('login')!r}",
+        )
+    )
 
     marker = f"{MARKER_PREFIX}{uuidlib.uuid4()}]"
     client_uuid = str(uuidlib.uuid4())
@@ -344,7 +368,14 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
             description=marker,
         )
     except Ambiguous as exc:
-        record(Result("inat.create", "POST /observations creates an observation", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "inat.create",
+                "POST /observations creates an observation",
+                UNKNOWN,
+                str(exc),
+            )
+        )
         return results
     created = _first(payload)
     obs_uuid = str(created.get("uuid") or "")
@@ -379,7 +410,11 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
             "Client-supplied uuid becomes the observation's own uuid",
             PASS if matches else FAIL,
             f"sent {client_uuid!r}, observation uuid is {obs_uuid!r}"
-            + ("" if matches else " — MISMATCH: the create uuid is NOT usable as a recovery anchor"),
+            + (
+                ""
+                if matches
+                else " — MISMATCH: the create uuid is NOT usable as a recovery anchor"
+            ),
             {"sent": client_uuid, "returned": obs_uuid},
         )
     )
@@ -396,11 +431,21 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
                 PASS if status < 400 and recovered else FAIL,
                 f"HTTP {status}; exact-uuid lookup {'succeeded' if recovered else 'failed'} — "
                 "this is the iNat-side verify_unknown mechanism for Phase 2A",
-                {"marker_in_description": marker in str(found.get("description") or "")},
+                {
+                    "marker_in_description": marker
+                    in str(found.get("description") or "")
+                },
             )
         )
     except Ambiguous as exc:
-        record(Result("inat.uuid_lookup", "GET /observations/{uuid} recovers a lost create response", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "inat.uuid_lookup",
+                "GET /observations/{uuid} recovers a lost create response",
+                UNKNOWN,
+                str(exc),
+            )
+        )
 
     # --- 4. double-POST with the same uuid: dedupe or duplicate? ------------
     try:
@@ -424,7 +469,10 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
                 "not as a fresh failure",
             )
         elif dup_uuid == obs_uuid:
-            verdict, detail = PASS, f"same uuid returned the same observation {dup_uuid} — de-duplicated"
+            verdict, detail = (
+                PASS,
+                f"same uuid returned the same observation {dup_uuid} — de-duplicated",
+            )
         else:
             verdict, detail = (
                 FAIL,
@@ -438,11 +486,22 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
                 "Same-uuid re-POST does not create a second observation",
                 verdict,
                 detail,
-                {"first_uuid": obs_uuid, "second_uuid": dup_uuid, "second_status": status},
+                {
+                    "first_uuid": obs_uuid,
+                    "second_uuid": dup_uuid,
+                    "second_status": status,
+                },
             )
         )
     except Ambiguous as exc:
-        record(Result("inat.uuid_idempotency", "Same-uuid re-POST does not create a second observation", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "inat.uuid_idempotency",
+                "Same-uuid re-POST does not create a second observation",
+                UNKNOWN,
+                str(exc),
+            )
+        )
 
     # --- 5. cleanup via DELETE /observations/{uuid} -------------------------
     try:
@@ -465,7 +524,14 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
             )
         )
     except Ambiguous as exc:
-        record(Result("inat.delete", "DELETE /observations/{uuid} removes a created observation", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "inat.delete",
+                "DELETE /observations/{uuid} removes a created observation",
+                UNKNOWN,
+                str(exc),
+            )
+        )
 
     return results
 
@@ -484,7 +550,9 @@ def run_inat_checks(inat: INatProof, taxon_name: str, ledger: Ledger) -> list[Re
 # ---------------------------------------------------------------------------
 
 
-def run_mo_recover_checks(mo: MOProof, observation_id: int, ledger: Ledger) -> list[Result]:
+def run_mo_recover_checks(
+    mo: MOProof, observation_id: int, ledger: Ledger
+) -> list[Result]:
     results: list[Result] = []
 
     def record(res: Result) -> Result:
@@ -529,7 +597,11 @@ def run_mo_recover_checks(mo: MOProof, observation_id: int, ledger: Ledger) -> l
             "Response contains a parseable observation row",
             PASS,
             f"id={row.get('id')}, name={row.get('name')!r}, notes={notes!r}"
-            + (f" — marker extracted: {marker!r}" if marker else " — NO planted marker found in notes"),
+            + (
+                f" — marker extracted: {marker!r}"
+                if marker
+                else " — NO planted marker found in notes"
+            ),
             {"row": row},
         )
     )
@@ -544,9 +616,11 @@ def run_mo_recover_checks(mo: MOProof, observation_id: int, ledger: Ledger) -> l
                 "HARD OUTCOME: a create-time marker is independently searchable",
                 PASS if matched else FAIL,
                 f"HTTP {status}; search for the planted marker "
-                + (f"found observation {observation_id} — this IS a viable M4 recovery path"
-                   if matched
-                   else f"did NOT return observation {observation_id} — NOT a viable recovery path"),
+                + (
+                    f"found observation {observation_id} — this IS a viable M4 recovery path"
+                    if matched
+                    else f"did NOT return observation {observation_id} — NOT a viable recovery path"
+                ),
                 {"matched_ids": [r.get("id") for r in found]},
             )
         )
@@ -561,7 +635,8 @@ def run_mo_recover_checks(mo: MOProof, observation_id: int, ledger: Ledger) -> l
             "mo.recover_delete",
             f"DELETE removes observation {observation_id} (hygiene cleanup)",
             PASS if ok else FAIL,
-            f"HTTP {status}" + (f"; MO error: {error_text}" if error_text else "; deleted"),
+            f"HTTP {status}"
+            + (f"; MO error: {error_text}" if error_text else "; deleted"),
         )
     )
     return results
@@ -643,7 +718,14 @@ def run_mo_checks(mo: MOProof, taxon_name: str, ledger: Ledger) -> list[Result]:
             }
         )
     except Ambiguous as exc:
-        record(Result("mo.create", "POST /api2/observations creates an observation", UNKNOWN, f"{exc} — re-enumerate before any retry"))
+        record(
+            Result(
+                "mo.create",
+                "POST /api2/observations creates an observation",
+                UNKNOWN,
+                f"{exc} — re-enumerate before any retry",
+            )
+        )
         return results
 
     error_text = _mo_error_text(payload)
@@ -676,7 +758,9 @@ def run_mo_checks(mo: MOProof, taxon_name: str, ledger: Ledger) -> list[Result]:
 
     # --- 3. is the marker actually searchable? -------------------------------
     try:
-        status, payload = mo.search_observations_by_notes(user_id=user_id, marker=marker)
+        status, payload = mo.search_observations_by_notes(
+            user_id=user_id, marker=marker
+        )
         found = _mo_results(payload)
         matched = any(_int_or_none(row.get("id")) == returned_id for row in found)
         record(
@@ -685,16 +769,25 @@ def run_mo_checks(mo: MOProof, taxon_name: str, ledger: Ledger) -> list[Result]:
                 "HARD OUTCOME: a create-time marker is independently searchable",
                 PASS if matched else FAIL,
                 f"HTTP {status}; search for the planted marker "
-                + (f"found the created observation {returned_id} — this IS a viable M4 recovery path"
-                   if matched
-                   else f"did NOT return observation {returned_id} — this field/search combination "
-                        "is NOT a viable recovery path; Mushroom Observer must not ship as a "
-                        "creation destination this phase unless a different searchable mechanism is found"),
+                + (
+                    f"found the created observation {returned_id} — this IS a viable M4 recovery path"
+                    if matched
+                    else f"did NOT return observation {returned_id} — this field/search combination "
+                    "is NOT a viable recovery path; Mushroom Observer must not ship as a "
+                    "creation destination this phase unless a different searchable mechanism is found"
+                ),
                 {"matched_ids": [row.get("id") for row in found]},
             )
         )
     except Ambiguous as exc:
-        record(Result("mo.marker_searchable", "HARD OUTCOME: a create-time marker is independently searchable", UNKNOWN, str(exc)))
+        record(
+            Result(
+                "mo.marker_searchable",
+                "HARD OUTCOME: a create-time marker is independently searchable",
+                UNKNOWN,
+                str(exc),
+            )
+        )
 
     # --- 4. double-create idempotency behaviour ------------------------------
     try:
@@ -728,7 +821,15 @@ def run_mo_checks(mo: MOProof, taxon_name: str, ledger: Ledger) -> list[Result]:
             )
         )
     except Ambiguous as exc:
-        record(Result("mo.create_idempotency", "Double-create with the same marker: dedupe or silent duplicate?", UNKNOWN, str(exc), blocking=False))
+        record(
+            Result(
+                "mo.create_idempotency",
+                "Double-create with the same marker: dedupe or silent duplicate?",
+                UNKNOWN,
+                str(exc),
+                blocking=False,
+            )
+        )
 
     # --- 5. cleanup: can created MO observations be deleted at all? ---------
     for oid in list(ledger.mo_observation_ids):
@@ -743,7 +844,8 @@ def run_mo_checks(mo: MOProof, taxon_name: str, ledger: Ledger) -> list[Result]:
                     "mo.delete",
                     "DELETE removes a created MO observation (informational, for hygiene)",
                     PASS if ok else UNKNOWN,
-                    f"HTTP {status}; observation {oid} " + ("deleted" if ok else f"NOT confirmed deleted: {del_error}"),
+                    f"HTTP {status}; observation {oid} "
+                    + ("deleted" if ok else f"NOT confirmed deleted: {del_error}"),
                     blocking=False,
                 )
             )
@@ -824,7 +926,9 @@ def _mo_errors(payload: Any) -> list[dict]:
     if not isinstance(payload, dict):
         return []
     errors = payload.get("errors")
-    return [e for e in errors if isinstance(e, dict)] if isinstance(errors, list) else []
+    return (
+        [e for e in errors if isinstance(e, dict)] if isinstance(errors, list) else []
+    )
 
 
 def _mo_error_text(payload: Any) -> str:
@@ -845,7 +949,9 @@ _ICON = {PASS: "PASS", FAIL: "FAIL", UNKNOWN: "????", SKIP: "SKIP"}
 def _print_result(res: Result) -> None:
     tag = _ICON[res.status]
     scope = "" if res.blocking else "  (informational)"
-    print(f"  [{tag}] {res.check_id}{scope}\n         {res.title}\n         {res.detail}")
+    print(
+        f"  [{tag}] {res.check_id}{scope}\n         {res.title}\n         {res.detail}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -868,14 +974,18 @@ def cleanup(inat: Optional[INatProof], mo: Optional[MOProof], ledger: Ledger) ->
             try:
                 status, payload = mo.delete_observation(oid)
                 if _mo_error_text(payload):
-                    print(f"  !! MO delete of {oid} reported an error: {_mo_error_text(payload)}")
+                    print(
+                        f"  !! MO delete of {oid} reported an error: {_mo_error_text(payload)}"
+                    )
                 else:
                     print(f"  deleted MO observation {oid} (HTTP {status})")
                     ledger.mo_observation_ids.remove(oid)
             except Ambiguous as exc:
                 print(f"  !! MO delete of {oid} outcome UNKNOWN: {exc}")
     if ledger.mo_observation_ids:
-        print("\n  NOTE: these MO observations could not be confirmed deleted. Check/remove")
+        print(
+            "\n  NOTE: these MO observations could not be confirmed deleted. Check/remove"
+        )
         print("  them on the website:")
         for oid in ledger.mo_observation_ids:
             print(f"    https://mushroomobserver.org/{oid}")
@@ -898,12 +1008,17 @@ def summarise(results: list[Result]) -> int:
     failed = [r for r in blocking if r.status == FAIL]
     unknown = [r for r in blocking if r.status == UNKNOWN]
     print("\n" + "-" * 72)
-    mo_hard_outcome = next((r for r in results if r.check_id == "mo.hard_outcome"), None)
+    mo_hard_outcome = next(
+        (r for r in results if r.check_id == "mo.hard_outcome"), None
+    )
     if mo_hard_outcome:
         print(
             f"Mushroom Observer hard outcome: {mo_hard_outcome.status} — "
-            + ("MO may proceed as a creation destination (M4)." if mo_hard_outcome.status == PASS
-               else "MO is DISABLED as a creation destination for this phase.")
+            + (
+                "MO may proceed as a creation destination (M4)."
+                if mo_hard_outcome.status == PASS
+                else "MO is DISABLED as a creation destination for this phase."
+            )
         )
     if failed:
         print(f"RESULT: NOT CLEARED — {len(failed)} blocking check(s) failed.")
@@ -911,13 +1026,17 @@ def summarise(results: list[Result]) -> int:
             print(f"  - {res.check_id}: {res.detail}")
         return 1
     if unknown:
-        print(f"RESULT: INCONCLUSIVE — {len(unknown)} blocking check(s) unknown. Re-run.")
+        print(
+            f"RESULT: INCONCLUSIVE — {len(unknown)} blocking check(s) unknown. Re-run."
+        )
         return 2
     if not blocking:
         print("RESULT: nothing ran. Supply --inat and/or --mo.")
         return 2
     print("RESULT: CLEARED — every blocking check passed.")
-    print("Update docs/gate_2a_capability_note.md with these outcomes before M3 (schema) begins.")
+    print(
+        "Update docs/gate_2a_capability_note.md with these outcomes before M3 (schema) begins."
+    )
     return 0
 
 
@@ -951,8 +1070,14 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--inat", action="store_true", help="Run the iNaturalist create-endpoint proofs")
-    parser.add_argument("--mo", action="store_true", help="Run the Mushroom Observer create-endpoint proofs")
+    parser.add_argument(
+        "--inat", action="store_true", help="Run the iNaturalist create-endpoint proofs"
+    )
+    parser.add_argument(
+        "--mo",
+        action="store_true",
+        help="Run the Mushroom Observer create-endpoint proofs",
+    )
     parser.add_argument(
         "--mo-recover-id",
         type=int,
@@ -969,15 +1094,25 @@ def build_parser() -> argparse.ArgumentParser:
         default="Amanita muscaria",
         help="A real, unambiguous taxon/species name to submit on the test observation",
     )
-    parser.add_argument("--run", action="store_true", help="Actually execute (default is dry-run)")
+    parser.add_argument(
+        "--run", action="store_true", help="Actually execute (default is dry-run)"
+    )
     parser.add_argument(
         "--i-own-these-records",
         action="store_true",
         help="Required with --run. Asserts you are creating disposable test records under your own account.",
     )
-    parser.add_argument("--no-cleanup", action="store_true", help="Leave created test observations in place")
-    parser.add_argument("--json-out", type=Path, help="Write machine-readable results here")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Log every request/response")
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Leave created test observations in place",
+    )
+    parser.add_argument(
+        "--json-out", type=Path, help="Write machine-readable results here"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Log every request/response"
+    )
     return parser
 
 
@@ -985,24 +1120,38 @@ def plan(args: argparse.Namespace) -> None:
     print("DRY RUN — nothing was sent. This run would:\n")
     if args.mo_recover_id:
         print(f"  Mushroom Observer (recovery mode, id={args.mo_recover_id}):")
-        print("    - GET the named observation and print its raw response (fixes id parsing)")
+        print(
+            "    - GET the named observation and print its raw response (fixes id parsing)"
+        )
         print("    - extract the planted marker from its notes field, if present")
         print("    - search for that marker and confirm it resolves back to this id")
         print("    - DELETE the observation (hygiene cleanup)")
         return
     if args.inat:
         print("  iNaturalist:")
-        print(f"    - POST /observations creating a disposable test observation ({args.taxon_name!r})")
-        print("    - confirm the client-supplied uuid becomes the observation's own uuid")
+        print(
+            f"    - POST /observations creating a disposable test observation ({args.taxon_name!r})"
+        )
+        print(
+            "    - confirm the client-supplied uuid becomes the observation's own uuid"
+        )
         print("    - GET /observations/{uuid} to prove exact-uuid recovery works")
         print("    - re-POST with the SAME uuid to check for silent duplication")
         print("    - DELETE /observations/{uuid} to clean up")
     if args.mo:
         print("\n  Mushroom Observer:")
-        print("    - probe POST /api2/observations?help=1 for the create parameter list")
-        print("    - if a free-text field exists: create a disposable observation with an")
-        print("      opaque marker embedded, then search for that marker (the HARD outcome")
-        print("      check — determines whether MO may be a Phase 2A creation destination)")
+        print(
+            "    - probe POST /api2/observations?help=1 for the create parameter list"
+        )
+        print(
+            "    - if a free-text field exists: create a disposable observation with an"
+        )
+        print(
+            "      opaque marker embedded, then search for that marker (the HARD outcome"
+        )
+        print(
+            "      check — determines whether MO may be a Phase 2A creation destination)"
+        )
         print("    - re-create with the same marker to check for silent duplication")
         print("    - attempt to delete the created test observation(s)")
     print("\nRe-run with --run --i-own-these-records to execute.")
@@ -1012,7 +1161,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.inat and not args.mo and not args.mo_recover_id:
-        print("Nothing to do: pass --inat and/or --mo (or --mo-recover-id).", file=sys.stderr)
+        print(
+            "Nothing to do: pass --inat and/or --mo (or --mo-recover-id).",
+            file=sys.stderr,
+        )
         return 2
 
     if not args.run:
@@ -1034,7 +1186,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         if args.inat:
-            jwt = os.environ.get("INAT_JWT", "") or getpass.getpass("iNaturalist JWT (hidden): ")
+            jwt = os.environ.get("INAT_JWT", "") or getpass.getpass(
+                "iNaturalist JWT (hidden): "
+            )
             if not jwt.strip():
                 print("No iNaturalist JWT supplied.", file=sys.stderr)
                 return 2
@@ -1043,7 +1197,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             results += run_inat_checks(inat, args.taxon_name, ledger)
 
         if args.mo or args.mo_recover_id:
-            key = os.environ.get("MO_API_KEY", "") or getpass.getpass("Mushroom Observer API key (hidden): ")
+            key = os.environ.get("MO_API_KEY", "") or getpass.getpass(
+                "Mushroom Observer API key (hidden): "
+            )
             if not key.strip():
                 print("No Mushroom Observer API key supplied.", file=sys.stderr)
                 return 2

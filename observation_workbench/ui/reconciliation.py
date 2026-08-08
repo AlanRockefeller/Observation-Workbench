@@ -1,4 +1,5 @@
 """Reconciliation dashboard with reviewed Gate 1B and Gate 1C writes."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,44 +8,108 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from PySide6.QtCore import (
-    QAbstractTableModel, QBuffer, QByteArray, QModelIndex, QObject, QPoint,
-    QRect, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal,
+    QAbstractTableModel,
+    QBuffer,
+    QByteArray,
+    QModelIndex,
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    QUrl,
+    Signal,
 )
 from PySide6.QtGui import (
-    QColor, QDesktopServices, QImage, QImageReader, QKeySequence, QPainter,
-    QPixmap, QShortcut,
+    QColor,
+    QDesktopServices,
+    QImage,
+    QImageReader,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
-    QApplication, QLabel, QInputDialog, QLayout, QLayoutItem, QLineEdit, QListWidget, QMainWindow, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QScrollArea, QSplitter, QTableView,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QApplication,
+    QLabel,
+    QInputDialog,
+    QLayout,
+    QLayoutItem,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QScrollArea,
+    QSplitter,
+    QTableView,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from observation_workbench.reconciliation.coordinator import ReconciliationCoordinator
-from observation_workbench.reconciliation.actions import simulate_link_repair_final_state
+from observation_workbench.reconciliation.actions import (
+    simulate_link_repair_final_state,
+)
 from observation_workbench.reconciliation.consolidation import select_canonical
 from observation_workbench.reconciliation.deletion import (
     DonorDeletionPreview,
 )
 from observation_workbench.reconciliation.db import REPAIRABLE_LINK_ISSUE_TYPES
-from observation_workbench.reconciliation.mo_client import ReconciliationCancelled, mo_login_of
+from observation_workbench.reconciliation.mo_client import (
+    ReconciliationCancelled,
+    mo_login_of,
+)
 from observation_workbench.reconciliation.mo_parsing import (
-    MO_LARGEST_FETCHABLE_SIZE, mo_image_page_url, mo_image_url,
-    mo_observation_photo_count, mo_original_is_public,
+    MO_LARGEST_FETCHABLE_SIZE,
+    mo_image_page_url,
+    mo_image_url,
+    mo_observation_photo_count,
+    mo_original_is_public,
 )
 from observation_workbench.reconciliation.photo_license import (
-    normalized_pixel_fingerprint, pixel_fingerprint_distance,
+    normalized_pixel_fingerprint,
+    pixel_fingerprint_distance,
 )
 from observation_workbench.reconciliation.types import (
-    CoordinateActionOption, CoordinateComparisonPreview, CoordinateRecordSnapshot,
-    ConsolidationMemberSnapshot, ConsolidationPreview,
-    ITSActionOption, ITSComparisonPreview, ITSRecordSnapshot, LinkRepairOption,
-    LinkRepairPreview, MediaIdentity, NameProposalCandidate, NameProposalPreview,
-    ObservationCreationItem, ObservationCreationPreview,
-    PhotoActionOption, PhotoComparisonPreview, PhotoIdentityPreview,
+    CoordinateActionOption,
+    CoordinateComparisonPreview,
+    CoordinateRecordSnapshot,
+    ConsolidationMemberSnapshot,
+    ConsolidationPreview,
+    ITSActionOption,
+    ITSComparisonPreview,
+    ITSRecordSnapshot,
+    LinkRepairOption,
+    LinkRepairPreview,
+    MediaIdentity,
+    NameProposalCandidate,
+    NameProposalPreview,
+    ObservationCreationItem,
+    ObservationCreationPreview,
+    PhotoActionOption,
+    PhotoComparisonPreview,
+    PhotoIdentityPreview,
     PhotoRecordSnapshot,
-    ReconciliationProfile, RemoteSite,
+    ReconciliationProfile,
+    RemoteSite,
 )
 
 PAGE_SIZE = 250
@@ -118,8 +183,11 @@ SCAN_STAGE_LABELS = {
 # observations at >=5s spacing, while listing observations is a single page.
 SCAN_STAGE_WEIGHTS: dict[str, tuple[tuple[str, float], ...]] = {
     "mo": (
-        ("observations", 0.10), ("names", 0.35), ("external_sites", 0.02),
-        ("recover", 0.08), ("external_links", 0.45),
+        ("observations", 0.10),
+        ("names", 0.35),
+        ("external_sites", 0.02),
+        ("recover", 0.08),
+        ("external_links", 0.45),
     ),
     "inat": (("observations", 0.95), ("deleted", 0.05)),
 }
@@ -171,7 +239,9 @@ class LinkRepairPreviewDialog(QDialog):
         current.setPlainText(self._current_state_text(preview))
         layout.addWidget(current)
         self.table = QTableWidget(len(preview.options), 5)
-        self.table.setHorizontalHeaderLabels(("Run", "Site", "Action", "Current", "Proposed final"))
+        self.table.setHorizontalHeaderLabels(
+            ("Run", "Site", "Action", "Current", "Proposed final")
+        )
         self._checks: list[tuple[QCheckBox, LinkRepairOption]] = []
         for row_index, option in enumerate(preview.options):
             check = QCheckBox()
@@ -180,25 +250,34 @@ class LinkRepairPreviewDialog(QDialog):
             check.stateChanged.connect(self._update_aggregate)
             self.table.setCellWidget(row_index, 0, check)
             self.table.setItem(row_index, 1, QTableWidgetItem(option.site.value))
-            label = option.description + (" (destructive)" if option.destructive else "")
+            label = option.description + (
+                " (destructive)" if option.destructive else ""
+            )
             if not option.enabled and option.disabled_reason:
                 label += f" — blocked: {option.disabled_reason}"
             self.table.setItem(row_index, 2, QTableWidgetItem(label))
             self.table.setItem(
-                row_index, 3,
-                QTableWidgetItem(str(option.current_target_id or "missing / malformed")),
+                row_index,
+                3,
+                QTableWidgetItem(
+                    str(option.current_target_id or "missing / malformed")
+                ),
             )
             self.table.setItem(
-                row_index, 4,
+                row_index,
+                4,
                 QTableWidgetItem(
-                    "row removed" if option.desired_target_id is None
+                    "row removed"
+                    if option.desired_target_id is None
                     else f"canonical target {option.desired_target_id}"
                 ),
             )
             self._checks.append((check, option))
         self.table.resizeColumnsToContents()
         layout.addWidget(self.table, 1)
-        self.aggregate = QLabel("Aggregate proposed final state: select actions to preview it.")
+        self.aggregate = QLabel(
+            "Aggregate proposed final state: select actions to preview it."
+        )
         self.aggregate.setWordWrap(True)
         layout.addWidget(self.aggregate)
         if preview.warnings:
@@ -208,36 +287,48 @@ class LinkRepairPreviewDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Confirm selected actions…")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Confirm selected actions…"
+        )
         self.buttons.accepted.connect(self._confirm)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
 
     def selected_options(self) -> list[LinkRepairOption]:
-        return [option for check, option in self._checks if check.isChecked() and option.enabled]
+        return [
+            option
+            for check, option in self._checks
+            if check.isChecked() and option.enabled
+        ]
 
     def _confirm(self) -> None:
         selected = self.selected_options()
         if not selected:
-            QMessageBox.warning(self, "No actions selected", "Select at least one enabled action.")
+            QMessageBox.warning(
+                self, "No actions selected", "Select at least one enabled action."
+            )
             return
         exact_rows = [
             (item.site.value, item.remote_row_uuid or item.remote_row_id)
-            for item in selected if item.remote_row_uuid or item.remote_row_id
+            for item in selected
+            if item.remote_row_uuid or item.remote_row_id
         ]
         if len(exact_rows) != len(set(exact_rows)):
             QMessageBox.warning(
-                self, "Choose one outcome per row",
+                self,
+                "Choose one outcome per row",
                 "Repair and removal are alternatives for an exact remote row. Select only one.",
             )
             return
         repaired_sites = [
-            item.site.value for item in selected
+            item.site.value
+            for item in selected
             if item.action_type.value.endswith("_repair")
         ]
         if len(repaired_sites) != len(set(repaired_sites)):
             QMessageBox.warning(
-                self, "One repaired survivor per site",
+                self,
+                "One repaired survivor per site",
                 "Repair at most one row on each site; explicitly remove other conflicting rows instead.",
             )
             return
@@ -254,20 +345,29 @@ class LinkRepairPreviewDialog(QDialog):
         )
         if destructive:
             message += f"\n\n{len(destructive)} selected action(s) repair or remove an existing remote row."
-        if QMessageBox.question(
-            self, "Explicit remote-write confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit remote-write confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
     def _update_aggregate(self) -> None:
         selected = self.selected_options()
         if not selected:
-            self.aggregate.setText("Aggregate proposed final state: select actions to preview it.")
+            self.aggregate.setText(
+                "Aggregate proposed final state: select actions to preview it."
+            )
             return
         try:
-            state = simulate_link_repair_final_state(self.preview, selected, enforce=False)
+            state = simulate_link_repair_final_state(
+                self.preview, selected, enforce=False
+            )
             text = self._format_aggregate(state)
             if self.preview.review_intent == "reciprocal":
                 try:
@@ -286,7 +386,11 @@ class LinkRepairPreviewDialog(QDialog):
             values = state.get(site, ())
             if not values:
                 return "none"
-            return ", ".join(f"{parse_state} → {target or 'unknown'}" for parse_state, target in values)
+            return ", ".join(
+                f"{parse_state} → {target or 'unknown'}"
+                for parse_state, target in values
+            )
+
         return (
             "Aggregate proposed final state:\n"
             f"• iNaturalist field values: {side(RemoteSite.INAT)}\n"
@@ -298,7 +402,8 @@ class LinkRepairPreviewDialog(QDialog):
         lines = ["Current iNaturalist Mushroom Observer URL values"]
         lines.extend(
             f"• row {row.row_uuid or row.row_id}: {row.display_value or '[empty]'} "
-            f"({row.parse_state})" for row in preview.inat_rows
+            f"({row.parse_state})"
+            for row in preview.inat_rows
         )
         if not preview.inat_rows:
             lines.append("• none")
@@ -335,7 +440,9 @@ class ITSComparisonDialog(QDialog):
         layout.addWidget(values, 1)
 
         self.table = QTableWidget(len(preview.options), 5)
-        self.table.setHorizontalHeaderLabels(("Run", "Destination", "Action", "Evidence", "Availability"))
+        self.table.setHorizontalHeaderLabels(
+            ("Run", "Destination", "Action", "Evidence", "Availability")
+        )
         self._buttons = QButtonGroup(self)
         self._buttons.setExclusive(True)
         self._choices: list[tuple[QRadioButton, ITSActionOption]] = []
@@ -345,20 +452,27 @@ class ITSComparisonDialog(QDialog):
             choice.setToolTip(option.disabled_reason)
             self._buttons.addButton(choice)
             self.table.setCellWidget(row_index, 0, choice)
-            self.table.setItem(row_index, 1, QTableWidgetItem(option.destination_site.value))
-            label = option.description + (" (destructive)" if option.destructive else "")
+            self.table.setItem(
+                row_index, 1, QTableWidgetItem(option.destination_site.value)
+            )
+            label = option.description + (
+                " (destructive)" if option.destructive else ""
+            )
             self.table.setItem(row_index, 2, QTableWidgetItem(label))
             if option.sequence_fingerprint:
                 evidence = f"sequence fingerprint {option.sequence_fingerprint[:12]}…"
             elif option.normalized_accession:
-                evidence = f"accession {option.archive or '?'}:{option.normalized_accession}"
+                evidence = (
+                    f"accession {option.archive or '?'}:{option.normalized_accession}"
+                )
             else:
                 # A removal/replacement of a non-empty invalid value: the exact
                 # remote text is spelled out in the Action column and the panel.
                 evidence = "invalid remote value (see Action and comparison panel)"
             self.table.setItem(row_index, 3, QTableWidgetItem(evidence))
             self.table.setItem(
-                row_index, 4,
+                row_index,
+                4,
                 QTableWidgetItem("ready" if option.enabled else option.disabled_reason),
             )
             self._choices.append((choice, option))
@@ -371,18 +485,24 @@ class ITSComparisonDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Confirm one ITS action…")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Confirm one ITS action…"
+        )
         buttons.accepted.connect(self._confirm)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def selected_option(self) -> Optional[ITSActionOption]:
-        return next((option for button, option in self._choices if button.isChecked()), None)
+        return next(
+            (option for button, option in self._choices if button.isChecked()), None
+        )
 
     def _confirm(self) -> None:
         option = self.selected_option()
         if option is None:
-            QMessageBox.warning(self, "No action selected", "Select one enabled ITS action.")
+            QMessageBox.warning(
+                self, "No action selected", "Select one enabled ITS action."
+            )
             return
         message = (
             "Journal and execute this one individually reviewed ITS write?\n\n"
@@ -395,11 +515,16 @@ class ITSComparisonDialog(QDialog):
                 "\n\nThis changes or removes a non-empty remote value. Confirm that this exact "
                 "destination row is incorrect and the displayed source is authoritative."
             )
-        if QMessageBox.question(
-            self, "Explicit ITS write confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit ITS write confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
     @classmethod
@@ -481,7 +606,9 @@ class CoordinateComparisonDialog(QDialog):
         self._buttons.setExclusive(True)
         self._choices: list[tuple[QRadioButton, CoordinateActionOption]] = []
         self.table = QTableWidget(len(preview.options), 4)
-        self.table.setHorizontalHeaderLabels(("Run", "Action", "Effect", "Availability"))
+        self.table.setHorizontalHeaderLabels(
+            ("Run", "Action", "Effect", "Availability")
+        )
         for row_index, option in enumerate(preview.options):
             choice = QRadioButton()
             choice.setEnabled(option.enabled)
@@ -498,7 +625,8 @@ class CoordinateComparisonDialog(QDialog):
                 effect += "; large discrepancy"
             self.table.setItem(row_index, 2, QTableWidgetItem(effect))
             self.table.setItem(
-                row_index, 3,
+                row_index,
+                3,
                 QTableWidgetItem("ready" if option.enabled else option.disabled_reason),
             )
             self._choices.append((choice, option))
@@ -513,18 +641,24 @@ class CoordinateComparisonDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Confirm one coordinate copy…")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Confirm one coordinate copy…"
+        )
         buttons.accepted.connect(self._confirm)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def selected_option(self) -> Optional[CoordinateActionOption]:
-        return next((option for button, option in self._choices if button.isChecked()), None)
+        return next(
+            (option for button, option in self._choices if button.isChecked()), None
+        )
 
     def _confirm(self) -> None:
         option = self.selected_option()
         if option is None:
-            QMessageBox.warning(self, "No action selected", "Select one enabled coordinate action.")
+            QMessageBox.warning(
+                self, "No action selected", "Select one enabled coordinate action."
+            )
             return
         message = (
             "Journal and execute this one reviewed coordinate copy?\n\n"
@@ -548,11 +682,16 @@ class CoordinateComparisonDialog(QDialog):
                 "\n\nThis REPLACES an existing iNaturalist coordinate. Confirm the current destination "
                 "coordinate is wrong and the Mushroom Observer source is authoritative."
             )
-        if QMessageBox.question(
-            self, "Explicit coordinate write confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit coordinate write confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
     @staticmethod
@@ -564,7 +703,11 @@ class CoordinateComparisonDialog(QDialog):
             )
         if not snapshot.coordinates_available:
             return f"• no coordinate present (privacy: {snapshot.privacy_state})"
-        accuracy = f"{snapshot.accuracy_m:.0f} m" if snapshot.accuracy_m is not None else "unspecified"
+        accuracy = (
+            f"{snapshot.accuracy_m:.0f} m"
+            if snapshot.accuracy_m is not None
+            else "unspecified"
+        )
         return (
             f"• available; privacy: {snapshot.privacy_state}; accuracy: {accuracy}\n"
             "  (raw coordinates are intentionally not shown or linked to an external map)"
@@ -616,7 +759,14 @@ class _PhotoThumbnailWorker(QRunnable):
     never proven to be the ones actually pinned.
     """
 
-    def __init__(self, key: str, url: str, download_image, is_cancelled, expected_byte_fingerprint: str = "") -> None:
+    def __init__(
+        self,
+        key: str,
+        url: str,
+        download_image,
+        is_cancelled,
+        expected_byte_fingerprint: str = "",
+    ) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self._key = key
@@ -636,8 +786,13 @@ class _PhotoThumbnailWorker(QRunnable):
                 data = None
             if data:
                 if self._expected_byte_fingerprint:
-                    from observation_workbench.reconciliation.photo_license import photo_byte_fingerprint
-                    mismatch = photo_byte_fingerprint(data) != self._expected_byte_fingerprint
+                    from observation_workbench.reconciliation.photo_license import (
+                        photo_byte_fingerprint,
+                    )
+
+                    mismatch = (
+                        photo_byte_fingerprint(data) != self._expected_byte_fingerprint
+                    )
                 candidate = QImage()
                 if candidate.loadFromData(data):
                     image = candidate
@@ -733,8 +888,12 @@ class _CandidatePhotoAnalysisWorker(QRunnable):
     """
 
     def __init__(
-        self, coordinator: ReconciliationCoordinator, profile_id: int,
-        pair_id: int, generation: int, token: _PhotoPrefetchToken,
+        self,
+        coordinator: ReconciliationCoordinator,
+        profile_id: int,
+        pair_id: int,
+        generation: int,
+        token: _PhotoPrefetchToken,
     ) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -764,9 +923,14 @@ class _CandidatePhotoAnalysisWorker(QRunnable):
         except Exception as exc:
             # A stand-down surfaces here as the service's own cancellation, and
             # must not be reported to the operator as a failed analysis.
-            result = _PHOTO_ANALYSIS_CANCELLED if self.token.cancelled else (
-                _PHOTO_ANALYSIS_DEFERRED if self._stand_down()
-                else {"error": str(exc)}
+            result = (
+                _PHOTO_ANALYSIS_CANCELLED
+                if self.token.cancelled
+                else (
+                    _PHOTO_ANALYSIS_DEFERRED
+                    if self._stand_down()
+                    else {"error": str(exc)}
+                )
             )
         finally:
             self.coordinator.db.close_thread_connection()
@@ -787,7 +951,9 @@ class _CandidatePhotoAnalysisWorker(QRunnable):
         if self._stand_down():
             return _PHOTO_ANALYSIS_DEFERRED
         preview = self.coordinator.photos.prepare_identity_preview(
-            self.profile_id, self.pair_id, cancelled=self._stop,
+            self.profile_id,
+            self.pair_id,
+            cancelled=self._stop,
         )
         if self.token.cancelled:
             return None
@@ -820,7 +986,8 @@ class _CandidatePhotoAnalysisWorker(QRunnable):
         )
 
     def _read_photos(
-        self, photos: tuple[PhotoRecordSnapshot, ...],
+        self,
+        photos: tuple[PhotoRecordSnapshot, ...],
     ) -> tuple[tuple[_HashedIdentityPhoto, ...], tuple[str, ...]]:
         values: list[_HashedIdentityPhoto] = []
         failures: list[str] = []
@@ -885,8 +1052,12 @@ def _decode_oriented_image(data: bytes) -> Optional[QImage]:
 # true original is _full_size_photo_page_url, which hands MO's own endpoint to
 # the browser instead of downloading anything.
 _MO_SIZE_FOR = {
-    "square": "thumb", "thumb": "thumb", "small": "320", "medium": "640",
-    "large": "960", "original": MO_LARGEST_FETCHABLE_SIZE,
+    "square": "thumb",
+    "thumb": "thumb",
+    "small": "320",
+    "medium": "640",
+    "large": "960",
+    "original": MO_LARGEST_FETCHABLE_SIZE,
 }
 
 
@@ -900,8 +1071,7 @@ def _identity_photo_url(photo: PhotoRecordSnapshot, size: str) -> str:
     if photo.site != RemoteSite.INAT:
         return url
     swapped, count = re.subn(
-        r"/(square|thumb|small|medium|large|original)"
-        r"\.(jpe?g|png|gif|webp)",
+        r"/(square|thumb|small|medium|large|original)" r"\.(jpe?g|png|gif|webp)",
         rf"/{size}.\2",
         url,
         flags=re.IGNORECASE,
@@ -993,19 +1163,19 @@ def _photo_analysis_mosaic(analysis: _CandidatePhotoAnalysis) -> QImage:
         for mo_index, inat_index, distance in analysis.matches
     ]
     plan.extend(
-        (index, None, None) for index in range(len(analysis.mo_photos))
+        (index, None, None)
+        for index in range(len(analysis.mo_photos))
         if index not in matched_mo
     )
     plan.extend(
-        (None, index, None) for index in range(len(analysis.inat_photos))
+        (None, index, None)
+        for index in range(len(analysis.inat_photos))
         if index not in matched_inat
     )
     painter = QPainter(mosaic)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     try:
-        for column, (mo_index, inat_index, distance) in enumerate(
-            plan[:columns]
-        ):
+        for column, (mo_index, inat_index, distance) in enumerate(plan[:columns]):
             left = gap + column * (cell + gap)
             for row, (photos, index) in enumerate(
                 ((analysis.mo_photos, mo_index), (analysis.inat_photos, inat_index))
@@ -1024,8 +1194,11 @@ def _photo_analysis_mosaic(analysis: _CandidatePhotoAnalysis) -> QImage:
             if distance is not None:
                 painter.fillRect(
                     QRect(left, height - gap, cell, gap),
-                    QColor("#167236") if distance <= PHOTO_CLOSE_DISTANCE
-                    else QColor("#b9770e"),
+                    (
+                        QColor("#167236")
+                        if distance <= PHOTO_CLOSE_DISTANCE
+                        else QColor("#b9770e")
+                    ),
                 )
         hidden = len(plan) - columns
         if hidden > 0:
@@ -1045,11 +1218,17 @@ def _fitted_thumbnail(image: QImage, size: int) -> QImage:
     side = min(image.width(), image.height())
     if side <= 0:
         return QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
-    square = image.copy(QRect(
-        (image.width() - side) // 2, (image.height() - side) // 2, side, side,
-    ))
+    square = image.copy(
+        QRect(
+            (image.width() - side) // 2,
+            (image.height() - side) // 2,
+            side,
+            side,
+        )
+    )
     return square.scaled(
-        size, size,
+        size,
+        size,
         Qt.AspectRatioMode.IgnoreAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
@@ -1059,7 +1238,10 @@ class PhotoIdentityReviewDialog(QDialog):
     """Read-only, pre-confirmation comparison of both complete photo sets."""
 
     def __init__(
-        self, preview: PhotoIdentityPreview, download_image, parent=None,
+        self,
+        preview: PhotoIdentityPreview,
+        download_image,
+        parent=None,
     ) -> None:
         super().__init__(parent)
         self.preview = preview
@@ -1095,8 +1277,7 @@ class PhotoIdentityReviewDialog(QDialog):
         open_mo.clicked.connect(
             lambda: QDesktopServices.openUrl(
                 QUrl(
-                    f"https://mushroomobserver.org/obs/"
-                    f"{preview.mo_observation_id}"
+                    f"https://mushroomobserver.org/obs/" f"{preview.mo_observation_id}"
                 )
             )
         )
@@ -1170,7 +1351,10 @@ class PhotoIdentityReviewDialog(QDialog):
         self._update_decision_buttons()
 
     def _photo_set(
-        self, label: str, photos: tuple[PhotoRecordSnapshot, ...], prefix: str,
+        self,
+        label: str,
+        photos: tuple[PhotoRecordSnapshot, ...],
+        prefix: str,
     ) -> QWidget:
         group = QWidget()
         group_layout = QVBoxLayout(group)
@@ -1184,17 +1368,14 @@ class PhotoIdentityReviewDialog(QDialog):
         for ordinal, photo in enumerate(photos, 1):
             key = f"{prefix}:{photo.photo_id}"
             caption = (
-                f"{label} photo {ordinal} of {len(photos)}\n"
-                f"ID {photo.photo_id}"
+                f"{label} photo {ordinal} of {len(photos)}\n" f"ID {photo.photo_id}"
             )
             self._captions[key] = caption
             full_url = _full_size_photo_page_url(photo)
             if full_url:
                 self._full_image_urls[key] = full_url
             thumb = _ClickableImageLabel("loading…")
-            thumb.setFixedSize(
-                _PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE
-            )
+            thumb.setFixedSize(_PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE)
             thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb.setFrameShape(QFrame.Shape.Box)
             thumb.clicked.connect(lambda _k=key: self._show_preview(_k))
@@ -1209,9 +1390,7 @@ class PhotoIdentityReviewDialog(QDialog):
             wrapper.setLayout(item)
             row.addWidget(wrapper)
             if photo.source_url:
-                self._request_thumbnail(
-                    key, self._photo_url(photo, "large")
-                )
+                self._request_thumbnail(key, self._photo_url(photo, "large"))
             else:
                 self._failed.add(key)
                 thumb.setText("no image URL")
@@ -1223,18 +1402,24 @@ class PhotoIdentityReviewDialog(QDialog):
     def _request_thumbnail(self, key: str, url: str) -> None:
         self._pending.add(key)
         worker = _PhotoThumbnailWorker(
-            key, url, self._download_image, lambda: self._closed,
+            key,
+            url,
+            self._download_image,
+            lambda: self._closed,
         )
         signals = worker.signals
         self._live_thumbnail_signals.add(signals)
         signals.done.connect(
-            lambda k, image, _mismatch, owned=signals:
-            self._thumbnail_loaded(owned, k, image)
+            lambda k, image, _mismatch, owned=signals: self._thumbnail_loaded(
+                owned, k, image
+            )
         )
         self._pool.start(worker)
 
     def _thumbnail_loaded(
-        self, signals: _PhotoThumbnailSignals, key: str,
+        self,
+        signals: _PhotoThumbnailSignals,
+        key: str,
         image: Optional[QImage],
     ) -> None:
         self._live_thumbnail_signals.discard(signals)
@@ -1255,7 +1440,8 @@ class PhotoIdentityReviewDialog(QDialog):
             if label is not None:
                 label.setPixmap(
                     QPixmap.fromImage(image).scaled(
-                        _PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE,
+                        _PHOTO_THUMBNAIL_SIZE,
+                        _PHOTO_THUMBNAIL_SIZE,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
@@ -1291,7 +1477,8 @@ class PhotoIdentityReviewDialog(QDialog):
         self._preview_label.setText("")
         self._preview_label.setPixmap(
             QPixmap.fromImage(image).scaled(
-                _PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE,
+                _PHOTO_PREVIEW_SIZE,
+                _PHOTO_PREVIEW_SIZE,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -1305,8 +1492,9 @@ class PhotoIdentityReviewDialog(QDialog):
             and bool(self.preview.inat_photos)
         )
         reason = (
-            "" if ready else
-            "Wait until every photo from both observations is displayed. "
+            ""
+            if ready
+            else "Wait until every photo from both observations is displayed. "
             "Use the site buttons if any image remains unavailable."
         )
         for button in self._decision_buttons:
@@ -1344,7 +1532,9 @@ class PhotoComparisonDialog(QDialog):
     smuggle an unreviewed photo into an upload this app can never undo.
     """
 
-    def __init__(self, preview: PhotoComparisonPreview, download_image, parent=None) -> None:
+    def __init__(
+        self, preview: PhotoComparisonPreview, download_image, parent=None
+    ) -> None:
         super().__init__(parent)
         self.preview = preview
         self._download_image = download_image
@@ -1390,7 +1580,9 @@ class PhotoComparisonDialog(QDialog):
 
         left.addWidget(QLabel("Mushroom Observer source images (pick one to send)"))
         self.table = QTableWidget(len(preview.options), 4)
-        self.table.setHorizontalHeaderLabels(("Send", "Image", "Destination license", "Availability"))
+        self.table.setHorizontalHeaderLabels(
+            ("Send", "Image", "Destination license", "Availability")
+        )
         self.table.verticalHeader().setDefaultSectionSize(_PHOTO_THUMBNAIL_SIZE + 12)
         for row_index, option in enumerate(preview.options):
             choice = QRadioButton()
@@ -1411,7 +1603,9 @@ class PhotoComparisonDialog(QDialog):
             self._captions[key] = caption
             thumb = self._make_thumbnail_label()
             self._thumbnail_labels[key] = thumb
-            thumb.clicked.connect(lambda _c=choice: _c.setChecked(True) if _c.isEnabled() else None)
+            thumb.clicked.connect(
+                lambda _c=choice: _c.setChecked(True) if _c.isEnabled() else None
+            )
             thumb.clicked.connect(lambda _k=key: self._show_preview(_k))
             thumb.doubleClicked.connect(lambda _k=key: self._show_preview(_k))
 
@@ -1424,7 +1618,9 @@ class PhotoComparisonDialog(QDialog):
             cell_layout.addWidget(text, 1)
             self.table.setCellWidget(row_index, 1, cell)
 
-            self.table.setItem(row_index, 2, QTableWidgetItem(option.destination_license_note))
+            self.table.setItem(
+                row_index, 2, QTableWidgetItem(option.destination_license_note)
+            )
             availability = QTableWidgetItem(
                 "loading image…" if option.enabled else option.disabled_reason
             )
@@ -1441,11 +1637,14 @@ class PhotoComparisonDialog(QDialog):
                 # what is about to be displayed and compare before the option
                 # is ever offered (see _PhotoThumbnailWorker's docstring).
                 self._request_thumbnail(
-                    key, snapshot.source_url, option.byte_fingerprint,
+                    key,
+                    snapshot.source_url,
+                    option.byte_fingerprint,
                 )
             elif option.enabled:
                 self._disable_source_option(
-                    key, "No image is available to review; this photo cannot be selected.",
+                    key,
+                    "No image is available to review; this photo cannot be selected.",
                 )
         self.table.resizeColumnsToContents()
         left.addWidget(self.table, 1)
@@ -1458,7 +1657,9 @@ class PhotoComparisonDialog(QDialog):
             none_ready.setWordWrap(True)
             left.addWidget(none_ready)
 
-        left.addWidget(QLabel("iNaturalist destination images (already on the observation)"))
+        left.addWidget(
+            QLabel("iNaturalist destination images (already on the observation)")
+        )
         dest_scroll = QScrollArea()
         dest_scroll.setWidgetResizable(True)
         dest_scroll.setFixedHeight(_PHOTO_THUMBNAIL_SIZE + 56)
@@ -1498,7 +1699,9 @@ class PhotoComparisonDialog(QDialog):
 
         right = QVBoxLayout()
         body.addLayout(right, 2)
-        right.addWidget(QLabel("Selected image (click, or double-click, any thumbnail to preview)"))
+        right.addWidget(
+            QLabel("Selected image (click, or double-click, any thumbnail to preview)")
+        )
         self._preview_label = QLabel("No image selected")
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_label.setMinimumSize(_PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE)
@@ -1543,19 +1746,31 @@ class PhotoComparisonDialog(QDialog):
         label.setFrameShape(QFrame.Shape.Box)
         return label
 
-    def _request_thumbnail(self, key: str, url: str, expected_byte_fingerprint: str = "") -> None:
+    def _request_thumbnail(
+        self, key: str, url: str, expected_byte_fingerprint: str = ""
+    ) -> None:
         worker = _PhotoThumbnailWorker(
-            key, url, self._download_image, lambda: self._closed, expected_byte_fingerprint,
+            key,
+            url,
+            self._download_image,
+            lambda: self._closed,
+            expected_byte_fingerprint,
         )
         signals = worker.signals
         self._live_thumbnail_signals.add(signals)
         signals.done.connect(
-            lambda k, image, mismatch, s=signals: self._thumbnail_loaded(s, k, image, mismatch)
+            lambda k, image, mismatch, s=signals: self._thumbnail_loaded(
+                s, k, image, mismatch
+            )
         )
         self._pool.start(worker)
 
     def _disable_source_option(
-        self, key: str, reason: str, *, blank_thumbnail: bool = True,
+        self,
+        key: str,
+        reason: str,
+        *,
+        blank_thumbnail: bool = True,
     ) -> None:
         """Make a source option permanently unselectable, and unselect it if it
         somehow already was. ``blank_thumbnail=False`` keeps a real (merely
@@ -1595,7 +1810,10 @@ class PhotoComparisonDialog(QDialog):
         self._update_confirm_enabled()
 
     def _thumbnail_loaded(
-        self, signals: _PhotoThumbnailSignals, key: str, image: Optional[QImage],
+        self,
+        signals: _PhotoThumbnailSignals,
+        key: str,
+        image: Optional[QImage],
         mismatch: bool = False,
     ) -> None:
         self._live_thumbnail_signals.discard(signals)
@@ -1608,7 +1826,8 @@ class PhotoComparisonDialog(QDialog):
             # a selectable option behind a "no image" placeholder.
             if is_source_option:
                 self._disable_source_option(
-                    key, "Image could not be displayed and reviewed; this photo cannot be selected.",
+                    key,
+                    "Image could not be displayed and reviewed; this photo cannot be selected.",
                 )
             elif label is not None:
                 label.setText("no image")
@@ -1619,8 +1838,10 @@ class PhotoComparisonDialog(QDialog):
         if label is not None:
             label.setPixmap(
                 QPixmap.fromImage(image).scaled(
-                    _PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE,
-                    Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+                    _PHOTO_THUMBNAIL_SIZE,
+                    _PHOTO_THUMBNAIL_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
                 )
             )
         if is_source_option:
@@ -1629,7 +1850,8 @@ class PhotoComparisonDialog(QDialog):
                 # byte_fingerprint and this display. The write would refuse
                 # later anyway; never offer content already known to be stale.
                 self._disable_source_option(
-                    key, "This image changed since it was reviewed and cannot be selected.",
+                    key,
+                    "This image changed since it was reviewed and cannot be selected.",
                     blank_thumbnail=False,
                 )
             else:
@@ -1651,8 +1873,10 @@ class PhotoComparisonDialog(QDialog):
         self._preview_label.setText("")
         self._preview_label.setPixmap(
             QPixmap.fromImage(image).scaled(
-                _PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE,
-                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+                _PHOTO_PREVIEW_SIZE,
+                _PHOTO_PREVIEW_SIZE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
         )
 
@@ -1669,7 +1893,8 @@ class PhotoComparisonDialog(QDialog):
         option = self.selected_option()
         if option is None or not option.enabled:
             QMessageBox.warning(
-                self, "No reviewed photo selected",
+                self,
+                "No reviewed photo selected",
                 "Select one photo whose image has actually been displayed here. An image that "
                 "could not be loaded, or that changed since it was reviewed, cannot be sent.",
             )
@@ -1682,11 +1907,16 @@ class PhotoComparisonDialog(QDialog):
             "verified afterward. iNaturalist accepts no license parameter on upload, and this app "
             "never deletes a photo — a duplicate upload cannot be undone."
         )
-        if QMessageBox.question(
-            self, "Explicit photo upload confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit photo upload confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
 
@@ -1703,7 +1933,9 @@ class ObservationCreationPreviewDialog(QDialog):
     delete afterward.
     """
 
-    def __init__(self, preview: ObservationCreationPreview, download_image, parent=None) -> None:
+    def __init__(
+        self, preview: ObservationCreationPreview, download_image, parent=None
+    ) -> None:
         super().__init__(parent)
         self.preview = preview
         self._download_image = download_image
@@ -1774,10 +2006,15 @@ class ObservationCreationPreviewDialog(QDialog):
             layout.addWidget(marker_note)
 
         if preview.approved_field_gaps:
-            from observation_workbench.reconciliation.observation_creation import gap_display_text
+            from observation_workbench.reconciliation.observation_creation import (
+                gap_display_text,
+            )
+
             gaps = QLabel(
                 "Cannot be transferred:\n"
-                + "\n".join(f"• {gap_display_text(gap)}" for gap in preview.approved_field_gaps)
+                + "\n".join(
+                    f"• {gap_display_text(gap)}" for gap in preview.approved_field_gaps
+                )
             )
             gaps.setWordWrap(True)
             layout.addWidget(gaps)
@@ -1787,14 +2024,22 @@ class ObservationCreationPreviewDialog(QDialog):
         left = QVBoxLayout()
         body.addLayout(left, 3)
 
-        left.addWidget(QLabel(
-            "Select identifiers and photos to include (nothing is preselected). Click a photo "
-            "thumbnail to preview it — clicking never selects it."
-        ))
-        self._checks: list[tuple[QCheckBox, ObservationCreationItem, Optional[str]]] = []
+        left.addWidget(
+            QLabel(
+                "Select identifiers and photos to include (nothing is preselected). Click a photo "
+                "thumbnail to preview it — clicking never selects it."
+            )
+        )
+        self._checks: list[tuple[QCheckBox, ObservationCreationItem, Optional[str]]] = (
+            []
+        )
         items_list = QListWidget()
         for index, item in enumerate(preview.items):
-            box = QCheckBox(item.description if item.enabled else f"{item.description}  [disabled: {item.disabled_reason}]")
+            box = QCheckBox(
+                item.description
+                if item.enabled
+                else f"{item.description}  [disabled: {item.disabled_reason}]"
+            )
             box.setChecked(False)
             item_key: Optional[str] = None
             row_widget = QWidget()
@@ -1829,14 +2074,18 @@ class ObservationCreationPreviewDialog(QDialog):
                     # thumbnail worker ever reports back.
                     box.setEnabled(False)
                     box.setText(f"{box.text()}  [loading image…]")
-                    self._request_thumbnail(key, item.source_url, item.reviewed_byte_fingerprint)
+                    self._request_thumbnail(
+                        key, item.source_url, item.reviewed_byte_fingerprint
+                    )
                 else:
                     # No URL to review from -- there is no path by which this
                     # photo can ever be visually verified, so it must never
                     # become selectable.
                     box.setEnabled(False)
                     if item.enabled and box.text().find("[disabled:") < 0:
-                        box.setText(f"{box.text()}  [disabled: no image available to review]")
+                        box.setText(
+                            f"{box.text()}  [disabled: no image available to review]"
+                        )
                 row_layout.addWidget(thumb)
                 license_label = QLabel(
                     f"license: {item.license_label or 'unknown'}\nholder: {item.copyright_holder or 'unknown'}"
@@ -1847,6 +2096,7 @@ class ObservationCreationPreviewDialog(QDialog):
                 box.setEnabled(item.enabled)
             row_layout.addWidget(box, 1)
             from PySide6.QtWidgets import QListWidgetItem
+
             list_item = QListWidgetItem()
             # Section 1/3 (release blocker): without an explicit size hint a
             # QListWidgetItem carrying an item widget is sized from its own
@@ -1867,7 +2117,9 @@ class ObservationCreationPreviewDialog(QDialog):
 
         right = QVBoxLayout()
         body.addLayout(right, 2)
-        right.addWidget(QLabel("Selected photo (click, or double-click, a thumbnail to preview)"))
+        right.addWidget(
+            QLabel("Selected photo (click, or double-click, a thumbnail to preview)")
+        )
         self._preview_label = QLabel("No photo selected")
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_label.setMinimumSize(_PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE)
@@ -1880,7 +2132,9 @@ class ObservationCreationPreviewDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create observation…")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Create observation…"
+        )
         buttons.accepted.connect(self._confirm)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -1895,7 +2149,10 @@ class ObservationCreationPreviewDialog(QDialog):
         for box, item, key in self._checks:
             if not box.isChecked():
                 continue
-            if item.item_type == "photo" and key not in self._visually_verified_photo_keys:
+            if (
+                item.item_type == "photo"
+                and key not in self._visually_verified_photo_keys
+            ):
                 continue
             result.append(item)
         return result
@@ -1911,16 +2168,28 @@ class ObservationCreationPreviewDialog(QDialog):
         label.setFrameShape(QFrame.Shape.Box)
         return label
 
-    def _request_thumbnail(self, key: str, url: str, expected_byte_fingerprint: str = "") -> None:
+    def _request_thumbnail(
+        self, key: str, url: str, expected_byte_fingerprint: str = ""
+    ) -> None:
         worker = _PhotoThumbnailWorker(
-            key, url, self._download_image, lambda: self._closed, expected_byte_fingerprint,
+            key,
+            url,
+            self._download_image,
+            lambda: self._closed,
+            expected_byte_fingerprint,
         )
         signals = worker.signals
         self._live_thumbnail_signals.add(signals)
-        signals.done.connect(lambda k, image, mismatch, s=signals: self._thumbnail_loaded(s, k, image, mismatch))
+        signals.done.connect(
+            lambda k, image, mismatch, s=signals: self._thumbnail_loaded(
+                s, k, image, mismatch
+            )
+        )
         self._pool.start(worker)
 
-    def _disable_item(self, key: str, reason: str, *, blank_thumbnail: bool = True) -> None:
+    def _disable_item(
+        self, key: str, reason: str, *, blank_thumbnail: bool = True
+    ) -> None:
         """Section 3: the user must actually SEE the pinned image before a
         photo is selectable. Disable AND uncheck the checkbox (never leave
         it enabled with a broken/blank thumbnail) so the confirmation
@@ -1949,7 +2218,11 @@ class ObservationCreationPreviewDialog(QDialog):
             label.setToolTip(reason)
 
     def _thumbnail_loaded(
-        self, signals: _PhotoThumbnailSignals, key: str, image: Optional[QImage], mismatch: bool = False,
+        self,
+        signals: _PhotoThumbnailSignals,
+        key: str,
+        image: Optional[QImage],
+        mismatch: bool = False,
     ) -> None:
         self._live_thumbnail_signals.discard(signals)
         if self._closed:
@@ -1970,7 +2243,8 @@ class ObservationCreationPreviewDialog(QDialog):
         # placeholder text while leaving the checkbox selectable.
         if image is None or not isinstance(image, QImage) or image.isNull():
             self._disable_item(
-                key, "Image could not be displayed and reviewed; this photo cannot be selected.",
+                key,
+                "Image could not be displayed and reviewed; this photo cannot be selected.",
             )
             if self._preview_key == key:
                 self._render_preview(key)
@@ -1980,8 +2254,10 @@ class ObservationCreationPreviewDialog(QDialog):
         if label is not None:
             label.setPixmap(
                 QPixmap.fromImage(image).scaled(
-                    _PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE,
-                    Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+                    _PHOTO_THUMBNAIL_SIZE,
+                    _PHOTO_THUMBNAIL_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
                 )
             )
         # Round-5 smaller issue: the dialog's own thumbnail download is a
@@ -1996,7 +2272,8 @@ class ObservationCreationPreviewDialog(QDialog):
         # be stale).
         if mismatch:
             self._disable_item(
-                key, "This image changed since it was reviewed and cannot be selected.",
+                key,
+                "This image changed since it was reviewed and cannot be selected.",
                 blank_thumbnail=False,
             )
         else:
@@ -2037,15 +2314,18 @@ class ObservationCreationPreviewDialog(QDialog):
         self._preview_label.setText("")
         self._preview_label.setPixmap(
             QPixmap.fromImage(image).scaled(
-                _PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE,
-                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+                _PHOTO_PREVIEW_SIZE,
+                _PHOTO_PREVIEW_SIZE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
         )
 
     def _confirm(self) -> None:
         if not self.preview.observed_on_string and not self.preview.taxon_name:
             QMessageBox.warning(
-                self, "Missing required fields",
+                self,
+                "Missing required fields",
                 "Neither an observed date nor a taxon/name is available to create with.",
             )
             return
@@ -2060,11 +2340,16 @@ class ObservationCreationPreviewDialog(QDialog):
             "This app CANNOT delete a created observation afterward. Creating it is not reversible "
             "through this application."
         )
-        if QMessageBox.question(
-            self, "Explicit observation creation confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit observation creation confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
 
@@ -2072,7 +2357,10 @@ class DuplicateSetDialog(QDialog):
     """Explicit member entry. This dialog never chooses a canonical record."""
 
     def __init__(
-        self, *, mo_ids: tuple[int, ...] = (), inat_ids: tuple[int, ...] = (),
+        self,
+        *,
+        mo_ids: tuple[int, ...] = (),
+        inat_ids: tuple[int, ...] = (),
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -2101,7 +2389,9 @@ class DuplicateSetDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Read selected records…")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Read selected records…"
+        )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -2138,7 +2428,8 @@ class DuplicateSetDialog(QDialog):
         }
         if len(candidates) < 2 or max(counts.values(), default=0) < 2:
             QMessageBox.warning(
-                self, "Duplicate set required",
+                self,
+                "Duplicate set required",
                 "Select at least two observations, with a canonical and donor on "
                 "at least one site.",
             )
@@ -2149,7 +2440,9 @@ class DuplicateSetDialog(QDialog):
 class ConsolidationPreviewDialog(QDialog):
     """Explicit canonical selection and link-only Phase 2B review."""
 
-    def __init__(self, preview: ConsolidationPreview, download_image, parent=None) -> None:
+    def __init__(
+        self, preview: ConsolidationPreview, download_image, parent=None
+    ) -> None:
         super().__init__(parent)
         self.preview = preview
         self.approved_preview: Optional[ConsolidationPreview] = None
@@ -2182,7 +2475,9 @@ class ConsolidationPreviewDialog(QDialog):
         if not preview.eligibility.eligible:
             blocked = QLabel(
                 "Consolidation is blocked:\n"
-                + "\n".join(f"• {reason}" for reason in preview.eligibility.blocking_reasons)
+                + "\n".join(
+                    f"• {reason}" for reason in preview.eligibility.blocking_reasons
+                )
             )
             blocked.setWordWrap(True)
             layout.addWidget(blocked)
@@ -2218,16 +2513,14 @@ class ConsolidationPreviewDialog(QDialog):
                 "Unavailable or insufficient supporting evidence (not treated "
                 "as a conflict):\n"
                 + "\n".join(
-                    f"• {item}"
-                    for item in preview.eligibility.evidence_unavailable
+                    f"• {item}" for item in preview.eligibility.evidence_unavailable
                 )
             )
             unavailable.setWordWrap(True)
             layout.addWidget(unavailable)
         if preview.warnings:
             warnings = QLabel(
-                "Attempt notes:\n"
-                + "\n".join(f"• {item}" for item in preview.warnings)
+                "Attempt notes:\n" + "\n".join(f"• {item}" for item in preview.warnings)
             )
             warnings.setWordWrap(True)
             layout.addWidget(warnings)
@@ -2245,16 +2538,27 @@ class ConsolidationPreviewDialog(QDialog):
             previous.setWordWrap(True)
             layout.addWidget(previous)
 
-        layout.addWidget(QLabel(
-            "1. Canonical records (fixed)" if preview.is_extension
-            else "1. Canonical records (choose explicitly) / 2. Donors retained remotely"
-        ))
+        layout.addWidget(
+            QLabel(
+                "1. Canonical records (fixed)"
+                if preview.is_extension
+                else "1. Canonical records (choose explicitly) / 2. Donors retained remotely"
+            )
+        )
         self.table = QTableWidget(len(preview.members), 9)
-        self.table.setHorizontalHeaderLabels((
-            "Canonical", "Site / ID", "Owner / account", "Taxon", "Date",
-            "Locality / coordinates / privacy", "Identifiers / sequence status",
-            "Reciprocal links / current pair", "Photos / updated",
-        ))
+        self.table.setHorizontalHeaderLabels(
+            (
+                "Canonical",
+                "Site / ID",
+                "Owner / account",
+                "Taxon",
+                "Date",
+                "Locality / coordinates / privacy",
+                "Identifiers / sequence status",
+                "Reciprocal links / current pair",
+                "Photos / updated",
+            )
+        )
         self._groups = {
             RemoteSite.MO: QButtonGroup(self),
             RemoteSite.INAT: QButtonGroup(self),
@@ -2267,13 +2571,11 @@ class ConsolidationPreviewDialog(QDialog):
             is_fixed = preview.is_extension and (
                 (
                     member.site is RemoteSite.MO
-                    and member.observation_id
-                    == preview.canonical_mo_observation_id
+                    and member.observation_id == preview.canonical_mo_observation_id
                 )
                 or (
                     member.site is RemoteSite.INAT
-                    and member.observation_id
-                    == preview.canonical_inat_observation_id
+                    and member.observation_id == preview.canonical_inat_observation_id
                 )
             )
             choice.setChecked(is_fixed)
@@ -2287,25 +2589,30 @@ class ConsolidationPreviewDialog(QDialog):
             self._choices[(member.site, member.observation_id)] = choice
             self.table.setCellWidget(row_index, 0, choice)
             self.table.setItem(
-                row_index, 1,
+                row_index,
+                1,
                 QTableWidgetItem(f"{member.site.value} #{member.observation_id}"),
             )
             self.table.setItem(
-                row_index, 2,
+                row_index,
+                2,
                 QTableWidgetItem(
                     f"{member.owner_login or '?'} / owner {member.owner_id or '?'}; "
                     f"profile account {member.account_id or '?'}"
                 ),
             )
             self.table.setItem(
-                row_index, 3,
+                row_index,
+                3,
                 QTableWidgetItem(
                     f"{member.taxon_name or '?'} ({member.taxon_rank or 'rank unknown'}; "
                     f"id {member.taxon_id or '?'})"
                 ),
             )
             self.table.setItem(
-                row_index, 4, QTableWidgetItem(member.observed_on_string or "unknown"),
+                row_index,
+                4,
+                QTableWidgetItem(member.observed_on_string or "unknown"),
             )
             coordinate = (
                 f"{member.latitude:.5f}, {member.longitude:.5f}"
@@ -2313,7 +2620,8 @@ class ConsolidationPreviewDialog(QDialog):
                 else "coordinates unavailable"
             )
             self.table.setItem(
-                row_index, 5,
+                row_index,
+                5,
                 QTableWidgetItem(
                     f"{member.locality or '?'}; {coordinate}; "
                     f"privacy={member.geoprivacy or 'unspecified'}"
@@ -2329,7 +2637,8 @@ class ConsolidationPreviewDialog(QDialog):
                 *member.sequence_summaries,
             ]
             self.table.setItem(
-                row_index, 6,
+                row_index,
+                6,
                 QTableWidgetItem("; ".join(identifiers) or "none / unavailable"),
             )
             pair_text = (
@@ -2339,11 +2648,13 @@ class ConsolidationPreviewDialog(QDialog):
                 else "; no current confirmed pair"
             )
             self.table.setItem(
-                row_index, 7,
+                row_index,
+                7,
                 QTableWidgetItem(member.reciprocal_link_state + pair_text),
             )
             self.table.setItem(
-                row_index, 8,
+                row_index,
+                8,
                 QTableWidgetItem(
                     f"{len(member.photos)} photo(s); updated "
                     f"{member.remote_updated_at or 'unknown'}"
@@ -2368,7 +2679,9 @@ class ConsolidationPreviewDialog(QDialog):
 
         body = QHBoxLayout()
         photo_side = QVBoxLayout()
-        photo_side.addWidget(QLabel("Photo thumbnails (view-only; transfer is disabled)"))
+        photo_side.addWidget(
+            QLabel("Photo thumbnails (view-only; transfer is disabled)")
+        )
         photo_scroll = QScrollArea()
         photo_scroll.setWidgetResizable(True)
         photo_holder = QWidget()
@@ -2396,9 +2709,11 @@ class ConsolidationPreviewDialog(QDialog):
                 wrapper = QWidget()
                 wrapper_layout = QVBoxLayout(wrapper)
                 wrapper_layout.addWidget(thumb)
-                wrapper_layout.addWidget(QLabel(
-                    f"{member.site.value} {member.observation_id}/{photo.photo_id}"
-                ))
+                wrapper_layout.addWidget(
+                    QLabel(
+                        f"{member.site.value} {member.observation_id}/{photo.photo_id}"
+                    )
+                )
                 photo_row.addWidget(wrapper)
         if not photo_count:
             photo_row.addWidget(QLabel("No photos returned."))
@@ -2443,7 +2758,9 @@ class ConsolidationPreviewDialog(QDialog):
             disabled.setToolTip(item.disabled_reason)
             self.unsupported.setCellWidget(row_index, 0, disabled)
             self.unsupported.setItem(row_index, 1, QTableWidgetItem(item.description))
-            self.unsupported.setItem(row_index, 2, QTableWidgetItem(item.disabled_reason))
+            self.unsupported.setItem(
+                row_index, 2, QTableWidgetItem(item.disabled_reason)
+            )
         self.unsupported.resizeColumnsToContents()
         layout.addWidget(self.unsupported)
 
@@ -2475,7 +2792,9 @@ class ConsolidationPreviewDialog(QDialog):
         super().closeEvent(event)
 
     def _request_photo(self, key: str, url: str) -> None:
-        worker = _PhotoThumbnailWorker(key, url, self._download_image, lambda: self._closed)
+        worker = _PhotoThumbnailWorker(
+            key, url, self._download_image, lambda: self._closed
+        )
         signals = worker.signals
         self._live_thumbnail_signals.add(signals)
         signals.done.connect(
@@ -2484,7 +2803,10 @@ class ConsolidationPreviewDialog(QDialog):
         self._pool.start(worker)
 
     def _photo_loaded(
-        self, signals: _PhotoThumbnailSignals, key: str, image: Optional[QImage],
+        self,
+        signals: _PhotoThumbnailSignals,
+        key: str,
+        image: Optional[QImage],
     ) -> None:
         self._live_thumbnail_signals.discard(signals)
         if self._closed:
@@ -2496,11 +2818,14 @@ class ConsolidationPreviewDialog(QDialog):
             return
         self._images[key] = image
         if label is not None:
-            label.setPixmap(QPixmap.fromImage(image).scaled(
-                _PHOTO_THUMBNAIL_SIZE, _PHOTO_THUMBNAIL_SIZE,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            label.setPixmap(
+                QPixmap.fromImage(image).scaled(
+                    _PHOTO_THUMBNAIL_SIZE,
+                    _PHOTO_THUMBNAIL_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
         if self._preview_key == key:
             self._show_photo(key)
 
@@ -2513,11 +2838,14 @@ class ConsolidationPreviewDialog(QDialog):
             self._photo_preview.setPixmap(QPixmap())
             return
         self._photo_preview.setText("")
-        self._photo_preview.setPixmap(QPixmap.fromImage(image).scaled(
-            _PHOTO_PREVIEW_SIZE, _PHOTO_PREVIEW_SIZE,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        ))
+        self._photo_preview.setPixmap(
+            QPixmap.fromImage(image).scaled(
+                _PHOTO_PREVIEW_SIZE,
+                _PHOTO_PREVIEW_SIZE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _selected_id(self, site: RemoteSite) -> Optional[int]:
         return next(
@@ -2550,13 +2878,13 @@ class ConsolidationPreviewDialog(QDialog):
             self._path_label.setText(
                 "Donor evidence paths are incomplete:\n"
                 + "\n".join(
-                    f"• {reason}"
-                    for reason in selected.eligibility.blocking_reasons
+                    f"• {reason}" for reason in selected.eligibility.blocking_reasons
                 )
                 + (
                     "\n\nValid strong-anchored paths in this blocked set:\n"
                     + valid_paths
-                    if valid_paths else ""
+                    if valid_paths
+                    else ""
                 )
             )
             self._ok.setEnabled(False)
@@ -2586,14 +2914,18 @@ class ConsolidationPreviewDialog(QDialog):
             return
         if not selected.eligibility.eligible:
             QMessageBox.warning(
-                self, "Evidence path required",
+                self,
+                "Evidence path required",
                 "\n".join(selected.eligibility.blocking_reasons),
             )
             return
-        donors = ", ".join(
-            f"{member.site.value} #{member.observation_id}"
-            for member in selected.donor_members
-        ) or "none"
+        donors = (
+            ", ".join(
+                f"{member.site.value} #{member.observation_id}"
+                for member in selected.donor_members
+            )
+            or "none"
+        )
         accounts = ", ".join(
             f"{member.site.value} {member.owner_login} (id {member.account_id})"
             for member in selected.canonical_members
@@ -2609,11 +2941,13 @@ class ConsolidationPreviewDialog(QDialog):
             and selected.canonical_inat_observation_id is not None
         ):
             mo_member = next(
-                member for member in selected.canonical_members
+                member
+                for member in selected.canonical_members
                 if member.site is RemoteSite.MO
             )
             inat_member = next(
-                member for member in selected.canonical_members
+                member
+                for member in selected.canonical_members
                 if member.site is RemoteSite.INAT
             )
             if not any(
@@ -2633,16 +2967,25 @@ class ConsolidationPreviewDialog(QDialog):
             f"Donors retained online: {donors}\n"
             f"Destination accounts: {accounts}\n"
             f"Selected remote write actions: {len(write_types)}"
-            + (f" ({'; '.join(write_types)})" if write_types else " (verification only)")
+            + (
+                f" ({'; '.join(write_types)})"
+                if write_types
+                else " (verification only)"
+            )
             + "\n\nDonors remain remotely unchanged. They may retain old reciprocal links. "
             "Deletion, hiding, withdrawal, or cleanup requires a later Phase 2C review.\n\n"
             "Journal and execute this immutable consolidation attempt?"
         )
-        if QMessageBox.question(
-            self, "Final non-destructive consolidation confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Final non-destructive consolidation confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.approved_preview = selected
             self.accept()
 
@@ -2681,11 +3024,19 @@ class DonorDeletionPreviewDialog(QDialog):
             layout.addWidget(notice)
 
         self.table = QTableWidget(len(preview.donors), 9)
-        self.table.setHorizontalHeaderLabels((
-            "Delete", "Donor", "Owner / stable identity", "Phase 2B provenance",
-            "Updated", "Content inventory", "Parity", "Third-party / dependencies",
-            "Eligibility",
-        ))
+        self.table.setHorizontalHeaderLabels(
+            (
+                "Delete",
+                "Donor",
+                "Owner / stable identity",
+                "Phase 2B provenance",
+                "Updated",
+                "Content inventory",
+                "Parity",
+                "Third-party / dependencies",
+                "Eligibility",
+            )
+        )
         for row_index, donor in enumerate(preview.donors):
             check = QCheckBox()
             check.setChecked(False)
@@ -2698,68 +3049,81 @@ class DonorDeletionPreviewDialog(QDialog):
             self._checks[donor.stable_member_id] = check
             self.table.setCellWidget(row_index, 0, check)
             self.table.setItem(
-                row_index, 1,
-                QTableWidgetItem(
-                    f"{donor.site.value.upper()} #{donor.observation_id}"
-                ),
+                row_index,
+                1,
+                QTableWidgetItem(f"{donor.site.value.upper()} #{donor.observation_id}"),
             )
             self.table.setItem(
-                row_index, 2,
+                row_index,
+                2,
                 QTableWidgetItem(
                     f"{donor.owner_account}; UUID/stable id="
                     f"{donor.remote_uuid or '[none]'}"
                 ),
             )
             self.table.setItem(
-                row_index, 3,
+                row_index,
+                3,
                 QTableWidgetItem(
                     f"admitted by #{donor.admitting_attempt_id}; "
                     f"{donor.evidence_path}"
                 ),
             )
             self.table.setItem(
-                row_index, 4,
+                row_index,
+                4,
                 QTableWidgetItem(donor.remote_updated_at or "unavailable"),
             )
             self.table.setItem(
-                row_index, 5,
-                QTableWidgetItem("\n".join(
-                    f"{item.content_type}: {item.safe_summary} "
-                    f"[{item.identity}]"
-                    for item in donor.content_inventory
-                ) or "No supported content returned"),
+                row_index,
+                5,
+                QTableWidgetItem(
+                    "\n".join(
+                        f"{item.content_type}: {item.safe_summary} "
+                        f"[{item.identity}]"
+                        for item in donor.content_inventory
+                    )
+                    or "No supported content returned"
+                ),
             )
             self.table.setItem(
-                row_index, 6,
-                QTableWidgetItem("\n".join(
-                    f"{'preserved' if item.preserved else 'BLOCKED'} — "
-                    f"{item.content_type}/{item.source_identity}: "
-                    f"{item.match_method or item.blocking_reason}"
-                    for item in donor.parity_items
-                ) or "No parity rows"),
+                row_index,
+                6,
+                QTableWidgetItem(
+                    "\n".join(
+                        f"{'preserved' if item.preserved else 'BLOCKED'} — "
+                        f"{item.content_type}/{item.source_identity}: "
+                        f"{item.match_method or item.blocking_reason}"
+                        for item in donor.parity_items
+                    )
+                    or "No parity rows"
+                ),
             )
             activity = [
                 *(item.safe_summary for item in donor.third_party),
                 *(item.safe_summary for item in donor.dependencies),
             ]
             self.table.setItem(
-                row_index, 7,
+                row_index,
+                7,
                 QTableWidgetItem("\n".join(activity) or "None detected"),
             )
             self.table.setItem(
-                row_index, 8,
+                row_index,
+                8,
                 QTableWidgetItem(
-                    donor.status + (
+                    donor.status
+                    + (
                         "\n" + "\n".join(donor.blocking_reasons[1:])
-                        if len(donor.blocking_reasons) > 1 else ""
+                        if len(donor.blocking_reasons) > 1
+                        else ""
                     )
                 ),
             )
         self.table.resizeColumnsToContents()
         layout.addWidget(self.table, 1)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setText("Review destructive confirmation…")
@@ -2776,11 +3140,11 @@ class DonorDeletionPreviewDialog(QDialog):
 
     def selected_member_ids(self) -> tuple[int, ...]:
         eligible = {
-            item.stable_member_id for item in self.preview.donors
-            if item.eligible
+            item.stable_member_id for item in self.preview.donors if item.eligible
         }
         return tuple(
-            item.stable_member_id for item in self.preview.donors
+            item.stable_member_id
+            for item in self.preview.donors
             if (
                 item.stable_member_id in eligible
                 and self._checks[item.stable_member_id].isEnabled()
@@ -2792,16 +3156,15 @@ class DonorDeletionPreviewDialog(QDialog):
         selected = self.selected_member_ids()
         if not selected:
             return
-        lookup = {
-            item.stable_member_id: item for item in self.preview.donors
-        }
+        lookup = {item.stable_member_id: item for item in self.preview.donors}
         chosen = [lookup[value] for value in selected]
         donor_labels = ", ".join(
-            f"{item.site.value.upper()} #{item.observation_id}"
-            for item in chosen
+            f"{item.site.value.upper()} #{item.observation_id}" for item in chosen
         )
         photos = sum(
-            1 for item in chosen for content in item.content_inventory
+            1
+            for item in chosen
+            for content in item.content_inventory
             if content.content_type == "photo"
         )
         objects = sum(len(item.content_inventory) for item in chosen)
@@ -2818,23 +3181,31 @@ class DonorDeletionPreviewDialog(QDialog):
             "Deletion is permanent and no rollback recreation will be attempted.\n"
             "Continue to typed confirmation?"
         )
-        if QMessageBox.question(
-            self, "Permanent donor deletion", first_message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Permanent donor deletion",
+                first_message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         phrase = self.preview.typed_phrase(selected)
         typed, accepted = QInputDialog.getText(
-            self, "Typed permanent-deletion confirmation",
+            self,
+            "Typed permanent-deletion confirmation",
             f"Type exactly:\n{phrase}",
-            QLineEdit.EchoMode.Normal, "",
+            QLineEdit.EchoMode.Normal,
+            "",
         )
         if not accepted:
             return
         if typed != phrase:
             QMessageBox.warning(
-                self, "Confirmation rejected",
+                self,
+                "Confirmation rejected",
                 "The typed phrase did not exactly match this reviewed plan.",
             )
             return
@@ -2842,7 +3213,8 @@ class DonorDeletionPreviewDialog(QDialog):
         # and requires both confirmation stages again.
         if self.selected_member_ids() != selected:
             QMessageBox.warning(
-                self, "Selection changed",
+                self,
+                "Selection changed",
                 "The donor selection changed; restart confirmation.",
             )
             return
@@ -2882,13 +3254,17 @@ class NameProposalDialog(QDialog):
             self._buttons.addButton(choice)
             self.table.setCellWidget(row_index, 0, choice)
             target = (
-                "iNaturalist identification" if candidate.target_site is RemoteSite.INAT
+                "iNaturalist identification"
+                if candidate.target_site is RemoteSite.INAT
                 else "Mushroom Observer proposal"
             )
             self.table.setItem(row_index, 1, QTableWidgetItem(target))
             self.table.setItem(
-                row_index, 2,
-                QTableWidgetItem(f"{candidate.source_name} → {candidate.proposed_name}"),
+                row_index,
+                2,
+                QTableWidgetItem(
+                    f"{candidate.source_name} → {candidate.proposed_name}"
+                ),
             )
             detail = candidate.proposed_rank or "?"
             if candidate.synonyms:
@@ -2916,22 +3292,30 @@ class NameProposalDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Confirm one proposal…")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Confirm one proposal…"
+        )
         buttons.accepted.connect(self._confirm)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def selected_candidate(self) -> Optional[NameProposalCandidate]:
-        return next((candidate for button, candidate in self._choices if button.isChecked()), None)
+        return next(
+            (candidate for button, candidate in self._choices if button.isChecked()),
+            None,
+        )
 
     def _confirm(self) -> None:
         candidate = self.selected_candidate()
         if candidate is None:
-            QMessageBox.warning(self, "No candidate selected", "Select one enabled name proposal.")
+            QMessageBox.warning(
+                self, "No candidate selected", "Select one enabled name proposal."
+            )
             return
         if candidate.string_similarity_only:
             QMessageBox.warning(
-                self, "Unresolved name",
+                self,
+                "Unresolved name",
                 "This candidate could not be resolved to an exact taxon and cannot be proposed.",
             )
             return
@@ -2948,18 +3332,28 @@ class NameProposalDialog(QDialog):
                 "It is tracked as pending and does NOT immediately change the consensus name. "
                 "Per-observation submission is not yet available."
             )
-        if QMessageBox.question(
-            self, "Explicit name proposal confirmation", message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Explicit name proposal confirmation",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.accept()
 
 
 class ReconciliationSetupDialog(QDialog):
     """Resolve exact account identities before creating or selecting a profile."""
 
-    def __init__(self, coordinator: ReconciliationCoordinator, authenticated_login: str, parent=None) -> None:
+    def __init__(
+        self,
+        coordinator: ReconciliationCoordinator,
+        authenticated_login: str,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Reconciliation profile")
         self.setMinimumWidth(560)
@@ -2998,7 +3392,9 @@ class ReconciliationSetupDialog(QDialog):
         button_row.addWidget(self.resolve_button)
         button_row.addStretch(1)
         layout.addLayout(button_row)
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         self.ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setEnabled(False)
         self.buttons.accepted.connect(self._accept)
@@ -3034,8 +3430,12 @@ class ReconciliationSetupDialog(QDialog):
         self.ok_button.setEnabled(existing)
         if existing:
             profile = self.coordinator.db.profile(int(profile_id))
-            self.inat_status.setText(f"Exact: {profile.inat_login} (numeric ID {profile.inat_user_id})")
-            self.mo_status.setText(f"Exact: {profile.mo_login} (numeric ID {profile.mo_user_id})")
+            self.inat_status.setText(
+                f"Exact: {profile.inat_login} (numeric ID {profile.inat_user_id})"
+            )
+            self.mo_status.setText(
+                f"Exact: {profile.mo_login} (numeric ID {profile.mo_user_id})"
+            )
             self.availability.setText(self._availability_text(profile))
         else:
             self.inat_status.setText("Not resolved")
@@ -3061,8 +3461,12 @@ class ReconciliationSetupDialog(QDialog):
         self._mo_user = dict(mo_user)  # type: ignore[arg-type]
         inat_name = str(self._inat_user.get("login") or "")
         mo_name = mo_login_of(self._mo_user)
-        self.inat_status.setText(f"Exact: {inat_name} (numeric ID {self._inat_user.get('id')})")
-        self.mo_status.setText(f"Exact: {mo_name} (numeric ID {self._mo_user.get('id')})")
+        self.inat_status.setText(
+            f"Exact: {inat_name} (numeric ID {self._inat_user.get('id')})"
+        )
+        self.mo_status.setText(
+            f"Exact: {mo_name} (numeric ID {self._mo_user.get('id')})"
+        )
         # Upgrade the remembered name to MO's canonical spelling now that one
         # exists, so a prefill never reintroduces the user's casing variant.
         if mo_name:
@@ -3076,7 +3480,9 @@ class ReconciliationSetupDialog(QDialog):
                 "validation are unavailable because authentication does not match this iNaturalist account."
             )
         else:
-            self.availability.setText("Authentication matches; authorized read-only validation is available.")
+            self.availability.setText(
+                "Authentication matches; authorized read-only validation is available."
+            )
 
     def _failed(self, message: str) -> None:
         self.inat_status.setText("Resolution failed")
@@ -3086,8 +3492,13 @@ class ReconciliationSetupDialog(QDialog):
 
     def _availability_text(self, profile: ReconciliationProfile) -> str:
         auth = self.coordinator.auth_provider()
-        if auth.is_authenticated and auth.login.casefold() == profile.inat_login.casefold():
-            return "Authentication matches; authorized read-only validation is available."
+        if (
+            auth.is_authenticated
+            and auth.login.casefold() == profile.inat_login.casefold()
+        ):
+            return (
+                "Authentication matches; authorized read-only validation is available."
+            )
         return (
             "Public scanning is available. Authentication does not match, so the deleted feed, private "
             "coordinates, and some reciprocal-link validation are unavailable."
@@ -3111,13 +3522,32 @@ class ReconciliationSetupDialog(QDialog):
 
 class ReconciliationTableModel(QAbstractTableModel):
     HEADERS = (
-        "Type", "Site", "Record", "Other record", "Reconciliation score",
-        "State", "Summary", "Updated", "Photo preview", "Photo similarity",
-        "Confirm", "Reject",
+        "Type",
+        "Site",
+        "Record",
+        "Other record",
+        "Reconciliation score",
+        "State",
+        "Summary",
+        "Updated",
+        "Photo preview",
+        "Photo similarity",
+        "Confirm",
+        "Reject",
     )
     KEYS = (
-        "kind", "site", "remote_id", "other_id", "score", "state", "title",
-        "updated_at", "_photo_preview", "_photo_summary", "_confirm", "_reject",
+        "kind",
+        "site",
+        "remote_id",
+        "other_id",
+        "score",
+        "state",
+        "title",
+        "updated_at",
+        "_photo_preview",
+        "_photo_summary",
+        "_confirm",
+        "_reject",
     )
     PHOTO_PREVIEW_COLUMN = 8
     PHOTO_SUMMARY_COLUMN = 9
@@ -3189,15 +3619,25 @@ class ReconciliationTableModel(QAbstractTableModel):
         ):
             return row.get("_photo_preview")
         if role == Qt.ItemDataRole.TextAlignmentRole and column in {
-            self.PHOTO_SUMMARY_COLUMN, self.CONFIRM_COLUMN, self.REJECT_COLUMN,
+            self.PHOTO_SUMMARY_COLUMN,
+            self.CONFIRM_COLUMN,
+            self.REJECT_COLUMN,
         }:
             return int(Qt.AlignmentFlag.AlignCenter)
-        if role == Qt.ItemDataRole.BackgroundRole and candidate and row.get("_photo_ready"):
+        if (
+            role == Qt.ItemDataRole.BackgroundRole
+            and candidate
+            and row.get("_photo_ready")
+        ):
             if column == self.CONFIRM_COLUMN:
                 return QColor("#d9f2df")
             if column == self.REJECT_COLUMN:
                 return QColor("#f7d7d7")
-        if role == Qt.ItemDataRole.ForegroundRole and candidate and row.get("_photo_ready"):
+        if (
+            role == Qt.ItemDataRole.ForegroundRole
+            and candidate
+            and row.get("_photo_ready")
+        ):
             if column == self.CONFIRM_COLUMN:
                 return QColor("#167236")
             if column == self.REJECT_COLUMN:
@@ -3211,19 +3651,27 @@ class ReconciliationTableModel(QAbstractTableModel):
             if column == self.CONFIRM_COLUMN:
                 return (
                     "Confirm this observation pair locally and advance (C)."
-                    if row.get("_photo_ready") else
-                    "Quick confirmation is available after every photo loads."
+                    if row.get("_photo_ready")
+                    else "Quick confirmation is available after every photo loads."
                 )
             if column == self.REJECT_COLUMN:
                 return (
                     "Reject this candidate locally and advance (X)."
-                    if row.get("_photo_ready") else
-                    "Quick rejection is available after every photo loads."
+                    if row.get("_photo_ready")
+                    else "Quick rejection is available after every photo loads."
                 )
         return None
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role=Qt.ItemDataRole.DisplayRole,
+    ):
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and orientation == Qt.Orientation.Horizontal
+        ):
             return self.HEADERS[section]
         return super().headerData(section, orientation, role)
 
@@ -3236,8 +3684,12 @@ class ReconciliationTableModel(QAbstractTableModel):
         if parent.isValid() or not self.canFetchMore(parent):
             return
         incoming = self.coordinator.db.dashboard_rows(
-            self.profile_id, self.category, len(self.rows), PAGE_SIZE,
-            sort_column=self.sort_column, descending=self.descending,
+            self.profile_id,
+            self.category,
+            len(self.rows),
+            PAGE_SIZE,
+            sort_column=self.sort_column,
+            descending=self.descending,
         )
         if not incoming:
             self.total = len(self.rows)
@@ -3252,19 +3704,26 @@ class ReconciliationTableModel(QAbstractTableModel):
             # page saves a whole extra query per category.
             self.total = len(self.rows)
 
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+    def sort(
+        self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+    ) -> None:
         if 0 <= column < self.PHOTO_PREVIEW_COLUMN:
             self.sort_column = self.KEYS[column]
             self.descending = order == Qt.SortOrder.DescendingOrder
             self.set_query(self.profile_id, self.category)
 
     def row(self, index: QModelIndex) -> Optional[dict[str, Any]]:
-        return self.rows[index.row()] if index.isValid() and index.row() < len(self.rows) else None
+        return (
+            self.rows[index.row()]
+            if index.isValid() and index.row() < len(self.rows)
+            else None
+        )
 
     def row_for_pair(self, pair_id: int) -> Optional[int]:
         return next(
             (
-                index for index, row in enumerate(self.rows)
+                index
+                for index, row in enumerate(self.rows)
                 if int(row.get("pair_id") or 0) == pair_id
             ),
             None,
@@ -3275,17 +3734,22 @@ class ReconciliationTableModel(QAbstractTableModel):
         if row_index is None:
             return
         self.rows[row_index]["_photo_summary"] = "loading…"
-        self.rows[row_index]["_photo_tooltip"] = (
-            "Reading both complete photo sets and calculating perceptual hashes."
-        )
+        self.rows[row_index][
+            "_photo_tooltip"
+        ] = "Reading both complete photo sets and calculating perceptual hashes."
         self.dataChanged.emit(
             self.index(row_index, self.PHOTO_PREVIEW_COLUMN),
             self.index(row_index, self.REJECT_COLUMN),
         )
 
     def set_photo_analysis(
-        self, pair_id: int, preview: Optional[QPixmap], summary: str,
-        tooltip: str, *, ready: bool,
+        self,
+        pair_id: int,
+        preview: Optional[QPixmap],
+        summary: str,
+        tooltip: str,
+        *,
+        ready: bool,
     ) -> None:
         row_index = self.row_for_pair(pair_id)
         if row_index is None:
@@ -3307,7 +3771,10 @@ class ReconciliationTableModel(QAbstractTableModel):
             return
         row = self.rows[row_index]
         for key in (
-            "_photo_preview", "_photo_summary", "_photo_tooltip", "_photo_ready",
+            "_photo_preview",
+            "_photo_summary",
+            "_photo_tooltip",
+            "_photo_ready",
         ):
             row.pop(key, None)
         self.dataChanged.emit(
@@ -3335,7 +3802,9 @@ class _DashboardCountWorker(QRunnable):
     """Count every dashboard category without blocking Qt's GUI thread."""
 
     def __init__(
-        self, coordinator: ReconciliationCoordinator, profile_id: int,
+        self,
+        coordinator: ReconciliationCoordinator,
+        profile_id: int,
         generation: int,
     ) -> None:
         super().__init__()
@@ -3348,9 +3817,7 @@ class _DashboardCountWorker(QRunnable):
         counts: dict[str, object] = {}
         try:
             for key, _label in CATEGORIES:
-                counts[key] = self.coordinator.db.dashboard_count(
-                    self.profile_id, key
-                )
+                counts[key] = self.coordinator.db.dashboard_count(self.profile_id, key)
         except Exception as exc:
             counts = {"__error__": str(exc)}
         finally:
@@ -3415,7 +3882,9 @@ class _FlowLayout(QLayout):
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
         margins = self.contentsMargins()
-        return size + QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size + QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
 
     def _reflow(self, rect: QRect, *, apply: bool) -> int:
         margins = self.contentsMargins()
@@ -3437,10 +3906,17 @@ class _FlowLayout(QLayout):
 
 
 class ReconciliationWindow(QMainWindow):
-    def __init__(self, coordinator: ReconciliationCoordinator, profile: ReconciliationProfile, parent=None) -> None:
+    def __init__(
+        self,
+        coordinator: ReconciliationCoordinator,
+        profile: ReconciliationProfile,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.setWindowTitle(f"MO ↔ iNaturalist Reconciliation — {profile.inat_login} / {profile.mo_login}")
+        self.setWindowTitle(
+            f"MO ↔ iNaturalist Reconciliation — {profile.inat_login} / {profile.mo_login}"
+        )
         self.resize(1180, 760)
         # Never open larger than the display. Qt will happily honour a resize
         # (or a layout's minimum) that puts the title bar's edges off-screen,
@@ -3538,7 +4014,9 @@ class ReconciliationWindow(QMainWindow):
         # the force_full flag, or None when no scan is pending.
         self._pending_scan_full: Optional[bool] = None
         for widget in (
-            self.scan_button, self.full_button, self.cancel_button,
+            self.scan_button,
+            self.full_button,
+            self.cancel_button,
             self.advanced_toggle,
         ):
             header.addWidget(widget)
@@ -3552,13 +4030,17 @@ class ReconciliationWindow(QMainWindow):
         advanced.addWidget(self.mo_key_button)
         advanced.addWidget(QLabel("Confirmed-pair tools"))
         for widget in (
-            self.repairs_button, self.its_button, self.coordinates_button,
-            self.photos_button, self.name_button,
+            self.repairs_button,
+            self.its_button,
+            self.coordinates_button,
+            self.photos_button,
+            self.name_button,
         ):
             advanced.addWidget(widget)
         advanced.addWidget(QLabel("Specialist workflows"))
         for widget in (
-            self.create_missing_button, self.consolidate_button,
+            self.create_missing_button,
+            self.consolidate_button,
             self.history_button,
         ):
             advanced.addWidget(widget)
@@ -3625,12 +4107,21 @@ class ReconciliationWindow(QMainWindow):
         self.recover_action = QPushButton("Resume / verify journal action")
         self.cancel_action = QPushButton("Cancel pending journal action")
         for widget in (
-            self.open_site, self.open_other, self.review_photos,
-            self.confirm, self.reject, self.undo_review,
-            self.exclude, self.ignore, self.missing,
+            self.open_site,
+            self.open_other,
+            self.review_photos,
+            self.confirm,
+            self.reject,
+            self.undo_review,
+            self.exclude,
+            self.ignore,
+            self.missing,
             self.refresh,
-            self.open_consolidation_member, self.review_deletion,
-            self.resume_deletion, self.recover_action, self.cancel_action,
+            self.open_consolidation_member,
+            self.review_deletion,
+            self.resume_deletion,
+            self.recover_action,
+            self.cancel_action,
         ):
             actions.addWidget(widget)
         middle_layout.addLayout(actions)
@@ -3665,7 +4156,9 @@ class ReconciliationWindow(QMainWindow):
         self.history_button.clicked.connect(self._show_consolidation_history)
         self.name_button.clicked.connect(self._prepare_name_proposal)
         self.categories.currentRowChanged.connect(self._category_changed)
-        self.table.selectionModel().selectionChanged.connect(lambda *_: self._selection_changed())
+        self.table.selectionModel().selectionChanged.connect(
+            lambda *_: self._selection_changed()
+        )
         self.table.clicked.connect(self._candidate_table_clicked)
         self.table.verticalScrollBar().valueChanged.connect(
             lambda *_: self._request_candidate_photo_prefetch()
@@ -3683,9 +4176,7 @@ class ReconciliationWindow(QMainWindow):
         self.refresh.clicked.connect(self._hydrate_selected)
         self.open_site.clicked.connect(self._open_selected)
         self.open_other.clicked.connect(self._open_other)
-        self.open_consolidation_member.clicked.connect(
-            self._open_consolidation_member
-        )
+        self.open_consolidation_member.clicked.connect(self._open_consolidation_member)
         self.review_deletion.clicked.connect(self._prepare_donor_deletion)
         self.resume_deletion.clicked.connect(self._resume_donor_deletion)
         self.recover_action.clicked.connect(self._recover_selected_action)
@@ -3703,8 +4194,12 @@ class ReconciliationWindow(QMainWindow):
         coordinator.coordinate_preview_ready.connect(self._coordinate_preview_ready)
         coordinator.photo_identity_ready.connect(self._photo_identity_ready)
         coordinator.photo_preview_ready.connect(self._photo_preview_ready)
-        coordinator.observation_creation_preview_ready.connect(self._observation_creation_preview_ready)
-        coordinator.consolidation_preview_ready.connect(self._consolidation_preview_ready)
+        coordinator.observation_creation_preview_ready.connect(
+            self._observation_creation_preview_ready
+        )
+        coordinator.consolidation_preview_ready.connect(
+            self._consolidation_preview_ready
+        )
         coordinator.deletion_preview_ready.connect(self._deletion_preview_ready)
         coordinator.name_proposal_ready.connect(self._name_proposal_ready)
         coordinator.name_proposal_changed.connect(self._link_actions_changed)
@@ -3737,9 +4232,7 @@ class ReconciliationWindow(QMainWindow):
             run.get("finished_at") or run.get("started_at") or "unknown time"
         )
         text = f"Latest inventory attempt: {mode}, {outcome}, {finished}"
-        successful = self.coordinator.db.latest_successful_run(
-            self.profile.profile_id
-        )
+        successful = self.coordinator.db.latest_successful_run(self.profile.profile_id)
         if successful and successful.get("run_id") != run.get("run_id"):
             success_finished = str(
                 successful.get("finished_at")
@@ -3768,8 +4261,11 @@ class ReconciliationWindow(QMainWindow):
         try:
             header.setSortIndicator(
                 section,
-                Qt.SortOrder.DescendingOrder if self.model.descending
-                else Qt.SortOrder.AscendingOrder,
+                (
+                    Qt.SortOrder.DescendingOrder
+                    if self.model.descending
+                    else Qt.SortOrder.AscendingOrder
+                ),
             )
         finally:
             header.blockSignals(blocked)
@@ -3798,12 +4294,8 @@ class ReconciliationWindow(QMainWindow):
                 76 if candidate_mode else 30
             )
             if candidate_mode:
-                self.table.setColumnWidth(
-                    self.model.PHOTO_PREVIEW_COLUMN, 190
-                )
-                self.table.setColumnWidth(
-                    self.model.PHOTO_SUMMARY_COLUMN, 145
-                )
+                self.table.setColumnWidth(self.model.PHOTO_PREVIEW_COLUMN, 190)
+                self.table.setColumnWidth(self.model.PHOTO_SUMMARY_COLUMN, 145)
                 self.table.setColumnWidth(self.model.CONFIRM_COLUMN, 68)
                 self.table.setColumnWidth(self.model.REJECT_COLUMN, 60)
             hints = {
@@ -3858,7 +4350,9 @@ class ReconciliationWindow(QMainWindow):
         self._selected_thumbnail_identities.clear()
         self.thumbnail.setText("No displayed thumbnail")
         self.thumbnail.setPixmap(QPixmap())
-        self.detail.setPlainText("Select a row to inspect its local and remote details.")
+        self.detail.setPlainText(
+            "Select a row to inspect its local and remote details."
+        )
         self._update_contextual_controls()
         if item and str(item.data(Qt.ItemDataRole.UserRole)) == "candidate_pairs":
             QTimer.singleShot(0, self._start_candidate_review_queue)
@@ -3926,9 +4420,7 @@ class ReconciliationWindow(QMainWindow):
         ]
         row_indexes: list[int] = []
         for start in starts:
-            for row_index in range(
-                start, min(count, start + PHOTO_PREFETCH_ROWS)
-            ):
+            for row_index in range(start, min(count, start + PHOTO_PREFETCH_ROWS)):
                 if row_index not in row_indexes:
                     row_indexes.append(row_index)
         for row_index in row_indexes:
@@ -3949,21 +4441,27 @@ class ReconciliationWindow(QMainWindow):
             self._pending_photo_analyses.add(pair_id)
             self.model.set_photo_loading(pair_id)
             worker = _CandidatePhotoAnalysisWorker(
-                self.coordinator, self.profile.profile_id, pair_id,
-                self._photo_prefetch_generation, self._photo_prefetch_token,
+                self.coordinator,
+                self.profile.profile_id,
+                pair_id,
+                self._photo_prefetch_generation,
+                self._photo_prefetch_token,
             )
             signals = worker.signals
             self._live_photo_analysis_signals.add(signals)
             signals.finished.connect(
-                lambda generation, completed_pair_id, payload, owned=signals:
-                self._candidate_photo_analysis_finished(
+                lambda generation, completed_pair_id, payload, owned=signals: self._candidate_photo_analysis_finished(
                     owned, generation, completed_pair_id, payload
                 )
             )
             self._photo_prefetch_pool.start(worker)
 
     def _candidate_photo_analysis_finished(
-        self, signals: QObject, generation: int, pair_id: int, payload: object,
+        self,
+        signals: QObject,
+        generation: int,
+        pair_id: int,
+        payload: object,
     ) -> None:
         self._live_photo_analysis_signals.discard(signals)
         if generation != self._photo_prefetch_generation:
@@ -3994,7 +4492,9 @@ class ReconciliationWindow(QMainWindow):
         if isinstance(payload, dict) and payload.get("error"):
             message = str(payload["error"])
             self._apply_photo_analysis(
-                pair_id, preview=None, summary="unavailable",
+                pair_id,
+                preview=None,
+                summary="unavailable",
                 tooltip=f"Photo analysis could not be completed: {message}",
                 ready=False,
             )
@@ -4002,15 +4502,17 @@ class ReconciliationWindow(QMainWindow):
             return
         if not isinstance(payload, _CandidatePhotoAnalysis):
             self._apply_photo_analysis(
-                pair_id, preview=None, summary="unavailable",
-                tooltip="Photo analysis returned an invalid result.", ready=False,
+                pair_id,
+                preview=None,
+                summary="unavailable",
+                tooltip="Photo analysis returned an invalid result.",
+                ready=False,
             )
             self._schedule_candidate_photo_prefetch()
             return
         close = payload.close_matches
         similarities = [
-            _photo_similarity_score(distance)
-            for _mo, _inat, distance in close
+            _photo_similarity_score(distance) for _mo, _inat, distance in close
         ]
         if similarities:
             score = min(similarities)
@@ -4052,14 +4554,20 @@ class ReconciliationWindow(QMainWindow):
         self._apply_photo_analysis(
             pair_id,
             preview=QPixmap.fromImage(_photo_analysis_mosaic(payload)),
-            summary=summary, tooltip="\n".join(tooltip_lines),
+            summary=summary,
+            tooltip="\n".join(tooltip_lines),
             ready=payload.ready_for_quick_review,
         )
         self._schedule_candidate_photo_prefetch()
 
     def _apply_photo_analysis(
-        self, pair_id: int, *, preview: Optional[QPixmap], summary: str,
-        tooltip: str, ready: bool,
+        self,
+        pair_id: int,
+        *,
+        preview: Optional[QPixmap],
+        summary: str,
+        tooltip: str,
+        ready: bool,
     ) -> None:
         """Show one analysis and remember it for the rest of the session.
 
@@ -4069,7 +4577,9 @@ class ReconciliationWindow(QMainWindow):
         candidate instead of megabytes.
         """
         values = {
-            "preview": preview, "summary": summary, "tooltip": tooltip,
+            "preview": preview,
+            "summary": summary,
+            "tooltip": tooltip,
             "ready": ready,
         }
         self._photo_analysis_cache[pair_id] = values
@@ -4095,12 +4605,10 @@ class ReconciliationWindow(QMainWindow):
         return False
 
     def _candidate_table_clicked(self, index: QModelIndex) -> None:
-        if (
-            self.model.category != "candidate_pairs"
-            or index.column() not in {
-                self.model.CONFIRM_COLUMN, self.model.REJECT_COLUMN,
-            }
-        ):
+        if self.model.category != "candidate_pairs" or index.column() not in {
+            self.model.CONFIRM_COLUMN,
+            self.model.REJECT_COLUMN,
+        }:
             return
         if self._quick_review_blocked():
             return
@@ -4113,9 +4621,7 @@ class ReconciliationWindow(QMainWindow):
             return
         self.table.selectRow(index.row())
         self._pair_action(
-            "confirmed"
-            if index.column() == self.model.CONFIRM_COLUMN
-            else "rejected"
+            "confirmed" if index.column() == self.model.CONFIRM_COLUMN else "rejected"
         )
 
     def _quick_shortcut_review(self, state: str) -> None:
@@ -4131,7 +4637,11 @@ class ReconciliationWindow(QMainWindow):
         self._pair_action(state)
 
     def _record_pair_undo(
-        self, pair_id: int, state: str, mo_id: int, inat_id: int,
+        self,
+        pair_id: int,
+        state: str,
+        mo_id: int,
+        inat_id: int,
     ) -> None:
         """Offer to reverse the decision just made, briefly.
 
@@ -4144,9 +4654,7 @@ class ReconciliationWindow(QMainWindow):
         """
         self._last_pair_review = (pair_id, state, mo_id, inat_id)
         verb = "confirmation" if state == "confirmed" else "rejection"
-        self.undo_review.setText(
-            f"Undo {verb}: MO {mo_id} ↔ iNat {inat_id}"
-        )
+        self.undo_review.setText(f"Undo {verb}: MO {mo_id} ↔ iNat {inat_id}")
         self._undo_timer.start(PAIR_UNDO_SECONDS * 1000)
         self._update_contextual_controls()
 
@@ -4190,7 +4698,9 @@ class ReconciliationWindow(QMainWindow):
             self._selected_thumbnail_identities.clear()
             self.thumbnail.setText("No displayed thumbnail")
             self.thumbnail.setPixmap(QPixmap())
-            self.detail.setPlainText("Select a row to inspect its local and remote details.")
+            self.detail.setPlainText(
+                "Select a row to inspect its local and remote details."
+            )
             self._update_contextual_controls()
             return
         self._schedule_candidate_photo_prefetch()
@@ -4202,48 +4712,70 @@ class ReconciliationWindow(QMainWindow):
         )
         self._refresh_deletion_controls()
         if row["kind"] == "pair":
-            value = self.coordinator.db.pair_detail(self.profile.profile_id, int(row["pair_id"]))
+            value = self.coordinator.db.pair_detail(
+                self.profile.profile_id, int(row["pair_id"])
+            )
             self._selected_pair = (int(row["remote_id"]), int(row["other_id"]))
         elif row["kind"] == "record":
-            value = self.coordinator.db.record_detail(self.profile.profile_id, row["site"], int(row["remote_id"]))
+            value = self.coordinator.db.record_detail(
+                self.profile.profile_id, row["site"], int(row["remote_id"])
+            )
             self._selected_pair = None
         elif row["kind"] == "issue":
-            value = self.coordinator.db.issue_detail(
-                self.profile.profile_id, int(row["issue_id"])
-            ) or row
+            value = (
+                self.coordinator.db.issue_detail(
+                    self.profile.profile_id, int(row["issue_id"])
+                )
+                or row
+            )
             if row.get("remote_id") and row.get("other_id"):
                 identifiers = {
                     str(row.get("site")): int(row["remote_id"]),
                     str(row.get("other_site")): int(row["other_id"]),
                 }
                 self._selected_pair = (
-                    identifiers["mo"], identifiers["inat"]
-                ) if {"mo", "inat"}.issubset(identifiers) else None
+                    (identifiers["mo"], identifiers["inat"])
+                    if {"mo", "inat"}.issubset(identifiers)
+                    else None
+                )
             else:
                 self._selected_pair = None
         elif row["kind"] == "consolidation":
-            value = self.coordinator.db.consolidation_detail(
-                self.profile.profile_id,
-                int(str(row["row_key"]).split(":", 1)[1]),
-            ) or row
+            value = (
+                self.coordinator.db.consolidation_detail(
+                    self.profile.profile_id,
+                    int(str(row["row_key"]).split(":", 1)[1]),
+                )
+                or row
+            )
             self._selected_pair = (
-                int(row["remote_id"]), int(row["other_id"])
-            ) if row.get("remote_id") and row.get("other_id") else None
+                (int(row["remote_id"]), int(row["other_id"]))
+                if row.get("remote_id") and row.get("other_id")
+                else None
+            )
         elif row["kind"] == "deletion_action":
             # Deletion actions live in their own table and their action_id is
             # a deletion_action_id, which must never be handed to
             # action_detail() -- that id space collides with sync_actions.
-            value = self.coordinator.db.deletion_action(
-                self.profile.profile_id, int(row["action_id"])
-            ) or row
+            value = (
+                self.coordinator.db.deletion_action(
+                    self.profile.profile_id, int(row["action_id"])
+                )
+                or row
+            )
             self._selected_pair = None
         else:
-            value = self.coordinator.db.action_detail(
-                self.profile.profile_id, int(row["action_id"])
-            ) or row
+            value = (
+                self.coordinator.db.action_detail(
+                    self.profile.profile_id, int(row["action_id"])
+                )
+                or row
+            )
             self._selected_pair = (
-                int(value["mo_observation_id"]), int(value["inat_observation_id"])
-            ) if value.get("mo_observation_id") and value.get("inat_observation_id") else None
+                (int(value["mo_observation_id"]), int(value["inat_observation_id"]))
+                if value.get("mo_observation_id") and value.get("inat_observation_id")
+                else None
+            )
         self._selected_detail = value if isinstance(value, dict) else row
         self._detail_payloads = {}
         self._selected_thumbnail_identities.clear()
@@ -4261,7 +4793,8 @@ class ReconciliationWindow(QMainWindow):
         # create endpoint, recovery marker, duplicate prevention, taxon
         # mapping, or verification, so it is deliberately excluded here.
         return bool(
-            row and row.get("kind") == "record"
+            row
+            and row.get("kind") == "record"
             and str(row.get("state", "")) == "confirmed_missing_on_inat"
         )
 
@@ -4284,7 +4817,9 @@ class ReconciliationWindow(QMainWindow):
 
     @staticmethod
     def _set_available(
-        button: QPushButton, available: bool, unavailable_reason: str = "",
+        button: QPushButton,
+        available: bool,
+        unavailable_reason: str = "",
     ) -> None:
         button.setEnabled(available)
         button.setToolTip("" if available else unavailable_reason)
@@ -4296,7 +4831,9 @@ class ReconciliationWindow(QMainWindow):
         detail = self._selected_detail or {}
         kind = str(row.get("kind")) if row else ""
         pair = detail if kind == "pair" else {}
-        pair_state = str(pair.get("review_state") or row.get("state") or "") if row else ""
+        pair_state = (
+            str(pair.get("review_state") or row.get("state") or "") if row else ""
+        )
         pair_excluded = bool(pair.get("excluded"))
         is_pair = kind == "pair"
         is_candidate = is_pair and pair_state == "candidate" and not pair_excluded
@@ -4306,7 +4843,8 @@ class ReconciliationWindow(QMainWindow):
         self._set_available(self.scan_button, available, busy_reason)
         self._set_available(self.full_button, available, busy_reason)
         self._set_available(
-            self.cancel_button, self._ui_busy,
+            self.cancel_button,
+            self._ui_busy,
             "There is no reconciliation operation to cancel.",
         )
         self._set_available(self.bindings_button, available, busy_reason)
@@ -4319,11 +4857,14 @@ class ReconciliationWindow(QMainWindow):
             "local identity decision; remote changes still require a preview."
         )
         for button in (
-            self.its_button, self.coordinates_button, self.photos_button,
+            self.its_button,
+            self.coordinates_button,
+            self.photos_button,
             self.name_button,
         ):
             self._set_available(
-                button, available and is_confirmed,
+                button,
+                available and is_confirmed,
                 busy_reason if self._ui_busy else confirmed_reason,
             )
         repairable_issue = (
@@ -4333,52 +4874,80 @@ class ReconciliationWindow(QMainWindow):
         self._set_available(
             self.repairs_button,
             available and (is_confirmed or repairable_issue),
-            busy_reason if self._ui_busy else
-            "Select a confirmed pair or an explicitly repairable link issue.",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a confirmed pair or an explicitly repairable link issue."
+            ),
         )
         self._set_available(
             self.create_missing_button,
             available and self._create_missing_eligible(row),
-            busy_reason if self._ui_busy else
-            "Select an MO record explicitly marked confirmed missing on iNaturalist.",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select an MO record explicitly marked confirmed missing on iNaturalist."
+            ),
         )
 
         self._set_available(
-            self.confirm, available and is_candidate,
-            busy_reason if self._ui_busy else
-            "Select a non-excluded candidate pair to confirm locally.",
+            self.confirm,
+            available and is_candidate,
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a non-excluded candidate pair to confirm locally."
+            ),
         )
         self._set_available(
-            self.reject, available and is_candidate,
-            busy_reason if self._ui_busy else
-            "Select a non-excluded candidate pair to reject.",
+            self.reject,
+            available and is_candidate,
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a non-excluded candidate pair to reject."
+            ),
         )
         self._set_available(
             self.undo_review,
             available and self._last_pair_review is not None,
-            busy_reason if self._ui_busy else
-            f"A confirm or reject decision can be reversed here for "
-            f"{PAIR_UNDO_SECONDS} seconds after you make it.",
+            (
+                busy_reason
+                if self._ui_busy
+                else f"A confirm or reject decision can be reversed here for "
+                f"{PAIR_UNDO_SECONDS} seconds after you make it."
+            ),
         )
         self._set_available(
             self.review_photos,
-            available and is_pair and pair_state in {"candidate", "confirmed"}
+            available
+            and is_pair
+            and pair_state in {"candidate", "confirmed"}
             and not pair_excluded,
-            busy_reason if self._ui_busy else
-            "Select a candidate or confirmed, non-excluded pair for read-only photo review.",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a candidate or confirmed, non-excluded pair for read-only photo review."
+            ),
         )
         self._set_available(
-            self.exclude, available and is_pair,
+            self.exclude,
+            available and is_pair,
             busy_reason if self._ui_busy else "Select a pair to exclude or reopen.",
         )
         self._set_available(
-            self.ignore, available and kind == "issue",
+            self.ignore,
+            available and kind == "issue",
             busy_reason if self._ui_busy else "Select an issue to ignore or reopen.",
         )
         self._set_available(
-            self.missing, available and kind == "record",
-            busy_reason if self._ui_busy else
-            "Select an unpaired inventory record after checking the other site.",
+            self.missing,
+            available and kind == "record",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select an unpaired inventory record after checking the other site."
+            ),
         )
         has_remote = bool(
             row and row.get("site") in {"inat", "mo"} and row.get("remote_id")
@@ -4387,30 +4956,45 @@ class ReconciliationWindow(QMainWindow):
             row and row.get("other_site") in {"inat", "mo"} and row.get("other_id")
         )
         self._set_available(
-            self.refresh, available and has_remote,
+            self.refresh,
+            available and has_remote,
             busy_reason if self._ui_busy else "Select a remote observation first.",
         )
         self._set_available(
-            self.open_site, available and has_remote,
+            self.open_site,
+            available and has_remote,
             busy_reason if self._ui_busy else "Select a remote observation first.",
         )
         self._set_available(
-            self.open_other, available and has_other,
-            busy_reason if self._ui_busy else "The selected row has no paired observation.",
+            self.open_other,
+            available and has_other,
+            (
+                busy_reason
+                if self._ui_busy
+                else "The selected row has no paired observation."
+            ),
         )
         self._set_available(
-            self.open_consolidation_member, available and kind == "consolidation",
-            busy_reason if self._ui_busy else
-            "Select a consolidation-history row first.",
+            self.open_consolidation_member,
+            available and kind == "consolidation",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a consolidation-history row first."
+            ),
         )
 
         action_state = str(detail.get("state") or "")
         self._set_available(
             self.recover_action,
-            available and kind == "action"
+            available
+            and kind == "action"
             and action_state in {"pending", "outcome_unknown"},
-            busy_reason if self._ui_busy else
-            "Select a pending or outcome-unknown journal action.",
+            (
+                busy_reason
+                if self._ui_busy
+                else "Select a pending or outcome-unknown journal action."
+            ),
         )
         self._set_available(
             self.cancel_action,
@@ -4441,10 +5025,14 @@ class ReconciliationWindow(QMainWindow):
     def _hydrate_selected(self) -> None:
         row = self._selected()
         if row and row.get("site") in {"inat", "mo"} and row.get("remote_id"):
-            self.coordinator.hydrate(row["site"], int(row["remote_id"]), self.profile.profile_id)
+            self.coordinator.hydrate(
+                row["site"], int(row["remote_id"]), self.profile.profile_id
+            )
             if row.get("other_id") and row.get("other_site") in {"inat", "mo"}:
                 self.coordinator.hydrate(
-                    str(row["other_site"]), int(row["other_id"]), self.profile.profile_id
+                    str(row["other_site"]),
+                    int(row["other_id"]),
+                    self.profile.profile_id,
                 )
 
     def _detail_loaded(self, part: str, value: object) -> None:
@@ -4472,6 +5060,7 @@ class ReconciliationWindow(QMainWindow):
         self.detail.setPlainText(
             _format_remote_comparison(self._detail_payloads, fallbacks)
         )
+
         # A failed read must never contribute (or appear to contribute)
         # identity evidence: skip any payload that is an error envelope.
         def usable(prefix: str) -> Optional[object]:
@@ -4486,16 +5075,24 @@ class ReconciliationWindow(QMainWindow):
         mo_payload = usable("mo:")
         inat_payload = usable("inat:")
         if self._selected_pair and mo_payload is not None and inat_payload is not None:
-            overlap = _distinctive_note_overlap(
-                mo_payload, inat_payload
-            )
+            overlap = _distinctive_note_overlap(mo_payload, inat_payload)
             if overlap:
-                from observation_workbench.reconciliation.types import EvidenceFamily, EvidenceTier, MatchEvidence
+                from observation_workbench.reconciliation.types import (
+                    EvidenceFamily,
+                    EvidenceTier,
+                    MatchEvidence,
+                )
+
                 self.coordinator.add_deep_evidence(
-                    self.profile.profile_id, self._selected_pair[0], self._selected_pair[1],
+                    self.profile.profile_id,
+                    self._selected_pair[0],
+                    self._selected_pair[1],
                     MatchEvidence(
-                        "distinctive_note_overlap", EvidenceFamily.TEXT, 15,
-                        "Selected records have distinctive in-memory note overlap.", EvidenceTier.DEEP,
+                        "distinctive_note_overlap",
+                        EvidenceFamily.TEXT,
+                        15,
+                        "Selected records have distinctive in-memory note overlap.",
+                        EvidenceTier.DEEP,
                     ),
                 )
         media = _first_display_media(value, site)
@@ -4505,7 +5102,9 @@ class ReconciliationWindow(QMainWindow):
             return
         identity, url = media
         self._selected_thumbnail_identities.add(identity)
-        self._thumbnail_sources[identity] = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        self._thumbnail_sources[identity] = hashlib.sha256(
+            url.encode("utf-8")
+        ).hexdigest()
         cached = self._thumbnail_cache.get(identity)
         if cached is not None:
             self._show_thumbnail(cached)
@@ -4515,7 +5114,10 @@ class ReconciliationWindow(QMainWindow):
             self.coordinator.fetch_thumbnail(identity, url)
 
     def _thumbnail_loaded(self, identity: object, data: object) -> None:
-        if not isinstance(identity, MediaIdentity) or identity not in self._pending_thumbnails:
+        if (
+            not isinstance(identity, MediaIdentity)
+            or identity not in self._pending_thumbnails
+        ):
             return
         self._pending_thumbnails.discard(identity)
         pixmap = QPixmap()
@@ -4523,8 +5125,11 @@ class ReconciliationWindow(QMainWindow):
             self._thumbnail_cache[identity] = pixmap
             exact_hash, perceptual_hash = _pixel_hashes(pixmap)
             self.coordinator.record_displayed_media_hash(
-                self.profile.profile_id, identity,
-                self._thumbnail_sources.get(identity, ""), exact_hash, perceptual_hash,
+                self.profile.profile_id,
+                identity,
+                self._thumbnail_sources.get(identity, ""),
+                exact_hash,
+                perceptual_hash,
             )
             if identity in self._selected_thumbnail_identities:
                 self._show_thumbnail(pixmap)
@@ -4536,7 +5141,8 @@ class ReconciliationWindow(QMainWindow):
         self.thumbnail.setText("")
         self.thumbnail.setPixmap(
             pixmap.scaled(
-                self.thumbnail.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                self.thumbnail.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
@@ -4578,25 +5184,32 @@ class ReconciliationWindow(QMainWindow):
                 "This stores the Mushroom Observer API key as plaintext in the application's "
                 "QSettings file. Anyone able to read that file can recover the key. Continue?"
             )
-            if QMessageBox.warning(
-                self, "Plaintext credential storage", warning,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            ) != QMessageBox.StandardButton.Yes:
+            if (
+                QMessageBox.warning(
+                    self,
+                    "Plaintext credential storage",
+                    warning,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
                 return
         self.coordinator.set_mo_api_key(
             self.profile.profile_id, value, persist_plaintext=persist.isChecked()
         )
         self.status.setText(
             "Mushroom Observer API key stored, but not yet verified against the selected account."
-            if value else "Mushroom Observer API key cleared; MO writes are blocked."
+            if value
+            else "Mushroom Observer API key cleared; MO writes are blocked."
         )
 
     def _prepare_repairs(self) -> None:
         row = self._selected()
         if not row or row["kind"] not in {"pair", "issue"}:
             QMessageBox.information(
-                self, "Select a pair or link issue",
+                self,
+                "Select a pair or link issue",
                 "Select a confirmed pair or an explicitly reviewable link issue first.",
             )
             return
@@ -4606,7 +5219,8 @@ class ReconciliationWindow(QMainWindow):
             )
             if not detail or detail.get("review_state") != "confirmed":
                 QMessageBox.warning(
-                    self, "Confirmed pair required",
+                    self,
+                    "Confirmed pair required",
                     "Only a currently confirmed, non-excluded pair can produce link additions.",
                 )
                 return
@@ -4617,8 +5231,13 @@ class ReconciliationWindow(QMainWindow):
 
         issue_id = int(row["issue_id"])
         issue = self.coordinator.db.issue_detail(self.profile.profile_id, issue_id)
-        if not issue or str(issue.get("issue_type") or "") not in REPAIRABLE_LINK_ISSUE_TYPES:
-            QMessageBox.warning(self, "Link issue required", "This issue cannot produce a link repair.")
+        if (
+            not issue
+            or str(issue.get("issue_type") or "") not in REPAIRABLE_LINK_ISSUE_TYPES
+        ):
+            QMessageBox.warning(
+                self, "Link issue required", "This issue cannot produce a link repair."
+            )
             return
         records = {
             str(item.get("site")): int(item["observation_id"])
@@ -4629,37 +5248,54 @@ class ReconciliationWindow(QMainWindow):
         inat_id = records.get("inat")
         if not mo_id:
             mo_id, accepted = QInputDialog.getInt(
-                self, "Exact Mushroom Observer record",
-                "Mushroom Observer observation ID reviewed for this issue:", 1, 1,
+                self,
+                "Exact Mushroom Observer record",
+                "Mushroom Observer observation ID reviewed for this issue:",
+                1,
+                1,
             )
             if not accepted:
                 return
         if not inat_id:
             inat_id, accepted = QInputDialog.getInt(
-                self, "Exact iNaturalist record",
-                "iNaturalist observation ID reviewed for this issue:", 1, 1,
+                self,
+                "Exact iNaturalist record",
+                "iNaturalist observation ID reviewed for this issue:",
+                1,
+                1,
             )
             if not accepted:
                 return
         intent_label, accepted = QInputDialog.getItem(
-            self, "Explicit link-issue review", "Reviewed intended final state:",
+            self,
+            "Explicit link-issue review",
+            "Reviewed intended final state:",
             (
                 "Reciprocal link between these exact records",
                 "Remove reviewed incorrect rows only",
-            ), 0, False,
+            ),
+            0,
+            False,
         )
         if not accepted:
             return
-        intent = "reciprocal" if intent_label.startswith("Reciprocal") else "remove_only"
+        intent = (
+            "reciprocal" if intent_label.startswith("Reciprocal") else "remove_only"
+        )
         confirmation = (
             f"Mark issue {issue_id} as explicitly reviewed for MO {mo_id} and iNaturalist "
             f"{inat_id}? This only authorizes a preview; it does not write remotely."
         )
-        if QMessageBox.question(
-            self, "Confirm reviewed records", confirmation,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm reviewed records",
+                confirmation,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         try:
             self.coordinator.db.review_link_issue(
@@ -4681,22 +5317,30 @@ class ReconciliationWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.coordinator.execute_link_repairs(payload, dialog.selected_options())
         else:
-            self.status.setText("Link-repair preview closed; no remote writes were made.")
+            self.status.setText(
+                "Link-repair preview closed; no remote writes were made."
+            )
 
     def _prepare_its(self) -> None:
         row = self._selected()
         if not row or row.get("kind") != "pair":
             QMessageBox.information(
-                self, "Select a confirmed pair",
+                self,
+                "Select a confirmed pair",
                 "ITS comparison and writes are available only for a selected confirmed pair.",
             )
             return
         detail = self.coordinator.db.pair_detail(
             self.profile.profile_id, int(row["pair_id"])
         )
-        if not detail or detail.get("review_state") != "confirmed" or detail.get("excluded"):
+        if (
+            not detail
+            or detail.get("review_state") != "confirmed"
+            or detail.get("excluded")
+        ):
             QMessageBox.warning(
-                self, "Confirmed pair required",
+                self,
+                "Confirmed pair required",
                 "Confirm this exact non-excluded pair before comparing ITS data.",
             )
             return
@@ -4721,14 +5365,22 @@ class ReconciliationWindow(QMainWindow):
         row = self._selected()
         if not row or row.get("kind") != "pair":
             QMessageBox.information(
-                self, "Select a confirmed pair",
+                self,
+                "Select a confirmed pair",
                 "This action is available only for a selected confirmed pair.",
             )
             return None
-        detail = self.coordinator.db.pair_detail(self.profile.profile_id, int(row["pair_id"]))
-        if not detail or detail.get("review_state") != "confirmed" or detail.get("excluded"):
+        detail = self.coordinator.db.pair_detail(
+            self.profile.profile_id, int(row["pair_id"])
+        )
+        if (
+            not detail
+            or detail.get("review_state") != "confirmed"
+            or detail.get("excluded")
+        ):
             QMessageBox.warning(
-                self, "Confirmed pair required",
+                self,
+                "Confirmed pair required",
                 "Confirm this exact non-excluded pair first.",
             )
             return None
@@ -4752,13 +5404,16 @@ class ReconciliationWindow(QMainWindow):
             if option is not None:
                 self.coordinator.execute_coordinate_action(payload, option)
         else:
-            self.status.setText("Coordinate comparison closed; no remote write was made.")
+            self.status.setText(
+                "Coordinate comparison closed; no remote write was made."
+            )
 
     def _prepare_photo_identity_review(self) -> None:
         row = self._selected()
         if not row or row.get("kind") != "pair":
             QMessageBox.information(
-                self, "Select a pair",
+                self,
+                "Select a pair",
                 "Photo identity review is available for a selected candidate "
                 "or confirmed pair.",
             )
@@ -4768,12 +5423,12 @@ class ReconciliationWindow(QMainWindow):
         )
         if (
             not detail
-            or str(detail.get("review_state") or "")
-            not in {"candidate", "confirmed"}
+            or str(detail.get("review_state") or "") not in {"candidate", "confirmed"}
             or detail.get("excluded")
         ):
             QMessageBox.warning(
-                self, "Reviewable pair required",
+                self,
+                "Reviewable pair required",
                 "Select a candidate or confirmed, non-excluded pair.",
             )
             return
@@ -4804,8 +5459,10 @@ class ReconciliationWindow(QMainWindow):
             QMessageBox.warning(self, "Pair action unavailable", str(exc))
             return
         self._record_pair_undo(
-            payload.pair_id, dialog.decision,
-            payload.mo_observation_id, payload.inat_observation_id,
+            payload.pair_id,
+            dialog.decision,
+            payload.mo_observation_id,
+            payload.inat_observation_id,
         )
         self._advance_past_decided_pair(payload.pair_id)
         verb = "confirmed" if dialog.decision == "confirmed" else "rejected"
@@ -4827,7 +5484,9 @@ class ReconciliationWindow(QMainWindow):
         if not isinstance(payload, PhotoComparisonPreview):
             self._link_action_failed("The photo comparison response was invalid.")
             return
-        dialog = PhotoComparisonDialog(payload, self.coordinator.inat_client.download_image, self)
+        dialog = PhotoComparisonDialog(
+            payload, self.coordinator.inat_client.download_image, self
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             option = dialog.selected_option()
             if option is not None:
@@ -4846,16 +5505,22 @@ class ReconciliationWindow(QMainWindow):
         ``_create_missing_eligible``, which only controls button enablement."""
         row = self._selected()
         if not self._create_missing_eligible(row):
-            if row and row.get("kind") == "record" and str(row.get("state", "")) == "confirmed_missing_on_mo":
+            if (
+                row
+                and row.get("kind") == "record"
+                and str(row.get("state", "")) == "confirmed_missing_on_mo"
+            ):
                 QMessageBox.information(
-                    self, "Direction not supported",
+                    self,
+                    "Direction not supported",
                     "Creating a missing observation on Mushroom Observer from an iNaturalist source "
                     "is not supported yet — only Mushroom Observer -> iNaturalist creation has been "
                     "proven safe.",
                 )
             else:
                 QMessageBox.information(
-                    self, "Confirmed missing record required",
+                    self,
+                    "Confirmed missing record required",
                     "Select an MO record already marked 'confirmed missing on iNaturalist' "
                     "(use the 'Mark / clear confirmed missing' button first).",
                 )
@@ -4866,19 +5531,29 @@ class ReconciliationWindow(QMainWindow):
         row = self._missing_record_row()
         if row is not None:
             self.coordinator.prepare_observation_creation(
-                self.profile.profile_id, str(row["site"]), int(row["remote_id"]),
+                self.profile.profile_id,
+                str(row["site"]),
+                int(row["remote_id"]),
             )
 
     def _observation_creation_preview_ready(self, payload: object) -> None:
         self._set_action_controls_enabled(True)
         if not isinstance(payload, ObservationCreationPreview):
-            self._link_action_failed("The observation creation preview response was invalid.")
+            self._link_action_failed(
+                "The observation creation preview response was invalid."
+            )
             return
-        dialog = ObservationCreationPreviewDialog(payload, self.coordinator.inat_client.download_image, self)
+        dialog = ObservationCreationPreviewDialog(
+            payload, self.coordinator.inat_client.download_image, self
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.coordinator.execute_observation_creation_action(payload, dialog.selected_items())
+            self.coordinator.execute_observation_creation_action(
+                payload, dialog.selected_items()
+            )
         else:
-            self.status.setText("Observation creation closed; no remote write was made.")
+            self.status.setText(
+                "Observation creation closed; no remote write was made."
+            )
 
     def _prepare_consolidation(self) -> None:
         mo_ids: tuple[int, ...] = ()
@@ -4890,11 +5565,13 @@ class ReconciliationWindow(QMainWindow):
             )
             records = detail.get("records", ()) if detail else ()
             mo_ids = tuple(
-                int(item["observation_id"]) for item in records
+                int(item["observation_id"])
+                for item in records
                 if str(item.get("site")) == "mo"
             )
             inat_ids = tuple(
-                int(item["observation_id"]) for item in records
+                int(item["observation_id"])
+                for item in records
                 if str(item.get("site")) == "inat"
             )
         elif row and row.get("kind") == "consolidation":
@@ -4911,10 +5588,13 @@ class ReconciliationWindow(QMainWindow):
         if row and row.get("kind") == "consolidation":
             dialog.setWindowTitle("Add duplicate to existing consolidation")
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            self.status.setText("Duplicate-set entry cancelled; no journal rows were created.")
+            self.status.setText(
+                "Duplicate-set entry cancelled; no journal rows were created."
+            )
             return
         self.coordinator.prepare_consolidation(
-            self.profile.profile_id, dialog.candidates(),
+            self.profile.profile_id,
+            dialog.candidates(),
         )
 
     def _consolidation_preview_ready(self, payload: object) -> None:
@@ -4923,7 +5603,9 @@ class ReconciliationWindow(QMainWindow):
             self._link_action_failed("The consolidation preview response was invalid.")
             return
         dialog = ConsolidationPreviewDialog(
-            payload, self.coordinator.inat_client.download_image, self,
+            payload,
+            self.coordinator.inat_client.download_image,
+            self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             if dialog.approved_preview is not None:
@@ -4938,18 +5620,21 @@ class ReconciliationWindow(QMainWindow):
     def _prepare_donor_deletion(self) -> None:
         row = self._selected()
         if (
-            not row or row.get("kind") != "consolidation"
+            not row
+            or row.get("kind") != "consolidation"
             or str(row.get("state")) != "finalized"
         ):
             QMessageBox.information(
-                self, "Select finalized consolidation",
+                self,
+                "Select finalized consolidation",
                 "Donor deletion review is available only from one finalized "
                 "consolidation-history row.",
             )
             return
         consolidation_id = int(str(row["row_key"]).split(":", 1)[1])
         self.coordinator.prepare_donor_deletion(
-            self.profile.profile_id, consolidation_id,
+            self.profile.profile_id,
+            consolidation_id,
         )
 
     def _resume_donor_deletion(self) -> None:
@@ -4958,7 +5643,8 @@ class ReconciliationWindow(QMainWindow):
             return
         consolidation_id = int(str(row["row_key"]).split(":", 1)[1])
         self.coordinator.resume_donor_deletion(
-            self.profile.profile_id, consolidation_id,
+            self.profile.profile_id,
+            consolidation_id,
         )
 
     def _deletion_preview_ready(self, payload: object) -> None:
@@ -4971,7 +5657,8 @@ class ReconciliationWindow(QMainWindow):
         dialog = DonorDeletionPreviewDialog(payload, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.coordinator.execute_donor_deletion(
-                payload, dialog.approved_member_ids,
+                payload,
+                dialog.approved_member_ids,
             )
         else:
             self.status.setText(
@@ -5030,7 +5717,8 @@ class ReconciliationWindow(QMainWindow):
             )
         else:
             QMessageBox.information(
-                self, "No safe resume available",
+                self,
+                "No safe resume available",
                 "Only pending actions can resume. Outcome-unknown actions can be verified without retrying.",
             )
 
@@ -5041,11 +5729,14 @@ class ReconciliationWindow(QMainWindow):
         if self.coordinator.db.cancel_pending_action(
             self.profile.profile_id, int(row["action_id"])
         ):
-            self.status.setText("Pending journal action group cancelled before execution.")
+            self.status.setText(
+                "Pending journal action group cancelled before execution."
+            )
             self._reload()
         else:
             QMessageBox.information(
-                self, "Cannot cancel action",
+                self,
+                "Cannot cancel action",
                 "Only a pending action can be cancelled directly.",
             )
 
@@ -5075,11 +5766,9 @@ class ReconciliationWindow(QMainWindow):
         if row is not None and row.get("kind") == "consolidation":
             review = str(row.get("state")) == "finalized"
             try:
-                unresolved = (
-                    self.coordinator.db.unresolved_deletion_for_consolidation(
-                        self.profile.profile_id,
-                        int(str(row["row_key"]).split(":", 1)[1]),
-                    )
+                unresolved = self.coordinator.db.unresolved_deletion_for_consolidation(
+                    self.profile.profile_id,
+                    int(str(row["row_key"]).split(":", 1)[1]),
                 )
             except Exception as exc:
                 # This reader RAISES on a corrupt deletion ledger (multiple
@@ -5107,7 +5796,11 @@ class ReconciliationWindow(QMainWindow):
     def _field_candidates_loaded(self, payload: object) -> None:
         self.bindings_button.setEnabled(not self._ui_busy)
         if not isinstance(payload, dict) or payload.get("error"):
-            QMessageBox.warning(self, "Field resolution failed", str(payload.get("error") if isinstance(payload, dict) else payload))
+            QMessageBox.warning(
+                self,
+                "Field resolution failed",
+                str(payload.get("error") if isinstance(payload, dict) else payload),
+            )
             return
         fields = (
             ("mo_url", "Mushroom Observer URL", "text"),
@@ -5119,27 +5812,41 @@ class ReconciliationWindow(QMainWindow):
             if not definitions:
                 if purpose == "mo_url":
                     QMessageBox.warning(
-                        self, "Required field unavailable",
+                        self,
+                        "Required field unavailable",
                         "No exact text field named Mushroom Observer URL was found. Link evidence is disabled.",
                     )
                 continue
             selected = definitions[0]
             override = len(definitions) > 1
             if override:
-                labels = [f"ID {item.get('id')} — {item.get('name')} ({item.get('datatype')})" for item in definitions]
+                labels = [
+                    f"ID {item.get('id')} — {item.get('name')} ({item.get('datatype')})"
+                    for item in definitions
+                ]
                 label, accepted = QInputDialog.getItem(
-                    self, f"Select {exact_name}",
+                    self,
+                    f"Select {exact_name}",
                     f"Multiple exact {datatype} fields named {exact_name} qualify. Select the profile-specific binding:",
-                    labels, 0, False,
+                    labels,
+                    0,
+                    False,
                 )
                 if not accepted:
                     continue
                 selected = definitions[labels.index(label)]
             self.coordinator.db.save_field_binding(
-                self.profile.profile_id, purpose, int(selected["id"]), exact_name,
-                datatype, "verified", is_override=override,
+                self.profile.profile_id,
+                purpose,
+                int(selected["id"]),
+                exact_name,
+                datatype,
+                "verified",
+                is_override=override,
             )
-        self.status.setText("Field bindings verified. The next scan will revalidate them.")
+        self.status.setText(
+            "Field bindings verified. The next scan will revalidate them."
+        )
 
     def _pair_action(self, state: str) -> None:
         row = self._selected()
@@ -5149,9 +5856,7 @@ class ReconciliationWindow(QMainWindow):
         mo_id = int(row["remote_id"])
         inat_id = int(row["other_id"])
         try:
-            self.coordinator.db.set_pair_review(
-                self.profile.profile_id, pair_id, state
-            )
+            self.coordinator.db.set_pair_review(self.profile.profile_id, pair_id, state)
         except Exception as exc:
             QMessageBox.warning(self, "Pair action unavailable", str(exc))
             return
@@ -5176,7 +5881,8 @@ class ReconciliationWindow(QMainWindow):
         self._pending_photo_analyses.discard(pair_id)
         removed = (
             self.model.remove_pair(pair_id)
-            if self.model.category == "candidate_pairs" else None
+            if self.model.category == "candidate_pairs"
+            else None
         )
         if removed is None:
             # Some other category is showing, so the row's new state may still
@@ -5194,20 +5900,26 @@ class ReconciliationWindow(QMainWindow):
         row = self._selected()
         if row and row["kind"] == "pair":
             pair_id = int(row["pair_id"])
-            excluded = self.coordinator.db.pair_is_excluded(self.profile.profile_id, pair_id)
-            self.coordinator.db.set_pair_excluded(self.profile.profile_id, pair_id, not excluded)
+            excluded = self.coordinator.db.pair_is_excluded(
+                self.profile.profile_id, pair_id
+            )
+            self.coordinator.db.set_pair_excluded(
+                self.profile.profile_id, pair_id, not excluded
+            )
             self._reload()
             self.status.setText(
                 "Pair reopened for review."
-                if excluded else
-                "Pair excluded locally. No remote data was changed."
+                if excluded
+                else "Pair excluded locally. No remote data was changed."
             )
 
     def _toggle_issue(self) -> None:
         row = self._selected()
         if row and row["kind"] == "issue":
             state = "open" if row["state"] in {"ignored", "resolved"} else "ignored"
-            self.coordinator.db.set_issue_state(self.profile.profile_id, int(row["issue_id"]), state)
+            self.coordinator.db.set_issue_state(
+                self.profile.profile_id, int(row["issue_id"]), state
+            )
             self._reload()
             self.status.setText(
                 f"Issue marked {state} locally. No remote data was changed."
@@ -5223,16 +5935,19 @@ class ReconciliationWindow(QMainWindow):
             self._reload()
             self.status.setText(
                 "Record marked confirmed missing locally."
-                if missing else
-                "Confirmed-missing mark cleared locally."
+                if missing
+                else "Confirmed-missing mark cleared locally."
             )
 
     def _open_selected(self) -> None:
         row = self._selected()
         if not row or not row.get("remote_id"):
             return
-        url = (f"https://www.inaturalist.org/observations/{int(row['remote_id'])}" if row["site"] == "inat"
-               else f"https://mushroomobserver.org/obs/{int(row['remote_id'])}")
+        url = (
+            f"https://www.inaturalist.org/observations/{int(row['remote_id'])}"
+            if row["site"] == "inat"
+            else f"https://mushroomobserver.org/obs/{int(row['remote_id'])}"
+        )
         QDesktopServices.openUrl(QUrl(url))
 
     def _open_other(self) -> None:
@@ -5240,26 +5955,32 @@ class ReconciliationWindow(QMainWindow):
         if row and row.get("other_id") and row.get("other_site"):
             site = str(row["other_site"])
             observation_id = int(row["other_id"])
-            url = (f"https://www.inaturalist.org/observations/{observation_id}"
-                   if site == "inat" else f"https://mushroomobserver.org/obs/{observation_id}")
+            url = (
+                f"https://www.inaturalist.org/observations/{observation_id}"
+                if site == "inat"
+                else f"https://mushroomobserver.org/obs/{observation_id}"
+            )
             QDesktopServices.openUrl(QUrl(url))
 
     def _open_consolidation_member(self) -> None:
         row = self._selected()
         if not row or row.get("kind") != "consolidation":
             QMessageBox.information(
-                self, "Select consolidation history",
+                self,
+                "Select consolidation history",
                 "Select a row in Consolidation history first.",
             )
             return
         consolidation_id = int(str(row["row_key"]).split(":", 1)[1])
         detail = self.coordinator.db.consolidation_detail(
-            self.profile.profile_id, consolidation_id,
+            self.profile.profile_id,
+            consolidation_id,
         )
         members = list(detail.get("members", ())) if detail else []
         if not members:
             QMessageBox.information(
-                self, "No consolidation members",
+                self,
+                "No consolidation members",
                 "This consolidation has no retained member records.",
             )
             return
@@ -5271,8 +5992,12 @@ class ReconciliationWindow(QMainWindow):
             for member in members
         ]
         selected, accepted = QInputDialog.getItem(
-            self, "Open consolidation member", "Remote observation",
-            choices, 0, False,
+            self,
+            "Open consolidation member",
+            "Remote observation",
+            choices,
+            0,
+            False,
         )
         if not accepted:
             return
@@ -5289,7 +6014,9 @@ class ReconciliationWindow(QMainWindow):
         self._count_generation += 1
         generation = self._count_generation
         worker = _DashboardCountWorker(
-            self.coordinator, self.profile.profile_id, generation,
+            self.coordinator,
+            self.profile.profile_id,
+            generation,
         )
         signals = worker.signals
         self._live_count_signals.add(signals)
@@ -5301,7 +6028,10 @@ class ReconciliationWindow(QMainWindow):
         self._count_pool.start(worker)
 
     def _dashboard_counts_loaded(
-        self, signals: QObject, generation: int, payload: object,
+        self,
+        signals: QObject,
+        generation: int,
+        payload: object,
     ) -> None:
         self._live_count_signals.discard(signals)
         if generation != self._count_generation or not isinstance(payload, dict):
@@ -5361,7 +6091,9 @@ class ReconciliationWindow(QMainWindow):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("iNaturalist sign-in unavailable")
-        box.setText(reasons.get(state, "The iNaturalist sign-in could not be confirmed."))
+        box.setText(
+            reasons.get(state, "The iNaturalist sign-in could not be confirmed.")
+        )
         box.setInformativeText(
             "A scan will still run, but read-only and public: deleted records will not be "
             "detected, private coordinates stay hidden, and pairs that need them will not be "
@@ -5435,16 +6167,17 @@ class ReconciliationWindow(QMainWindow):
         # (0, 0) is the phase-start ping: the phase has begun but has no count
         # to report yet, so show the name alone rather than a meaningless zero.
         counted = (
-            f": {current:,} / {total:,}" if total
-            else "" if not current
-            else f": {current:,}"
+            f": {current:,} / {total:,}"
+            if total
+            else "" if not current else f": {current:,}"
         )
         self.status.setText(f"Step {step} of {SCAN_STEP_COUNT} — {label}{counted}")
         within = min(max((current / total) if total else 0.0, 0.0), 1.0)
         # Stage-aware, so a phase's fraction keeps climbing across its stages
         # instead of restarting at each one.
         self._scan_fractions[base] = max(
-            self._scan_fractions.get(base, 0.0), _stage_fraction(base, stage, within),
+            self._scan_fractions.get(base, 0.0),
+            _stage_fraction(base, stage, within),
         )
         peers = [
             self._scan_fractions[peer]
@@ -5486,7 +6219,9 @@ class ReconciliationWindow(QMainWindow):
         self.status.setText(message)
 
 
-def open_reconciliation_window(coordinator: ReconciliationCoordinator, authenticated_login: str, parent=None):
+def open_reconciliation_window(
+    coordinator: ReconciliationCoordinator, authenticated_login: str, parent=None
+):
     setup = ReconciliationSetupDialog(coordinator, authenticated_login, parent)
     if setup.exec() != QDialog.DialogCode.Accepted or setup.profile is None:
         return None
@@ -5495,7 +6230,9 @@ def open_reconciliation_window(coordinator: ReconciliationCoordinator, authentic
     return window
 
 
-def _first_display_media(payload: object, site: str) -> Optional[tuple[MediaIdentity, str]]:
+def _first_display_media(
+    payload: object, site: str
+) -> Optional[tuple[MediaIdentity, str]]:
     if not isinstance(payload, dict):
         return None
     raw = payload
@@ -5529,18 +6266,23 @@ def _first_display_media(payload: object, site: str) -> Optional[tuple[MediaIden
 
 
 def _pixel_hashes(pixmap: QPixmap) -> tuple[str, str]:
-    image = pixmap.toImage().convertToFormat(
-        QImage.Format.Format_RGBA8888
-    )
-    pixels = bytes(image.constBits())[:image.sizeInBytes()]
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = bytes(image.constBits())[: image.sizeInBytes()]
     exact = hashlib.sha256(
         image.width().to_bytes(4, "big") + image.height().to_bytes(4, "big") + pixels
     ).hexdigest()
     tiny = image.convertToFormat(QImage.Format.Format_Grayscale8).scaled(
-        8, 8, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+        8,
+        8,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     )
-    samples = bytes(tiny.constBits())[:tiny.sizeInBytes()]
-    values = [samples[row * tiny.bytesPerLine() + column] for row in range(8) for column in range(8)]
+    samples = bytes(tiny.constBits())[: tiny.sizeInBytes()]
+    values = [
+        samples[row * tiny.bytesPerLine() + column]
+        for row in range(8)
+        for column in range(8)
+    ]
     average = sum(values) / len(values)
     bits = "".join("1" if value >= average else "0" for value in values)
     perceptual = f"{int(bits, 2):016x}"
@@ -5549,21 +6291,37 @@ def _pixel_hashes(pixmap: QPixmap) -> tuple[str, str]:
 
 def _distinctive_note_overlap(left: object, right: object) -> bool:
     """Compare selected details in memory; tokens and raw text are never persisted."""
+
     def collect(value: object, key: str = "") -> str:
         if isinstance(value, dict):
             return " ".join(
-                collect(item, str(name)) for name, item in value.items()
+                collect(item, str(name))
+                for name, item in value.items()
                 if str(name).casefold() in {"notes", "description", "body", "comments"}
                 or isinstance(item, (dict, list))
             )
         if isinstance(value, list):
             return " ".join(collect(item, key) for item in value)
-        return str(value) if key.casefold() in {"notes", "description", "body", "comments"} else ""
+        return (
+            str(value)
+            if key.casefold() in {"notes", "description", "body", "comments"}
+            else ""
+        )
 
     def tokens(value: object) -> set[str]:
-        return {word for word in re.findall(r"[a-z]{5,}", collect(value).casefold()) if word not in {
-            "observation", "mushroom", "species", "inaturalist", "location", "photo",
-        }}
+        return {
+            word
+            for word in re.findall(r"[a-z]{5,}", collect(value).casefold())
+            if word
+            not in {
+                "observation",
+                "mushroom",
+                "species",
+                "inaturalist",
+                "location",
+                "photo",
+            }
+        }
 
     return len(tokens(left).intersection(tokens(right))) >= 3
 
@@ -5573,31 +6331,39 @@ def _format_local_detail(value: object) -> str:
         return str(value or "No detail available")
     lines: list[str] = []
     if value.get("action_id"):
-        its_action = str(value.get("action_type") or "").startswith(("inat_its_", "mo_sequence_"))
-        lines.extend([
-            f"Journal action {value.get('action_id')} — {value.get('action_type')}",
-            f"State: {value.get('state')}   Phase: {value.get('last_phase')}",
-            f"MO {value.get('mo_observation_id')} ↔ iNaturalist {value.get('inat_observation_id')}",
-            f"Exact remote row: {value.get('remote_row_uuid') or value.get('remote_row_id') or 'new row'}",
-            f"Destructive: {'yes' if value.get('destructive') else 'no'}",
-            f"Verification: {value.get('verification_state') or 'not completed'}",
-            f"Error code: {value.get('last_error_code') or 'none'}",
-            f"Attempts: {value.get('attempt_count') or 0}",
-        ])
+        its_action = str(value.get("action_type") or "").startswith(
+            ("inat_its_", "mo_sequence_")
+        )
+        lines.extend(
+            [
+                f"Journal action {value.get('action_id')} — {value.get('action_type')}",
+                f"State: {value.get('state')}   Phase: {value.get('last_phase')}",
+                f"MO {value.get('mo_observation_id')} ↔ iNaturalist {value.get('inat_observation_id')}",
+                f"Exact remote row: {value.get('remote_row_uuid') or value.get('remote_row_id') or 'new row'}",
+                f"Destructive: {'yes' if value.get('destructive') else 'no'}",
+                f"Verification: {value.get('verification_state') or 'not completed'}",
+                f"Error code: {value.get('last_error_code') or 'none'}",
+                f"Attempts: {value.get('attempt_count') or 0}",
+            ]
+        )
         if its_action:
-            lines.extend([
-                f"Source: {value.get('source_site')} record {value.get('source_record_id')}, "
-                f"row {value.get('source_sequence_remote_id') or 'unknown'}",
-                f"Evidence: {value.get('evidence_type') or 'unknown'}",
-                f"Sequence fingerprint: {value.get('sequence_fingerprint') or 'none'}",
-                f"Normalized accession: {value.get('normalized_accession') or 'none'}",
-                f"Resulting remote row: {value.get('server_row_uuid') or value.get('server_row_id') or 'not returned'}",
-            ])
+            lines.extend(
+                [
+                    f"Source: {value.get('source_site')} record {value.get('source_record_id')}, "
+                    f"row {value.get('source_sequence_remote_id') or 'unknown'}",
+                    f"Evidence: {value.get('evidence_type') or 'unknown'}",
+                    f"Sequence fingerprint: {value.get('sequence_fingerprint') or 'none'}",
+                    f"Normalized accession: {value.get('normalized_accession') or 'none'}",
+                    f"Resulting remote row: {value.get('server_row_uuid') or value.get('server_row_id') or 'not returned'}",
+                ]
+            )
         else:
-            lines.extend([
-                f"Current target: {value.get('current_target_id') or 'none'}",
-                f"Proposed target: {value.get('desired_target_id') or 'row removed'}",
-            ])
+            lines.extend(
+                [
+                    f"Current target: {value.get('current_target_id') or 'none'}",
+                    f"Proposed target: {value.get('desired_target_id') or 'row removed'}",
+                ]
+            )
         actions = value.get("group_actions") or []
         if len(actions) > 1:
             lines.extend(["", "Action group"])
@@ -5607,12 +6373,14 @@ def _format_local_detail(value: object) -> str:
                 )
         return "\n".join(lines)
     if value.get("issue_type"):
-        lines.extend([
-            str(value.get("title") or "Issue"),
-            f"State: {value.get('state', '')}   Severity: {value.get('severity', '')}",
-            "",
-            str(value.get("detail") or ""),
-        ])
+        lines.extend(
+            [
+                str(value.get("title") or "Issue"),
+                f"State: {value.get('state', '')}   Severity: {value.get('severity', '')}",
+                "",
+                str(value.get("detail") or ""),
+            ]
+        )
         records = value.get("records") or []
         if records:
             lines.extend(["", "Associated records"])
@@ -5625,17 +6393,19 @@ def _format_local_detail(value: object) -> str:
                 )
         return "\n".join(lines)
     if value.get("consolidation_id"):
-        lines.extend([
-            f"Stable consolidation #{value.get('consolidation_id')}",
-            f"State: {value.get('state')}",
-            f"Canonical MO: {value.get('canonical_mo_observation_id') or 'not participating'}",
-            "Canonical iNaturalist: "
-            f"{value.get('canonical_inat_observation_id') or 'not participating'}",
-            "Current finalized canonical baseline: "
-            f"attempt #{value.get('current_finalized_attempt_id') or 'none'}",
-            "Phase 2C: deletion is permanent; only immutable lossless reviews "
-            "may enter the deletion ledger.",
-        ])
+        lines.extend(
+            [
+                f"Stable consolidation #{value.get('consolidation_id')}",
+                f"State: {value.get('state')}",
+                f"Canonical MO: {value.get('canonical_mo_observation_id') or 'not participating'}",
+                "Canonical iNaturalist: "
+                f"{value.get('canonical_inat_observation_id') or 'not participating'}",
+                "Current finalized canonical baseline: "
+                f"attempt #{value.get('current_finalized_attempt_id') or 'none'}",
+                "Phase 2C: deletion is permanent; only immutable lossless reviews "
+                "may enter the deletion ledger.",
+            ]
+        )
         members = value.get("members") or []
         if members:
             lines.extend(["", "Stable members"])
@@ -5643,11 +6413,9 @@ def _format_local_detail(value: object) -> str:
                 provenance = (
                     f"; added by attempt #{member.get('added_by_attempt_id') or '?'}"
                 )
-                if (
-                    member.get("originally_proposed_by_attempt_id")
-                    and member.get("originally_proposed_by_attempt_id")
-                    != member.get("added_by_attempt_id")
-                ):
+                if member.get("originally_proposed_by_attempt_id") and member.get(
+                    "originally_proposed_by_attempt_id"
+                ) != member.get("added_by_attempt_id"):
                     provenance += (
                         f"; originally proposed by attempt "
                         f"#{member.get('originally_proposed_by_attempt_id')}"
@@ -5686,19 +6454,23 @@ def _format_local_detail(value: object) -> str:
                     f"action group #{attempt.get('action_group_id')}"
                     + (
                         "; ORIGINAL CONSOLIDATION ATTEMPT"
-                        if attempt.get("is_original_attempt") else ""
+                        if attempt.get("is_original_attempt")
+                        else ""
                     )
                     + (
                         "; CURRENT FINALIZED BASELINE"
-                        if attempt.get("is_current_finalized_baseline") else ""
+                        if attempt.get("is_current_finalized_baseline")
+                        else ""
                     )
                     + (
                         f"; supersedes #{attempt.get('supersedes_attempt_id')}"
-                        if attempt.get("supersedes_attempt_id") else ""
+                        if attempt.get("supersedes_attempt_id")
+                        else ""
                     )
                 )
                 proposed = [
-                    member for member in (attempt.get("members") or [])
+                    member
+                    for member in (attempt.get("members") or [])
                     if member.get("participation_role") == "new_donor"
                 ]
                 for member in proposed:
@@ -5712,7 +6484,8 @@ def _format_local_detail(value: object) -> str:
                         f"#{member.get('observation_id')} — {disposition}"
                     )
                 canonical_context = [
-                    member for member in (attempt.get("members") or [])
+                    member
+                    for member in (attempt.get("members") or [])
                     if member.get("participation_role") == "canonical_context"
                 ]
                 for member in canonical_context:
@@ -5756,7 +6529,8 @@ def _format_local_detail(value: object) -> str:
                         f"{action.get('action_type')} — {action.get('state')}"
                         + (
                             f" ({action.get('verification_state')})"
-                            if action.get("verification_state") else ""
+                            if action.get("verification_state")
+                            else ""
                         )
                     )
         deletion_attempts = value.get("deletion_attempts") or []
@@ -5783,7 +6557,8 @@ def _format_local_detail(value: object) -> str:
                             f"{parity.get('match_method') or 'none'}"
                             + (
                                 f" — {parity.get('blocking_reason')}"
-                                if parity.get("blocking_reason") else ""
+                                if parity.get("blocking_reason")
+                                else ""
                             )
                         )
                 for action in attempt.get("actions") or []:
@@ -5795,14 +6570,16 @@ def _format_local_detail(value: object) -> str:
                     )
         return "\n".join(lines)
     if value.get("pair_id"):
-        lines.extend([
-            f"MO {value.get('mo_observation_id')}  ↔  iNaturalist {value.get('inat_observation_id')}",
-            f"Review: {value.get('review_state')}   Link: {value.get('link_state')}",
-            f"Score: {value.get('score')} ({value.get('classification')})",
-            f"Confirmed by: {value.get('confirmed_by') or 'not confirmed'}",
-            f"Historical confirmation: {value.get('historical_confirmed_by') or 'none'}",
-            f"Excluded: {'yes' if value.get('excluded') else 'no'}",
-        ])
+        lines.extend(
+            [
+                f"MO {value.get('mo_observation_id')}  ↔  iNaturalist {value.get('inat_observation_id')}",
+                f"Review: {value.get('review_state')}   Link: {value.get('link_state')}",
+                f"Score: {value.get('score')} ({value.get('classification')})",
+                f"Confirmed by: {value.get('confirmed_by') or 'not confirmed'}",
+                f"Historical confirmation: {value.get('historical_confirmed_by') or 'none'}",
+                f"Excluded: {'yes' if value.get('excluded') else 'no'}",
+            ]
+        )
         evidence = value.get("evidence") or []
         if evidence:
             lines.extend(["", "Evidence"])
@@ -5811,18 +6588,20 @@ def _format_local_detail(value: object) -> str:
                     f"• {item.get('family')}: +{item.get('score')} — {item.get('explanation')}"
                 )
         return "\n".join(lines)
-    return "\n".join([
-        f"{value.get('site', '')} {value.get('remote_observation_id', '')}",
-        f"Taxon: {value.get('taxon_name') or 'unknown'}",
-        f"Observed: {value.get('observed_on') or 'unknown'}",
-        f"Owner: {value.get('owner_login') or value.get('owner_id') or 'unknown'}",
-        f"Locality: {value.get('public_locality') or 'not provided'}",
-        f"Fungi status: {value.get('fungi_status') or 'unknown'}",
-        f"Scope: {value.get('scope_state') or 'unknown'}",
-        f"Availability: {value.get('availability_state') or 'unknown'}",
-        f"Deleted: {'yes' if value.get('is_deleted') else 'no'}",
-        f"Unpaired state: {value.get('unpaired_state') or ''}",
-    ])
+    return "\n".join(
+        [
+            f"{value.get('site', '')} {value.get('remote_observation_id', '')}",
+            f"Taxon: {value.get('taxon_name') or 'unknown'}",
+            f"Observed: {value.get('observed_on') or 'unknown'}",
+            f"Owner: {value.get('owner_login') or value.get('owner_id') or 'unknown'}",
+            f"Locality: {value.get('public_locality') or 'not provided'}",
+            f"Fungi status: {value.get('fungi_status') or 'unknown'}",
+            f"Scope: {value.get('scope_state') or 'unknown'}",
+            f"Availability: {value.get('availability_state') or 'unknown'}",
+            f"Deleted: {'yes' if value.get('is_deleted') else 'no'}",
+            f"Unpaired state: {value.get('unpaired_state') or ''}",
+        ]
+    )
 
 
 def _format_remote_comparison(
@@ -5855,7 +6634,11 @@ def _format_remote_comparison(
         if not isinstance(raw, dict):
             sections.append(f"{site.upper()}\nDetail unavailable")
             continue
-        user = raw.get("user") if isinstance(raw.get("user"), dict) else raw.get("owner") or {}
+        user = (
+            raw.get("user")
+            if isinstance(raw.get("user"), dict)
+            else raw.get("owner") or {}
+        )
         if site == "mo":
             # Mushroom Observer serializes ``name`` as an object in high detail
             # and as a bare name id in low detail. Only the object form is a
@@ -5863,42 +6646,48 @@ def _format_remote_comparison(
             taxon = (
                 raw.get("consensus")
                 if isinstance(raw.get("consensus"), dict)
-                else raw.get("name") if isinstance(raw.get("name"), dict)
-                else {}
+                else raw.get("name") if isinstance(raw.get("name"), dict) else {}
             )
             location = raw.get("location")
             locality = (
                 str(location.get("name") or location.get("display_name") or "")
-                if isinstance(location, dict) else ""
+                if isinstance(location, dict)
+                else ""
             )
-            locality = (
-                str(raw.get("location_name") or locality).strip()
-                or str(fallback.get("public_locality") or "")
+            locality = str(raw.get("location_name") or locality).strip() or str(
+                fallback.get("public_locality") or ""
             )
         else:
-            taxon = raw.get("taxon") if isinstance(raw.get("taxon"), dict) else raw.get("name") or {}
-            locality = (
-                str(raw.get("place_guess") or raw.get("location_name") or "").strip()
-                or str(fallback.get("public_locality") or "")
+            taxon = (
+                raw.get("taxon")
+                if isinstance(raw.get("taxon"), dict)
+                else raw.get("name") or {}
             )
+            locality = str(
+                raw.get("place_guess") or raw.get("location_name") or ""
+            ).strip() or str(fallback.get("public_locality") or "")
         # Field order matches each site's own parser, so the detail pane and
         # the list cannot disagree about the same observation's taxon:
         # mo_parsing._observation_identity reads text_name before name, while
         # iNaturalist has no text_name at all.
         name_keys = ("text_name", "name") if site == "mo" else ("name", "text_name")
         taxon_name = (
-            str(next(
-                (taxon.get(key) for key in name_keys if taxon.get(key)), "",
-            )).strip()
-            if isinstance(taxon, dict) else str(taxon or "").strip()
+            str(
+                next(
+                    (taxon.get(key) for key in name_keys if taxon.get(key)),
+                    "",
+                )
+            ).strip()
+            if isinstance(taxon, dict)
+            else str(taxon or "").strip()
         )
         taxon_name = (
-            taxon_name or str(raw.get("species_guess") or "").strip()
+            taxon_name
+            or str(raw.get("species_guess") or "").strip()
             or str(fallback.get("taxon_name") or "")
         )
         taxon_rank = (
-            str(taxon.get("rank") or "").strip()
-            if isinstance(taxon, dict) else ""
+            str(taxon.get("rank") or "").strip() if isinstance(taxon, dict) else ""
         ) or str(fallback.get("taxon_rank") or "")
         # Presence only. The raw point -- including private_geojson, which is
         # populated for obscured observations whenever the read was authorized
@@ -5912,7 +6701,9 @@ def _format_remote_comparison(
             else raw.get("geojson") or raw.get("location")
         )
         if private_point:
-            coordinates = "present (private/obscured; exact point intentionally not shown)"
+            coordinates = (
+                "present (private/obscured; exact point intentionally not shown)"
+            )
         elif public_point:
             coordinates = "present (exact point intentionally not shown)"
         else:
@@ -5925,21 +6716,31 @@ def _format_remote_comparison(
         else:
             photos = raw.get("observation_photos") or raw.get("photos") or []
             photo_count = (
-                len(photos) if isinstance(photos, list)
+                len(photos)
+                if isinstance(photos, list)
                 else 1 if isinstance(photos, dict) else 0
             )
-        notes_present = bool(raw.get("description") or raw.get("notes") or raw.get("comments"))
-        sections.append("\n".join([
-            site.upper(),
-            f"Record: {raw.get('id') or raw.get('observation_id') or 'unknown'}",
-            f"Owner: {user.get('login') or user.get('name') or user.get('id') or 'unknown'}"
-            if isinstance(user, dict) else "Owner: unknown",
-            f"Observed: {raw.get('observed_on') or raw.get('when') or raw.get('date') or 'unknown'}",
-            f"Taxon: {taxon_name or 'unknown'}"
-            + (f" ({taxon_rank})" if taxon_rank else ""),
-            f"Locality: {locality or 'not provided'}",
-            f"Coordinates: {coordinates}",
-            f"Displayed photos available: {photo_count}",
-            f"Notes/comments available for in-memory comparison: {'yes' if notes_present else 'no'}",
-        ]))
+        notes_present = bool(
+            raw.get("description") or raw.get("notes") or raw.get("comments")
+        )
+        sections.append(
+            "\n".join(
+                [
+                    site.upper(),
+                    f"Record: {raw.get('id') or raw.get('observation_id') or 'unknown'}",
+                    (
+                        f"Owner: {user.get('login') or user.get('name') or user.get('id') or 'unknown'}"
+                        if isinstance(user, dict)
+                        else "Owner: unknown"
+                    ),
+                    f"Observed: {raw.get('observed_on') or raw.get('when') or raw.get('date') or 'unknown'}",
+                    f"Taxon: {taxon_name or 'unknown'}"
+                    + (f" ({taxon_rank})" if taxon_rank else ""),
+                    f"Locality: {locality or 'not provided'}",
+                    f"Coordinates: {coordinates}",
+                    f"Displayed photos available: {photo_count}",
+                    f"Notes/comments available for in-memory comparison: {'yes' if notes_present else 'no'}",
+                ]
+            )
+        )
     return "\n\n".join(sections) if sections else "No remote detail available"

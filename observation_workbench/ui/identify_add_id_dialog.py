@@ -1,4 +1,5 @@
 """Focused, journal-first Add ID entry for one captured observation."""
+
 from __future__ import annotations
 
 import logging
@@ -89,9 +90,9 @@ class IdentifyAddIDDialog(QDialog):
         self._submission_taxon: StudyTaxon | None = None
         self._submission_body = ""
         self._submission_disagreement = False
-        self._submit_eligibility_snapshot: tuple[
-            bool, bool, int | None, bool
-        ] | None = None
+        self._submit_eligibility_snapshot: (
+            tuple[bool, bool, int | None, bool] | None
+        ) = None
 
         self._build()
         self._action_manager.observation_uuid_resolved.connect(self._uuid_resolved)
@@ -102,7 +103,9 @@ class IdentifyAddIDDialog(QDialog):
 
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        intro = QLabel(f"Add a normal identification to observation #{self._observation_id}.", self)
+        intro = QLabel(
+            f"Add a normal identification to observation #{self._observation_id}.", self
+        )
         intro.setWordWrap(True)
         outer.addWidget(intro)
 
@@ -114,7 +117,9 @@ class IdentifyAddIDDialog(QDialog):
         form = QFormLayout()
         self._taxon_field = TaxonAutocompleteField(self._client, self)
         self._taxon_field.selection_changed.connect(self._taxon_selection_changed)
-        self._taxon_field.search_status_changed.connect(self._taxon_search_status_changed)
+        self._taxon_field.search_status_changed.connect(
+            self._taxon_search_status_changed
+        )
         self._taxon_field.line_edit.installEventFilter(self)
         form.addRow("Taxon", self._taxon_field)
 
@@ -176,7 +181,10 @@ class IdentifyAddIDDialog(QDialog):
                     self._submit()
                 return True
             return super().eventFilter(watched, event)
-        if watched is self._taxon_field.line_edit and not self._taxon_field.popup_visible:
+        if (
+            watched is self._taxon_field.line_edit
+            and not self._taxon_field.popup_visible
+        ):
             if self._can_submit():
                 self._submit()
                 return True
@@ -230,7 +238,10 @@ class IdentifyAddIDDialog(QDialog):
 
     def _refresh_auth_status(self) -> None:
         snapshot = self._action_manager.current_authentication()
-        if self._same_login(snapshot.login, self._opened_login) and snapshot.authenticated:
+        if (
+            self._same_login(snapshot.login, self._opened_login)
+            and snapshot.authenticated
+        ):
             self._auth_status.setText(f"Authenticated as {snapshot.login}.")
         elif snapshot.authenticated:
             self._auth_status.setText(
@@ -356,7 +367,10 @@ class IdentifyAddIDDialog(QDialog):
     def _uuid_resolved(self, resolution: object) -> None:
         if self._closed or not isinstance(resolution, ObservationUUIDResolution):
             return
-        if self._resolution_request_id is None or self._active_submission_generation is None:
+        if (
+            self._resolution_request_id is None
+            or self._active_submission_generation is None
+        ):
             return
         if (
             resolution.request_id != self._resolution_request_id
@@ -364,7 +378,10 @@ class IdentifyAddIDDialog(QDialog):
             or self._resolution_request_generation != self._active_submission_generation
         ):
             return
-        if self._submission_authentication_generation != self._authentication_generation:
+        if (
+            self._submission_authentication_generation
+            != self._authentication_generation
+        ):
             self._reset_after_submission_attempt()
             self._refresh_auth_status()
             self._set_status(
@@ -455,7 +472,8 @@ class IdentifyAddIDDialog(QDialog):
             not self._closed
             and self._busy
             and self._active_submission_generation is not None
-            and self._resolution_request_generation == self._active_submission_generation
+            and self._resolution_request_generation
+            == self._active_submission_generation
             and self._resolution_request_id == resolution.request_id
             and resolution.observation_id == self._observation_id
             and self._submission_observation_id == self._observation_id
@@ -495,7 +513,9 @@ class IdentifyAddIDDialog(QDialog):
         self._closed = True
         self._taxon_field.shutdown()
         try:
-            self._action_manager.observation_uuid_resolved.disconnect(self._uuid_resolved)
+            self._action_manager.observation_uuid_resolved.disconnect(
+                self._uuid_resolved
+            )
             self._action_manager.authentication_context_changed.disconnect(
                 self._authentication_changed
             )

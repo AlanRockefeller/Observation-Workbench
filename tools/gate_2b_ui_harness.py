@@ -5,6 +5,7 @@ This is not a repository test. It creates no database, makes no network
 request, and journals no action. The deliberately invalid image bytes exercise
 the failed-thumbnail presentation path only.
 """
+
 from __future__ import annotations
 
 import os
@@ -31,7 +32,8 @@ from observation_workbench.reconciliation.types import (  # noqa: E402
     RemoteSite,
 )
 from observation_workbench.ui.reconciliation import (  # noqa: E402
-    ConsolidationPreviewDialog, _format_local_detail,
+    ConsolidationPreviewDialog,
+    _format_local_detail,
 )
 
 
@@ -54,17 +56,19 @@ def _member(site: RemoteSite, observation_id: int, *, photo: bool = False):
         voucher_identifiers=("AR-1",),
         sequence_summaries=("Not inspected in Phase 2B.",),
         photos=(
-            PhotoRecordSnapshot(
-                site=site,
-                photo_id="photo-1",
-                observation_id=observation_id,
-                source_url="https://invalid.example/photo.jpg",
-                license_label="CC BY",
-                copyright_holder="Owned account",
-            ),
-        )
-        if photo
-        else (),
+            (
+                PhotoRecordSnapshot(
+                    site=site,
+                    photo_id="photo-1",
+                    observation_id=observation_id,
+                    source_url="https://invalid.example/photo.jpg",
+                    license_label="CC BY",
+                    copyright_holder="Owned account",
+                ),
+            )
+            if photo
+            else ()
+        ),
         remote_updated_at="2026-07-01T00:00:00+00:00",
         record_fingerprint=f"record-{site.value}-{observation_id}",
         preflight_fingerprint=f"stable-{site.value}-{observation_id}",
@@ -88,20 +92,31 @@ def main() -> int:
         unsupported_items=UNSUPPORTED_ITEM_DISCLOSURES,
         evidence_edges=(
             ConsolidationEvidenceEdge(
-                RemoteSite.MO, 10, RemoteSite.MO, 11,
-                "exact_voucher", "strong", "edge-1",
+                RemoteSite.MO,
+                10,
+                RemoteSite.MO,
+                11,
+                "exact_voucher",
+                "strong",
+                "edge-1",
                 "Exact normalized voucher-to-voucher identity.",
             ),
             ConsolidationEvidenceEdge(
-                RemoteSite.INAT, 20, RemoteSite.MO, 10,
-                "exact_voucher", "strong", "edge-2",
+                RemoteSite.INAT,
+                20,
+                RemoteSite.MO,
+                10,
+                "exact_voucher",
+                "strong",
+                "edge-2",
                 "Exact normalized voucher-to-voucher identity.",
             ),
         ),
     )
 
     dialog = ConsolidationPreviewDialog(
-        preview, lambda _url: b"deliberately-not-an-image",
+        preview,
+        lambda _url: b"deliberately-not-an-image",
     )
     assert dialog._choices
     assert not any(button.isChecked() for button in dialog._choices.values())
@@ -119,9 +134,7 @@ def main() -> int:
         for row in range(dialog.unsupported.rowCount())
     ), "a failed thumbnail made an unsupported transfer selectable"
 
-    visible_text = "\n".join(
-        label.text() for label in dialog.findChildren(QLabel)
-    )
+    visible_text = "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert "DONOR OBSERVATIONS WILL REMAIN ONLINE" in visible_text
     assert "Phase 2C" in visible_text
     assert "owner" in dialog.table.item(0, 2).text()
@@ -170,21 +183,23 @@ def main() -> int:
         is_extension=True,
         previous_members=(
             PriorConsolidationMember(
-                RemoteSite.MO, 9, "donor", "superseded",
-                added_by_attempt_id=1, superseded_by_attempt_id=1,
+                RemoteSite.MO,
+                9,
+                "donor",
+                "superseded",
+                added_by_attempt_id=1,
+                superseded_by_attempt_id=1,
                 superseded_at="2026-07-01T00:00:00+00:00",
             ),
         ),
     )
     extension_dialog = ConsolidationPreviewDialog(
-        extension, lambda _url: b"deliberately-not-an-image",
+        extension,
+        lambda _url: b"deliberately-not-an-image",
     )
     assert extension_dialog._choices[(RemoteSite.MO, 10)].isChecked()
     assert extension_dialog._choices[(RemoteSite.INAT, 20)].isChecked()
-    assert all(
-        not button.isEnabled()
-        for button in extension_dialog._choices.values()
-    )
+    assert all(not button.isEnabled() for button in extension_dialog._choices.values())
     extension_text = "\n".join(
         label.text() for label in extension_dialog.findChildren(QLabel)
     )
@@ -194,42 +209,70 @@ def main() -> int:
     assert "Reviewed donor evidence paths" in extension_text
     extension_dialog.close()
     app.processEvents()
-    history_text = _format_local_detail({
-        "consolidation_id": 7,
-        "state": "finalized",
-        "canonical_mo_observation_id": 10,
-        "canonical_inat_observation_id": 20,
-        "current_finalized_attempt_id": 2,
-        "members": [{
-            "site": "mo", "observation_id": 11, "role": "donor",
-            "local_state": "superseded", "added_by_attempt_id": 1,
-            "superseded_by_attempt_id": 2, "superseded_at": "now",
-            "remote_url": "https://mushroomobserver.org/obs/11",
-        }],
-        "attempts": [{
-            "attempt_id": 2, "state": "succeeded", "action_group_id": 3,
-            "is_current_finalized_baseline": True,
-            "members": [{
-                "site": "mo", "observation_id": 11,
-                "participation_role": "new_donor",
-            }],
-            "evidence": [{
-                "evidence_strength": "strong", "left_site": "mo",
-                "left_observation_id": 10, "right_site": "mo",
-                "right_observation_id": 11,
-                "display_summary": "Exact normalized voucher identity.",
-            }],
-            "actions": [{
-                "ordinal": 1, "action_type": "consolidation_finalize",
-                "state": "succeeded", "verification_state": "verified",
-            }],
-        }],
-    })
+    history_text = _format_local_detail(
+        {
+            "consolidation_id": 7,
+            "state": "finalized",
+            "canonical_mo_observation_id": 10,
+            "canonical_inat_observation_id": 20,
+            "current_finalized_attempt_id": 2,
+            "members": [
+                {
+                    "site": "mo",
+                    "observation_id": 11,
+                    "role": "donor",
+                    "local_state": "superseded",
+                    "added_by_attempt_id": 1,
+                    "superseded_by_attempt_id": 2,
+                    "superseded_at": "now",
+                    "remote_url": "https://mushroomobserver.org/obs/11",
+                }
+            ],
+            "attempts": [
+                {
+                    "attempt_id": 2,
+                    "state": "succeeded",
+                    "action_group_id": 3,
+                    "is_current_finalized_baseline": True,
+                    "members": [
+                        {
+                            "site": "mo",
+                            "observation_id": 11,
+                            "participation_role": "new_donor",
+                        }
+                    ],
+                    "evidence": [
+                        {
+                            "evidence_strength": "strong",
+                            "left_site": "mo",
+                            "left_observation_id": 10,
+                            "right_site": "mo",
+                            "right_observation_id": 11,
+                            "display_summary": "Exact normalized voucher identity.",
+                        }
+                    ],
+                    "actions": [
+                        {
+                            "ordinal": 1,
+                            "action_type": "consolidation_finalize",
+                            "state": "succeeded",
+                            "verification_state": "verified",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
     for expected in (
-        "Stable consolidation #7", "Canonical MO: 10",
-        "superseded by attempt #2", "Immutable attempts", "+ donor MO #11",
-        "evidence [IDENTITY; strong]", "consolidation_finalize",
-        "CURRENT FINALIZED BASELINE", "admitted and superseded",
+        "Stable consolidation #7",
+        "Canonical MO: 10",
+        "superseded by attempt #2",
+        "Immutable attempts",
+        "+ donor MO #11",
+        "evidence [IDENTITY; strong]",
+        "consolidation_finalize",
+        "CURRENT FINALIZED BASELINE",
+        "admitted and superseded",
         "deletion is permanent",
     ):
         assert expected in history_text, (expected, history_text)

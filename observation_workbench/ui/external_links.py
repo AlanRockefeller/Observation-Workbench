@@ -1,4 +1,5 @@
 """Helpers for opening external links without leaking browser startup noise."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager

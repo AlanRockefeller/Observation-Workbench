@@ -10,6 +10,7 @@ this dialog never infers which of the three explicit operations is intended
 rows -- the user must deliberately select one radio button before Submit
 becomes available.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal

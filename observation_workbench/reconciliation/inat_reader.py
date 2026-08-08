@@ -1,4 +1,5 @@
 """Read-only iNaturalist inventory parsing and field-link validation."""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -6,9 +7,17 @@ from typing import Any, Iterable, Optional
 
 from observation_workbench.api.client import INatClient
 
-from .normalization import normalize_accession, parse_mo_observation_url, public_fingerprint, sequence_digest
+from .normalization import (
+    normalize_accession,
+    parse_mo_observation_url,
+    public_fingerprint,
+    sequence_digest,
+)
 from .types import (
-    AuthoritativeLinkRow, InventoryObservation, MediaIdentity, RemoteRecordKey,
+    AuthoritativeLinkRow,
+    InventoryObservation,
+    MediaIdentity,
+    RemoteRecordKey,
     RemoteSite,
 )
 
@@ -23,24 +32,35 @@ class INatReconciliationReader:
 
     def resolve_user(self, login: str) -> Optional[dict[str, Any]]:
         result = self.client.get_user(login.strip())
-        if result and str(result.get("login") or "").casefold() == login.strip().casefold():
+        if (
+            result
+            and str(result.get("login") or "").casefold() == login.strip().casefold()
+        ):
             return result
         return None
 
     def resolve_field_definitions(
-        self, exact_name: str, datatypes: tuple[str, ...] = ("text",),
+        self,
+        exact_name: str,
+        datatypes: tuple[str, ...] = ("text",),
     ) -> list[dict[str, Any]]:
         raw = self.client.get_observation_fields_autocomplete(exact_name)
         allowed = {value.casefold() for value in datatypes}
         return [
-            item for item in raw.get("results") or []
+            item
+            for item in raw.get("results") or []
             if isinstance(item, dict)
             and str(item.get("name") or "") == exact_name
             and str(item.get("datatype") or "").casefold() in allowed
         ]
 
     def inventory_page(
-        self, user_id: int, page: int, *, id_above: Optional[int] = None, updated_since: str = "",
+        self,
+        user_id: int,
+        page: int,
+        *,
+        id_above: Optional[int] = None,
+        updated_since: str = "",
     ) -> dict[str, Any]:
         """Read one inventory page in one of two DELIBERATELY different modes.
 
@@ -63,8 +83,10 @@ class INatReconciliationReader:
         contain non-fungal records that the baseline scan never returned.
         """
         params: dict[str, Any] = {
-            "user_id": int(user_id), "per_page": 200,
-            "order_by": "id" if id_above is not None else "updated_at", "order": "asc",
+            "user_id": int(user_id),
+            "per_page": 200,
+            "order_by": "id" if id_above is not None else "updated_at",
+            "order": "asc",
         }
         if id_above is not None:
             params.update({"id_above": int(id_above), "taxon_id": 47170})
@@ -72,7 +94,9 @@ class INatReconciliationReader:
             params["updated_since"] = updated_since
         return self.client.get_reconciliation_observations(params, page=page)
 
-    def deleted_observations(self, token: str, deleted_since: str = "") -> dict[str, Any]:
+    def deleted_observations(
+        self, token: str, deleted_since: str = ""
+    ) -> dict[str, Any]:
         return self.client.get_reconciliation_deleted(
             token, deleted_since=deleted_since[:10]
         )
@@ -81,7 +105,11 @@ class INatReconciliationReader:
         return self.client.get_reconciliation_detail(observation_id, token)
 
     def parse_inventory(
-        self, raw: dict[str, Any], account_id: int, mo_field_id: Optional[int], its_field_id: Optional[int] = None,
+        self,
+        raw: dict[str, Any],
+        account_id: int,
+        mo_field_id: Optional[int],
+        its_field_id: Optional[int] = None,
     ) -> InventoryObservation:
         observation_id = _positive_int(raw.get("id"))
         if observation_id is None:
@@ -89,7 +117,8 @@ class INatReconciliationReader:
         user = _mapping(raw.get("user"))
         taxon = _mapping(raw.get("taxon"))
         field_rows = [
-            item for item in (raw.get("ofvs") or raw.get("observation_field_values") or [])
+            item
+            for item in (raw.get("ofvs") or raw.get("observation_field_values") or [])
             if isinstance(item, dict)
         ]
         targets: list[int] = []
@@ -101,7 +130,9 @@ class INatReconciliationReader:
         for row in field_rows:
             field = _mapping(row.get("observation_field"))
             field_id = _positive_int(
-                row.get("field_id") or row.get("observation_field_id") or field.get("id")
+                row.get("field_id")
+                or row.get("observation_field_id")
+                or field.get("id")
             )
             if mo_field_id and field_id == mo_field_id:
                 matching_rows += 1
@@ -109,16 +140,28 @@ class INatReconciliationReader:
                 row_id = str(row.get("id") or f"ofv:{observation_id}:{matching_rows}")
                 if target is None:
                     malformed = True
-                    link_rows.append(AuthoritativeLinkRow(
-                        row_id, None, RemoteSite.MO, None, "malformed",
-                        public_fingerprint(row_id, "malformed"),
-                    ))
+                    link_rows.append(
+                        AuthoritativeLinkRow(
+                            row_id,
+                            None,
+                            RemoteSite.MO,
+                            None,
+                            "malformed",
+                            public_fingerprint(row_id, "malformed"),
+                        )
+                    )
                 else:
                     targets.append(target)
-                    link_rows.append(AuthoritativeLinkRow(
-                        row_id, None, RemoteSite.MO, target, "valid",
-                        public_fingerprint(row_id, target, "valid"),
-                    ))
+                    link_rows.append(
+                        AuthoritativeLinkRow(
+                            row_id,
+                            None,
+                            RemoteSite.MO,
+                            target,
+                            "valid",
+                            public_fingerprint(row_id, target, "valid"),
+                        )
+                    )
             if its_field_id and field_id == its_field_id:
                 accession = normalize_accession(row.get("value"))
                 if accession:
@@ -132,14 +175,22 @@ class INatReconciliationReader:
             parse_state = "conflicting" if len(unique_targets) > 1 else "duplicate"
             link_rows = [
                 AuthoritativeLinkRow(
-                    item.row_id, item.external_site_id, item.target_site,
+                    item.row_id,
+                    item.external_site_id,
+                    item.target_site,
                     item.target_observation_id,
                     parse_state if item.parse_state == "valid" else item.parse_state,
                     public_fingerprint(
-                        item.row_id, item.target_observation_id,
-                        parse_state if item.parse_state == "valid" else item.parse_state,
+                        item.row_id,
+                        item.target_observation_id,
+                        (
+                            parse_state
+                            if item.parse_state == "valid"
+                            else item.parse_state
+                        ),
                     ),
-                ) for item in link_rows
+                )
+                for item in link_rows
             ]
         fungi = inat_fungi_status(taxon)
         observed = _parse_date(raw.get("observed_on"))
@@ -152,26 +203,45 @@ class INatReconciliationReader:
             photo = _mapping(photo_row.get("photo")) or photo_row
             photo_id = photo.get("id")
             if photo_id is not None:
-                media.append(MediaIdentity(
-                    RemoteSite.INAT, str(photo_id), "display",
-                    RemoteSite.INAT, str(photo_id),
-                ))
+                media.append(
+                    MediaIdentity(
+                        RemoteSite.INAT,
+                        str(photo_id),
+                        "display",
+                        RemoteSite.INAT,
+                        str(photo_id),
+                    )
+                )
         fingerprint = public_fingerprint(
-            observation_id, raw.get("updated_at"), observed, taxon.get("id"), taxon.get("name"),
-            locality, fungi, unique_targets, malformed,
+            observation_id,
+            raw.get("updated_at"),
+            observed,
+            taxon.get("id"),
+            taxon.get("name"),
+            locality,
+            fungi,
+            unique_targets,
+            malformed,
         )
         return InventoryObservation(
-            key=RemoteRecordKey(RemoteSite.INAT, observation_id), account_id=account_id,
-            owner_id=_positive_int(user.get("id")), owner_login=str(user.get("login") or ""),
-            observed_on=observed, taxon_id=_positive_int(taxon.get("id")),
+            key=RemoteRecordKey(RemoteSite.INAT, observation_id),
+            account_id=account_id,
+            owner_id=_positive_int(user.get("id")),
+            owner_login=str(user.get("login") or ""),
+            observed_on=observed,
+            taxon_id=_positive_int(taxon.get("id")),
             taxon_name=str(taxon.get("name") or raw.get("species_guess") or ""),
-            taxon_rank=str(taxon.get("rank") or ""), public_locality=locality,
-            fungi_status=fungi, updated_at=updated,
+            taxon_rank=str(taxon.get("rank") or ""),
+            public_locality=locality,
+            fungi_status=fungi,
+            updated_at=updated,
             scope_state="in_scope" if fungi == "fungi" else "out_of_scope",
             content_fingerprint=fingerprint,
-            authoritative_targets=unique_targets, link_malformed=malformed,
+            authoritative_targets=unique_targets,
+            link_malformed=malformed,
             authoritative_links=tuple(link_rows),
-            identifiers=tuple(identifiers), inventory_identifiers=tuple(identifiers),
+            identifiers=tuple(identifiers),
+            inventory_identifiers=tuple(identifiers),
             sequence_hashes=tuple(sorted(set(sequence_hashes))),
             inventory_sequence_hashes=tuple(sorted(set(sequence_hashes))),
             media=tuple(media),
@@ -205,7 +275,11 @@ def inat_fungi_status(taxon: dict[str, Any]) -> str:
     iconic = str(taxon.get("iconic_taxon_name") or "").casefold()
     if iconic == "fungi":
         return "fungi"
-    ancestry = {int(item) for item in str(taxon.get("ancestry") or "").split("/") if item.isdigit()}
+    ancestry = {
+        int(item)
+        for item in str(taxon.get("ancestry") or "").split("/")
+        if item.isdigit()
+    }
     if _positive_int(taxon.get("id")) == 47170 or 47170 in ancestry:
         return "fungi"
     return "nonfungal" if iconic or ancestry else "unknown"
@@ -228,6 +302,8 @@ def _parse_date(value: object) -> Optional[date]:
 
 def _parse_datetime(value: object) -> Optional[datetime]:
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        return (
+            datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+        )
     except ValueError:
         return None

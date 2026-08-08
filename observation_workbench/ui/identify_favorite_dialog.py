@@ -5,6 +5,7 @@ Favorite always presents an explicit Add/Remove choice.  Unlike Reviewed
 direction is intended: the user must deliberately select one radio button
 before Submit becomes available, and neither choice is preselected.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
@@ -73,7 +74,9 @@ class IdentifyFavoriteDialog(IdentifyJournalDialog):
         outer.addWidget(self._auth_status)
 
         self._add_radio = QRadioButton("Add this observation to favorites", self)
-        self._remove_radio = QRadioButton("Remove this observation from favorites", self)
+        self._remove_radio = QRadioButton(
+            "Remove this observation from favorites", self
+        )
         self._add_radio.installEventFilter(self)
         self._remove_radio.installEventFilter(self)
         self._add_radio.toggled.connect(self._selection_changed)

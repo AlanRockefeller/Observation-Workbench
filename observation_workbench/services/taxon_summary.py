@@ -12,6 +12,7 @@ How to extend for compare mode:
   - Compute agreement/disagreement rates by taxon
   - The TaxonSummary model can be extended with per-taxon statistics
 """
+
 from __future__ import annotations
 
 import json

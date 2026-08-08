@@ -12,6 +12,7 @@ row into each new consolidation table and asserts:
   * sync_consolidation_members' global (profile,site,observation) UNIQUE
     rejects a second membership row for the same observation
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from observation_workbench.reconciliation import db as db_module  # noqa: E402
-from observation_workbench.reconciliation.db import ReconciliationDB, _utc_now  # noqa: E402
+from observation_workbench.reconciliation.db import (
+    ReconciliationDB,
+    _utc_now,
+)  # noqa: E402
 
 DB_PATH = Path("/tmp/gate2b_schema_migration_harness.db")
 V12_PATH = Path("/tmp/gate2b_populated_v12_harness.db")
@@ -99,7 +103,8 @@ def _validate_populated_v8_snapshot_upgrade() -> None:
         (now, now, now),
     )
     for snapshot_id, site, observation_id, row_id in (
-        (1, "inat", 200, "ofv-1"), (2, "mo", 100, "mo-link-1"),
+        (1, "inat", 200, "ofv-1"),
+        (2, "mo", 100, "mo-link-1"),
     ):
         conn.execute(
             "INSERT INTO sync_action_snapshot_rows(snapshot_row_id,profile_id,"
@@ -107,8 +112,13 @@ def _validate_populated_v8_snapshot_upgrade() -> None:
             "binding_id,normalized_target_id,parse_state,row_fingerprint) "
             "VALUES(?,1,1,?,?,?,?,7,?,'valid',?)",
             (
-                snapshot_id, site, observation_id, row_id, f"{row_id}-uuid",
-                200 if site == "mo" else 100, f"{row_id}-fp",
+                snapshot_id,
+                site,
+                observation_id,
+                row_id,
+                f"{row_id}-uuid",
+                200 if site == "mo" else 100,
+                f"{row_id}-fp",
             ),
         )
     conn.close()
@@ -119,9 +129,9 @@ def _validate_populated_v8_snapshot_upgrade() -> None:
     rows = upgraded.execute(
         "SELECT * FROM sync_action_snapshot_rows ORDER BY snapshot_row_id"
     ).fetchall()
-    assert len(rows) == 2, (
-        f"v9 destroyed reviewed link snapshots: {len(rows)} of 2 survived"
-    )
+    assert (
+        len(rows) == 2
+    ), f"v9 destroyed reviewed link snapshots: {len(rows)} of 2 survived"
     assert [str(r["row_fingerprint"]) for r in rows] == ["ofv-1-fp", "mo-link-1-fp"]
     assert [int(r["action_group_id"]) for r in rows] == [1, 1]
     # The FK must point at the live parent, not a temporary rebuild name: a
@@ -132,9 +142,10 @@ def _validate_populated_v8_snapshot_upgrade() -> None:
         "normalized_target_id,parse_state,row_fingerprint) "
         "VALUES(1,1,'inat',200,'ofv-2','ofv-2-uuid',7,100,'valid','ofv-2-fp')"
     )
-    assert upgraded.execute(
-        "SELECT COUNT(*) FROM sync_action_snapshot_rows"
-    ).fetchone()[0] == 3
+    assert (
+        upgraded.execute("SELECT COUNT(*) FROM sync_action_snapshot_rows").fetchone()[0]
+        == 3
+    )
     fk = upgraded.execute("PRAGMA foreign_key_check").fetchall()
     assert not fk, f"post-upgrade foreign_key_check failed: {fk}"
     db.close_thread_connection()
@@ -287,8 +298,14 @@ def _validate_populated_v12_upgrade() -> None:
             "confirmed_at,created_at,updated_at) "
             "VALUES(?,1,'creation',?,?,?,?,?,?,?)",
             (
-                group_id, f"pair-fp-{identity}", canonical_id,
-                canonical_inat_id, now, now, now, now,
+                group_id,
+                f"pair-fp-{identity}",
+                canonical_id,
+                canonical_inat_id,
+                now,
+                now,
+                now,
+                now,
             ),
         )
         conn.execute(
@@ -296,21 +313,43 @@ def _validate_populated_v12_upgrade() -> None:
             "canonical_mo_observation_id,canonical_inat_observation_id,state,"
             "created_at,updated_at) VALUES(?,1,?,?,?,?,?)",
             (
-                identity, canonical_id, canonical_inat_id,
-                consolidation_state, now, now,
+                identity,
+                canonical_id,
+                canonical_inat_id,
+                consolidation_state,
+                now,
+                now,
             ),
         )
         member_specs = [
-            (identity * 10, canonical_id, "canonical",
-             "canonical" if consolidation_state == "finalized" else "active", "mo"),
-            (identity * 10 + 1, donor_id, "donor",
-             "superseded" if consolidation_state == "finalized" else "active", "mo"),
+            (
+                identity * 10,
+                canonical_id,
+                "canonical",
+                "canonical" if consolidation_state == "finalized" else "active",
+                "mo",
+            ),
+            (
+                identity * 10 + 1,
+                donor_id,
+                "donor",
+                "superseded" if consolidation_state == "finalized" else "active",
+                "mo",
+            ),
         ]
         if canonical_inat_id is not None and donor_inat_id is not None:
-            member_specs.extend((
-                (identity * 10 + 2, canonical_inat_id, "canonical", "canonical", "inat"),
-                (identity * 10 + 3, donor_inat_id, "donor", "superseded", "inat"),
-            ))
+            member_specs.extend(
+                (
+                    (
+                        identity * 10 + 2,
+                        canonical_inat_id,
+                        "canonical",
+                        "canonical",
+                        "inat",
+                    ),
+                    (identity * 10 + 3, donor_inat_id, "donor", "superseded", "inat"),
+                )
+            )
         for member_id, observation_id, role, local_state, site in member_specs:
             conn.execute(
                 "INSERT INTO sync_consolidation_members("
@@ -319,28 +358,45 @@ def _validate_populated_v12_upgrade() -> None:
                 "preflight_record_fingerprint,local_state,created_at,updated_at"
                 ") VALUES(?,?,1,?,?,?,?,?,?,?,?)",
                 (
-                    member_id, identity, site, observation_id, role,
-                    f"member-fp-{observation_id}", f"preflight-{observation_id}",
-                    local_state, now, now,
+                    member_id,
+                    identity,
+                    site,
+                    observation_id,
+                    role,
+                    f"member-fp-{observation_id}",
+                    f"preflight-{observation_id}",
+                    local_state,
+                    now,
+                    now,
                 ),
             )
         donor_specs = [("mo", donor_id)]
         if donor_inat_id is not None:
             donor_specs.append(("inat", donor_inat_id))
-        donors = json.dumps([
-            {
-                "site": site, "observation_id": observation_id,
-                "fingerprint": f"member-fp-{observation_id}",
-            }
-            for site, observation_id in donor_specs
-        ], sort_keys=True, separators=(",", ":"))
-        donor_preflight = json.dumps([
-            {
-                "site": site, "observation_id": observation_id,
-                "fingerprint": f"preflight-{observation_id}",
-            }
-            for site, observation_id in donor_specs
-        ], sort_keys=True, separators=(",", ":"))
+        donors = json.dumps(
+            [
+                {
+                    "site": site,
+                    "observation_id": observation_id,
+                    "fingerprint": f"member-fp-{observation_id}",
+                }
+                for site, observation_id in donor_specs
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        donor_preflight = json.dumps(
+            [
+                {
+                    "site": site,
+                    "observation_id": observation_id,
+                    "fingerprint": f"preflight-{observation_id}",
+                }
+                for site, observation_id in donor_specs
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         conn.execute(
             "INSERT INTO sync_consolidation_attempts("
             "attempt_id,consolidation_id,profile_id,action_group_id,"
@@ -351,20 +407,30 @@ def _validate_populated_v12_upgrade() -> None:
             "destination_mo_account,destination_inat_account,state,"
             "created_at,updated_at) VALUES(?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                identity, identity, group_id, f"marker-{identity}",
+                identity,
+                identity,
+                group_id,
+                f"marker-{identity}",
                 f"member-fp-{canonical_id}",
                 (
                     f"member-fp-{canonical_inat_id}"
-                    if canonical_inat_id is not None else ""
+                    if canonical_inat_id is not None
+                    else ""
                 ),
                 f"preflight-{canonical_id}",
                 (
                     f"preflight-{canonical_inat_id}"
-                    if canonical_inat_id is not None else ""
+                    if canonical_inat_id is not None
+                    else ""
                 ),
-                donors, donor_preflight, f"pair-fp-{identity}",
-                "2:mouser", "1:inatuser", attempt_state,
-                now, now,
+                donors,
+                donor_preflight,
+                f"pair-fp-{identity}",
+                "2:mouser",
+                "1:inatuser",
+                attempt_state,
+                now,
+                now,
             ),
         )
     conn.execute(
@@ -410,9 +476,12 @@ def _validate_populated_v12_upgrade() -> None:
     before = {
         table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for table in (
-            "sync_consolidations", "sync_consolidation_members",
-            "sync_consolidation_attempts", "sync_actions",
-            "sync_creation_attempts", "sync_photo_transfers",
+            "sync_consolidations",
+            "sync_consolidation_members",
+            "sync_consolidation_attempts",
+            "sync_actions",
+            "sync_creation_attempts",
+            "sync_photo_transfers",
             "sync_action_snapshot_rows",
         )
     }
@@ -427,17 +496,28 @@ def _validate_populated_v12_upgrade() -> None:
     assert after["sync_consolidations"] == before["sync_consolidations"]
     assert after["sync_consolidation_attempts"] == before["sync_consolidation_attempts"]
     assert after["sync_actions"] == before["sync_actions"]
-    assert after["sync_consolidation_members"] == before["sync_consolidation_members"] - 4
+    assert (
+        after["sync_consolidation_members"] == before["sync_consolidation_members"] - 4
+    )
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 17
-    assert upgraded.execute(
-        "SELECT state FROM sync_actions WHERE deduplication_key='v11-unknown-link'"
-    ).fetchone()["state"] == "outcome_unknown"
-    assert upgraded.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_attempt_members"
-    ).fetchone()[0] == 12
-    assert upgraded.execute(
-        "SELECT COUNT(*) FROM sync_unresolved_consolidation_proposals"
-    ).fetchone()[0] == 2
+    assert (
+        upgraded.execute(
+            "SELECT state FROM sync_actions WHERE deduplication_key='v11-unknown-link'"
+        ).fetchone()["state"]
+        == "outcome_unknown"
+    )
+    assert (
+        upgraded.execute(
+            "SELECT COUNT(*) FROM sync_consolidation_attempt_members"
+        ).fetchone()[0]
+        == 12
+    )
+    assert (
+        upgraded.execute(
+            "SELECT COUNT(*) FROM sync_unresolved_consolidation_proposals"
+        ).fetchone()[0]
+        == 2
+    )
     finalized_donors = upgraded.execute(
         "SELECT added_by_attempt_id,superseded_by_attempt_id,superseded_at "
         "FROM sync_consolidation_members WHERE consolidation_id=1 AND role='donor'"
@@ -446,21 +526,30 @@ def _validate_populated_v12_upgrade() -> None:
     assert all(row["added_by_attempt_id"] == 1 for row in finalized_donors)
     assert all(row["superseded_by_attempt_id"] == 1 for row in finalized_donors)
     assert all(row["superseded_at"] for row in finalized_donors)
-    assert upgraded.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_members "
-        "WHERE role='donor' AND admitted_from_attempt_member_id IS NOT NULL "
-        "AND added_by_attempt_id=superseded_by_attempt_id"
-    ).fetchone()[0] == 2
-    assert upgraded.execute(
-        "SELECT current_finalized_attempt_id FROM sync_consolidations "
-        "WHERE consolidation_id=1"
-    ).fetchone()[0] == 1
+    assert (
+        upgraded.execute(
+            "SELECT COUNT(*) FROM sync_consolidation_members "
+            "WHERE role='donor' AND admitted_from_attempt_member_id IS NOT NULL "
+            "AND added_by_attempt_id=superseded_by_attempt_id"
+        ).fetchone()[0]
+        == 2
+    )
+    assert (
+        upgraded.execute(
+            "SELECT current_finalized_attempt_id FROM sync_consolidations "
+            "WHERE consolidation_id=1"
+        ).fetchone()[0]
+        == 1
+    )
     assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert not upgraded.execute("PRAGMA foreign_key_check").fetchall()
-    assert upgraded.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_members "
-        "WHERE consolidation_id IN (4,5) AND role='donor'"
-    ).fetchone()[0] == 0
+    assert (
+        upgraded.execute(
+            "SELECT COUNT(*) FROM sync_consolidation_members "
+            "WHERE consolidation_id IN (4,5) AND role='donor'"
+        ).fetchone()[0]
+        == 0
+    )
     db.close_thread_connection()
     print(
         "populated finalized/pending/outcome-unknown/failed/cancelled "
@@ -548,8 +637,13 @@ def _validate_malformed_v14_baselines_rejected() -> None:
                 "mo_user_id,mo_login,created_at,last_used_at) "
                 "VALUES(?,?,?,?,?,?,?)",
                 (
-                    profile_id, profile_id * 100 + 1, f"inat{profile_id}",
-                    profile_id * 100 + 2, f"mo{profile_id}", now, now,
+                    profile_id,
+                    profile_id * 100 + 1,
+                    f"inat{profile_id}",
+                    profile_id * 100 + 2,
+                    f"mo{profile_id}",
+                    now,
+                    now,
                 ),
             )
             group_id = conn.execute(
@@ -557,8 +651,13 @@ def _validate_malformed_v14_baselines_rejected() -> None:
                 "source_fingerprint,mo_observation_id,previewed_at,confirmed_at,"
                 "created_at,updated_at) VALUES(?,'creation',?,?,?, ?,?,?)",
                 (
-                    profile_id, f"source-{profile_id}", profile_id * 1000,
-                    now, now, now, now,
+                    profile_id,
+                    f"source-{profile_id}",
+                    profile_id * 1000,
+                    now,
+                    now,
+                    now,
+                    now,
                 ),
             ).lastrowid
             consolidation_id = conn.execute(
@@ -572,8 +671,12 @@ def _validate_malformed_v14_baselines_rejected() -> None:
                 "profile_id,action_group_id,correlation_marker,state,"
                 "created_at,updated_at) VALUES(?,?,?,?,'succeeded',?,?)",
                 (
-                    consolidation_id, profile_id, group_id,
-                    f"attempt-{profile_id}", now, now,
+                    consolidation_id,
+                    profile_id,
+                    group_id,
+                    f"attempt-{profile_id}",
+                    now,
+                    now,
                 ),
             ).lastrowid
             conn.execute(
@@ -586,8 +689,13 @@ def _validate_malformed_v14_baselines_rejected() -> None:
                 "VALUES(?,?,1,'consolidation_finalize','mo','succeeded',?,?,"
                 "'','','','','',0,?,?,?)",
                 (
-                    profile_id, group_id, profile_id * 1000,
-                    f"finalize-{profile_id}", now, now, now,
+                    profile_id,
+                    group_id,
+                    profile_id * 1000,
+                    f"finalize-{profile_id}",
+                    now,
+                    now,
+                    now,
                 ),
             )
             if profile_id == 1:
@@ -643,24 +751,40 @@ def main() -> None:
     conn = db.connection()
     now = _utc_now()
 
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 17, "migration did not reach v17"
-    assert conn.execute(
-        "SELECT state FROM sync_actions WHERE action_id=1"
-    ).fetchone()["state"] == "outcome_unknown"
-    assert conn.execute(
-        "SELECT state FROM sync_photo_transfers WHERE transfer_id=1"
-    ).fetchone()["state"] == "outcome_unknown"
-    assert conn.execute(
-        "SELECT state FROM sync_creation_attempts WHERE attempt_id=1"
-    ).fetchone()["state"] == "outcome_unknown"
-    assert conn.execute(
-        "SELECT reviewed_byte_fingerprint FROM sync_creation_items "
-        "WHERE creation_item_id=1"
-    ).fetchone()["reviewed_byte_fingerprint"] == "creation-bytes-fp"
+    assert (
+        conn.execute("PRAGMA user_version").fetchone()[0] == 17
+    ), "migration did not reach v17"
+    assert (
+        conn.execute("SELECT state FROM sync_actions WHERE action_id=1").fetchone()[
+            "state"
+        ]
+        == "outcome_unknown"
+    )
+    assert (
+        conn.execute(
+            "SELECT state FROM sync_photo_transfers WHERE transfer_id=1"
+        ).fetchone()["state"]
+        == "outcome_unknown"
+    )
+    assert (
+        conn.execute(
+            "SELECT state FROM sync_creation_attempts WHERE attempt_id=1"
+        ).fetchone()["state"]
+        == "outcome_unknown"
+    )
+    assert (
+        conn.execute(
+            "SELECT reviewed_byte_fingerprint FROM sync_creation_items "
+            "WHERE creation_item_id=1"
+        ).fetchone()["reviewed_byte_fingerprint"]
+        == "creation-bytes-fp"
+    )
     print("seeded Gate 1B–2A journals and unknown outcomes survived v10→v17")
 
     with db.transaction() as tx:
-        profile_id = tx.execute("SELECT profile_id FROM sync_profiles").fetchone()["profile_id"]
+        profile_id = tx.execute("SELECT profile_id FROM sync_profiles").fetchone()[
+            "profile_id"
+        ]
 
         pair_id = tx.execute("SELECT pair_id FROM sync_pairs").fetchone()["pair_id"]
 
@@ -754,8 +878,14 @@ def main() -> None:
             "evidence_strength,reviewed_evidence_fingerprint,display_summary,created_at"
             ") VALUES(?,?,?,?,?,?,?,?)",
             (
-                attempt_id, left_id, right_id, "exact_voucher",
-                "strong", "edge-fingerprint", "Exact normalized voucher identity.", now,
+                attempt_id,
+                left_id,
+                right_id,
+                "exact_voucher",
+                "strong",
+                "edge-fingerprint",
+                "Exact normalized voucher identity.",
+                now,
             ),
         )
 
@@ -776,9 +906,10 @@ def main() -> None:
         "SELECT sql FROM sqlite_master WHERE name='sync_action_snapshot_rows'"
     ).fetchone()["sql"]
     assert "sync_action_groups_v8" not in snapshot_sql
-    assert conn.execute(
-        "SELECT COUNT(*) FROM sync_consolidation_evidence"
-    ).fetchone()[0] == 1
+    assert (
+        conn.execute("SELECT COUNT(*) FROM sync_consolidation_evidence").fetchone()[0]
+        == 1
+    )
     print("integrity_check: ok, foreign_key_check: clean")
 
     # Partial unique index: a second draft/confirmed consolidation claiming
@@ -791,7 +922,9 @@ def main() -> None:
                 "VALUES (?,100,999,'draft',?,?)",
                 (profile_id, now, now),
             )
-        raise AssertionError("expected IntegrityError for duplicate canonical_mo_observation_id")
+        raise AssertionError(
+            "expected IntegrityError for duplicate canonical_mo_observation_id"
+        )
     except sqlite3.IntegrityError as exc:
         print(f"uq_consolidation_canonical_mo correctly rejected duplicate: {exc}")
 
@@ -816,7 +949,9 @@ def main() -> None:
             )
         raise AssertionError("expected IntegrityError for duplicate member observation")
     except sqlite3.IntegrityError as exc:
-        print(f"sync_consolidation_members UNIQUE(profile,site,observation) correctly rejected duplicate: {exc}")
+        print(
+            f"sync_consolidation_members UNIQUE(profile,site,observation) correctly rejected duplicate: {exc}"
+        )
 
     ic2 = conn.execute("PRAGMA integrity_check").fetchall()
     assert [r[0] for r in ic2] == ["ok"], f"post-rollback integrity_check failed: {ic2}"

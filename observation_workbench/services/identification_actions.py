@@ -1,4 +1,5 @@
 """Shared safety logic for iNaturalist identification write actions."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,9 +50,7 @@ def observations_from_detail_response(raw: dict) -> list[StudyObservation]:
         return []
     raw_list = raw.get("results") if isinstance(raw.get("results"), list) else [raw]
     return [
-        obs
-        for raw_obs in raw_list
-        if (obs := parse_observation(raw_obs)) is not None
+        obs for raw_obs in raw_list if (obs := parse_observation(raw_obs)) is not None
     ]
 
 
@@ -173,10 +172,9 @@ def _agreement_should_suppress_mentions(
 
     target_taxon_id = int(taxon_id)
     current_target_idents = [
-        ident for ident in obs.all_identifications
-        if ident.current
-        and ident.taxon
-        and ident.taxon.taxon_id == target_taxon_id
+        ident
+        for ident in obs.all_identifications
+        if ident.current and ident.taxon and ident.taxon.taxon_id == target_taxon_id
     ]
     if not current_target_idents:
         return False
@@ -187,15 +185,15 @@ def _agreement_should_suppress_mentions(
 
     login_key = login.casefold()
     non_self_target_count = sum(
-        1
-        for ident in current_target_idents
-        if ident.user_login.casefold() != login_key
+        1 for ident in current_target_idents if ident.user_login.casefold() != login_key
     )
     return non_self_target_count >= 1
 
 
 def _users_not_to_tag_path() -> Path:
-    root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+    root = Path(
+        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+    )
     return root / "users_not_to_tag.txt"
 
 
@@ -214,10 +212,7 @@ def load_users_not_to_tag() -> set[str]:
         _users_not_to_tag_cache_mtime = None
         return _users_not_to_tag_cache
 
-    if (
-        _users_not_to_tag_cache is not None
-        and _users_not_to_tag_cache_mtime == mtime
-    ):
+    if _users_not_to_tag_cache is not None and _users_not_to_tag_cache_mtime == mtime:
         return _users_not_to_tag_cache
 
     try:
@@ -264,10 +259,12 @@ def needs_human_review(
     prov_date = _parse_iso_datetime(target.source_created_at or "")
 
     current_non_self = [
-        ident for ident in obs.all_identifications
+        ident
+        for ident in obs.all_identifications
         if ident.current
         and ident.user_login.casefold() != login_key
-        and ident.taxon and ident.taxon.taxon_id
+        and ident.taxon
+        and ident.taxon.taxon_id
     ]
     current_non_self.sort(key=lambda i: (i.created_at or "", i.ident_id), reverse=True)
     recent_not_provisional = bool(
@@ -299,7 +296,9 @@ def _parse_iso_datetime(value: str) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def make_target_from_ident(obs: StudyObservation, ident: StudyIdentification) -> AgreeTarget:
+def make_target_from_ident(
+    obs: StudyObservation, ident: StudyIdentification
+) -> AgreeTarget:
     return AgreeTarget(
         observation_id=obs.obs_id,
         taxon_id=ident.taxon.taxon_id,
@@ -318,7 +317,9 @@ def agree_with_most_recent(
 ) -> AgreeResult:
     obs = refresh_observation(client, api_token, observation_id)
     if obs is None:
-        return AgreeResult("skipped", "Could not refresh observation before identifying.")
+        return AgreeResult(
+            "skipped", "Could not refresh observation before identifying."
+        )
     ident = most_recent_non_self_current_identification(obs, login)
     if ident is None:
         return AgreeResult(
@@ -338,7 +339,9 @@ def agree_with_consensus(
 ) -> AgreeResult:
     obs = refresh_observation(client, api_token, observation_id)
     if obs is None:
-        return AgreeResult("skipped", "Could not refresh observation before identifying.")
+        return AgreeResult(
+            "skipped", "Could not refresh observation before identifying."
+        )
     if not obs.community_taxon or not obs.community_taxon.taxon_id:
         return AgreeResult(
             "skipped",
@@ -377,7 +380,10 @@ def post_agreement(
         body=body,
     )
     try:
-        updated = refresh_observation(client, api_token, target.observation_id) or refreshed_obs
+        updated = (
+            refresh_observation(client, api_token, target.observation_id)
+            or refreshed_obs
+        )
         message = f"Added identification: {target.taxon_name}"
     except Exception as exc:
         updated = refreshed_obs

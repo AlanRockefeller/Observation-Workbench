@@ -5,6 +5,7 @@ the local canonical/superseded decision are implemented; every optional data
 transfer remains disabled and durably disclosed. Donors are never edited,
 hidden, withdrawn, or deleted.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -29,15 +30,26 @@ from .mo_client import MOClient, ReconciliationCancelled, results_from_payload
 from .mo_parsing import parse_mo_external_link, parse_mo_observation, positive_int
 from .normalization import parse_mo_observation_url, public_fingerprint
 from .photos import (
-    _inat_photo_snapshots, _inat_photos_fingerprint,
-    _mo_photo_snapshots, _mo_photos_fingerprint,
+    _inat_photo_snapshots,
+    _inat_photos_fingerprint,
+    _mo_photo_snapshots,
+    _mo_photos_fingerprint,
 )
 from .types import (
-    AuthoritativeLinkSnapshot, LinkActionType,
-    ConsolidationConflict, ConsolidationEligibility, ConsolidationItemDisclosure,
-    ConsolidationEvidenceEdge, ConsolidationEvidencePath,
-    ConsolidationMemberSnapshot, ConsolidationPreview, HydratedObservation,
-    InventoryObservation, PriorConsolidationMember, ReconciliationProfile, RemoteSite,
+    AuthoritativeLinkSnapshot,
+    LinkActionType,
+    ConsolidationConflict,
+    ConsolidationEligibility,
+    ConsolidationItemDisclosure,
+    ConsolidationEvidenceEdge,
+    ConsolidationEvidencePath,
+    ConsolidationMemberSnapshot,
+    ConsolidationPreview,
+    HydratedObservation,
+    InventoryObservation,
+    PriorConsolidationMember,
+    ReconciliationProfile,
+    RemoteSite,
 )
 
 
@@ -109,9 +121,13 @@ UNSUPPORTED_ITEM_DISCLOSURES: tuple[ConsolidationItemDisclosure, ...] = (
 
 
 def _hydrate_candidate(
-    site: RemoteSite, observation_id: int, raw: dict[str, Any],
-    profile: ReconciliationProfile, reader: INatReconciliationReader,
-    *, inat_mo_field_id: Optional[int] = None,
+    site: RemoteSite,
+    observation_id: int,
+    raw: dict[str, Any],
+    profile: ReconciliationProfile,
+    reader: INatReconciliationReader,
+    *,
+    inat_mo_field_id: Optional[int] = None,
 ) -> tuple[InventoryObservation, HydratedObservation]:
     # Imported lazily to avoid the module import cycle documented in
     # specimen_state.py (coordinator imports the write services, which import
@@ -127,7 +143,10 @@ def _hydrate_candidate(
             )
         its_binding = None
         inventory = reader.parse_inventory(
-            raw, profile.inat_user_id, inat_mo_field_id, its_binding,
+            raw,
+            profile.inat_user_id,
+            inat_mo_field_id,
+            its_binding,
         )
         hydrated = _hydrate_record(inventory, raw, authorized=True, include_its=True)
     else:
@@ -152,22 +171,30 @@ def _link_rows_as_snapshots(
     """Adapt inventory-parsed link rows to the snapshot shape used everywhere else."""
     return tuple(
         AuthoritativeLinkSnapshot(
-            site=inv.key.site, observation_id=inv.key.observation_id,
-            row_id=row.row_id, binding_id=row.external_site_id,
+            site=inv.key.site,
+            observation_id=inv.key.observation_id,
+            row_id=row.row_id,
+            binding_id=row.external_site_id,
             target_observation_id=row.target_observation_id,
-            parse_state=row.parse_state, row_fingerprint=row.fingerprint,
+            parse_state=row.parse_state,
+            row_fingerprint=row.fingerprint,
         )
         for row in inv.authoritative_links
     )
 
 
 def _ordered_edge_ends(
-    left_site: RemoteSite, left_id: int, right_site: RemoteSite, right_id: int,
+    left_site: RemoteSite,
+    left_id: int,
+    right_site: RemoteSite,
+    right_id: int,
 ) -> tuple[RemoteSite, int, RemoteSite, int]:
     left = _member_key(left_site, left_id)
     right = _member_key(right_site, right_id)
     if left == right:
-        raise ConsolidationError("An evidence edge cannot point to itself.", "malformed_evidence")
+        raise ConsolidationError(
+            "An evidence edge cannot point to itself.", "malformed_evidence"
+        )
     return (
         (left_site, left_id, right_site, right_id)
         if left < right
@@ -176,12 +203,18 @@ def _ordered_edge_ends(
 
 
 def _evidence_edge(
-    left: InventoryObservation, right: InventoryObservation,
-    evidence_type: str, strength: str, summary: str, *proof: object,
+    left: InventoryObservation,
+    right: InventoryObservation,
+    evidence_type: str,
+    strength: str,
+    summary: str,
+    *proof: object,
 ) -> ConsolidationEvidenceEdge:
     left_site, left_id, right_site, right_id = _ordered_edge_ends(
-        left.key.site, left.key.observation_id,
-        right.key.site, right.key.observation_id,
+        left.key.site,
+        left.key.observation_id,
+        right.key.site,
+        right.key.observation_id,
     )
     return ConsolidationEvidenceEdge(
         left_site=left_site,
@@ -192,8 +225,13 @@ def _evidence_edge(
         evidence_strength=strength,
         reviewed_evidence_fingerprint=public_fingerprint(
             "phase_2b_specimen_edge_v1",
-            left_site.value, left_id, right_site.value, right_id,
-            evidence_type, strength, *proof,
+            left_site.value,
+            left_id,
+            right_site.value,
+            right_id,
+            evidence_type,
+            strength,
+            *proof,
         ),
         display_summary=summary,
     )
@@ -216,17 +254,19 @@ def _supporting_evidence(
     links = link_snapshots or {}
     result: list[ConsolidationEvidenceEdge] = []
     for index, (left_inv, left_hyd) in enumerate(hydrated):
-        for right_inv, right_hyd in hydrated[index + 1:]:
+        for right_inv, right_hyd in hydrated[index + 1 :]:
             # Each direction is independent, so an expected reciprocal-link
             # addition does not mutate the fingerprint of a reviewed one-way
             # link edge.
             for source_inv, target_inv in (
-                (left_inv, right_inv), (right_inv, left_inv),
+                (left_inv, right_inv),
+                (right_inv, left_inv),
             ):
                 if source_inv.key.site is target_inv.key.site:
                     continue
                 source_key = (
-                    source_inv.key.site, source_inv.key.observation_id,
+                    source_inv.key.site,
+                    source_inv.key.observation_id,
                 )
                 snapshot_rows: Sequence[AuthoritativeLinkSnapshot]
                 if source_key in links:
@@ -238,84 +278,119 @@ def _supporting_evidence(
                     # (``row_fingerprint``/``binding_id``). Normalize exactly as
                     # ``_member_snapshot`` does so both branches expose one shape.
                     snapshot_rows = _link_rows_as_snapshots(source_inv)
-                matching = tuple(sorted(
-                    (
-                        str(row.row_id), str(row.row_uuid),
-                        str(row.row_fingerprint),
+                matching = tuple(
+                    sorted(
+                        (
+                            str(row.row_id),
+                            str(row.row_uuid),
+                            str(row.row_fingerprint),
+                        )
+                        for row in snapshot_rows
+                        if row.parse_state not in {"malformed", "conflicting"}
+                        and row.target_observation_id == target_inv.key.observation_id
                     )
-                    for row in snapshot_rows
-                    if row.parse_state not in {"malformed", "conflicting"}
-                    and row.target_observation_id
-                    == target_inv.key.observation_id
-                ))
+                )
                 if matching:
-                    result.append(_evidence_edge(
-                        source_inv, target_inv,
-                        f"authoritative_link_{source_inv.key.site.value}_to_"
-                        f"{target_inv.key.site.value}",
-                        "strong",
-                        f"Authoritative {source_inv.key.site.value} reciprocal-link field "
-                        f"targets {target_inv.key.site.value} "
-                        f"#{target_inv.key.observation_id}.",
-                        *("|".join(item) for item in matching),
-                    ))
+                    result.append(
+                        _evidence_edge(
+                            source_inv,
+                            target_inv,
+                            f"authoritative_link_{source_inv.key.site.value}_to_"
+                            f"{target_inv.key.site.value}",
+                            "strong",
+                            f"Authoritative {source_inv.key.site.value} reciprocal-link field "
+                            f"targets {target_inv.key.site.value} "
+                            f"#{target_inv.key.observation_id}.",
+                            *("|".join(item) for item in matching),
+                        )
+                    )
 
-            shared_vouchers = tuple(sorted(
-                set(left_hyd.voucher_identifiers)
-                & set(right_hyd.voucher_identifiers)
-            ))
+            shared_vouchers = tuple(
+                sorted(
+                    set(left_hyd.voucher_identifiers)
+                    & set(right_hyd.voucher_identifiers)
+                )
+            )
             if shared_vouchers:
-                result.append(_evidence_edge(
-                    left_inv, right_inv, "exact_voucher", "strong",
-                    "Exact normalized voucher-to-voucher identity.",
-                    *shared_vouchers,
-                ))
-            shared_collection_numbers = tuple(sorted(
-                set(left_hyd.collection_identifiers)
-                & set(right_hyd.collection_identifiers)
-            ))
+                result.append(
+                    _evidence_edge(
+                        left_inv,
+                        right_inv,
+                        "exact_voucher",
+                        "strong",
+                        "Exact normalized voucher-to-voucher identity.",
+                        *shared_vouchers,
+                    )
+                )
+            shared_collection_numbers = tuple(
+                sorted(
+                    set(left_hyd.collection_identifiers)
+                    & set(right_hyd.collection_identifiers)
+                )
+            )
             if shared_collection_numbers:
-                result.append(_evidence_edge(
-                    left_inv, right_inv, "exact_collection_number", "strong",
-                    "Exact normalized collection-number-to-collection-number identity.",
-                    *shared_collection_numbers,
-                ))
+                result.append(
+                    _evidence_edge(
+                        left_inv,
+                        right_inv,
+                        "exact_collection_number",
+                        "strong",
+                        "Exact normalized collection-number-to-collection-number identity.",
+                        *shared_collection_numbers,
+                    )
+                )
 
             # Explicit source-qualified media identity is accepted; visual
             # similarity and bare filenames are not.
             left_native = {(item.site.value, item.photo_id) for item in left_inv.media}
-            right_native = {(item.site.value, item.photo_id) for item in right_inv.media}
+            right_native = {
+                (item.site.value, item.photo_id) for item in right_inv.media
+            }
             left_provenance = {
                 (item.provenance_key[0].value, item.provenance_key[1])
-                for item in left_inv.media if item.provenance_key
+                for item in left_inv.media
+                if item.provenance_key
             }
             right_provenance = {
                 (item.provenance_key[0].value, item.provenance_key[1])
-                for item in right_inv.media if item.provenance_key
+                for item in right_inv.media
+                if item.provenance_key
             }
-            shared_media = tuple(sorted(
-                (left_native & right_native)
-                | (left_provenance & right_native)
-                | (right_provenance & left_native)
-                | (left_provenance & right_provenance)
-            ))
+            shared_media = tuple(
+                sorted(
+                    (left_native & right_native)
+                    | (left_provenance & right_native)
+                    | (right_provenance & left_native)
+                    | (left_provenance & right_provenance)
+                )
+            )
             if shared_media:
-                result.append(_evidence_edge(
-                    left_inv, right_inv, "native_media_identity", "strong",
-                    "Exact source-qualified photo identity.",
-                    *(f"{site}:{photo_id}" for site, photo_id in shared_media),
-                ))
+                result.append(
+                    _evidence_edge(
+                        left_inv,
+                        right_inv,
+                        "native_media_identity",
+                        "strong",
+                        "Exact source-qualified photo identity.",
+                        *(f"{site}:{photo_id}" for site, photo_id in shared_media),
+                    )
+                )
 
             # Date is acceptable only as a corroborating part of a precise
             # coordinate+date edge. Broad named locality never participates.
             coordinate_values = (
-                left_hyd.latitude, left_hyd.longitude,
-                right_hyd.latitude, right_hyd.longitude,
-                left_hyd.accuracy_m, right_hyd.accuracy_m,
+                left_hyd.latitude,
+                left_hyd.longitude,
+                right_hyd.latitude,
+                right_hyd.longitude,
+                left_hyd.accuracy_m,
+                right_hyd.accuracy_m,
             )
             coordinate_semantics_permit = all(
-                hyd.coordinate_source in {
-                    "explicit_public", "explicit_authorized_private",
+                hyd.coordinate_source
+                in {
+                    "explicit_public",
+                    "explicit_authorized_private",
                 }
                 and (
                     hyd.coordinate_privacy_state in {"", "open", "public"}
@@ -344,32 +419,44 @@ def _supporting_evidence(
                 and coordinate_semantics_permit
             ):
                 distance = _distance_m(
-                    left_hyd.latitude, left_hyd.longitude,  # type: ignore[arg-type]
-                    right_hyd.latitude, right_hyd.longitude,  # type: ignore[arg-type]
+                    left_hyd.latitude,
+                    left_hyd.longitude,  # type: ignore[arg-type]
+                    right_hyd.latitude,
+                    right_hyd.longitude,  # type: ignore[arg-type]
                 )
                 if distance <= 100.0:
-                    result.append(_evidence_edge(
-                        left_inv, right_inv, "exact_date_close_coordinates",
-                        "corroborating",
-                        "Exact observation date plus coordinates within 100 metres.",
-                        left_inv.observed_on.isoformat(),
-                        right_inv.observed_on.isoformat(),
-                        f"{left_hyd.latitude:.6f}", f"{left_hyd.longitude:.6f}",
-                        f"{right_hyd.latitude:.6f}", f"{right_hyd.longitude:.6f}",
-                        f"{left_hyd.accuracy_m:.3f}",
-                        f"{right_hyd.accuracy_m:.3f}",
-                        f"{distance:.3f}",
-                        "threshold_m=100.000",
-                        "coordinate_policy=phase_2b_v2",
-                    ))
-    return tuple(sorted(
-        result,
-        key=lambda edge: (
-            edge.left_site.value, edge.left_observation_id,
-            edge.right_site.value, edge.right_observation_id,
-            edge.evidence_type,
-        ),
-    ))
+                    result.append(
+                        _evidence_edge(
+                            left_inv,
+                            right_inv,
+                            "exact_date_close_coordinates",
+                            "corroborating",
+                            "Exact observation date plus coordinates within 100 metres.",
+                            left_inv.observed_on.isoformat(),
+                            right_inv.observed_on.isoformat(),
+                            f"{left_hyd.latitude:.6f}",
+                            f"{left_hyd.longitude:.6f}",
+                            f"{right_hyd.latitude:.6f}",
+                            f"{right_hyd.longitude:.6f}",
+                            f"{left_hyd.accuracy_m:.3f}",
+                            f"{right_hyd.accuracy_m:.3f}",
+                            f"{distance:.3f}",
+                            "threshold_m=100.000",
+                            "coordinate_policy=phase_2b_v2",
+                        )
+                    )
+    return tuple(
+        sorted(
+            result,
+            key=lambda edge: (
+                edge.left_site.value,
+                edge.left_observation_id,
+                edge.right_site.value,
+                edge.right_observation_id,
+                edge.evidence_type,
+            ),
+        )
+    )
 
 
 def _evidence_unavailable_notices(
@@ -385,7 +472,7 @@ def _evidence_unavailable_notices(
 
     notices: list[str] = []
     for index, (left_inv, left_hyd) in enumerate(hydrated):
-        for right_inv, right_hyd in hydrated[index + 1:]:
+        for right_inv, right_hyd in hydrated[index + 1 :]:
             if (
                 not left_inv.observed_on
                 or left_inv.observed_on != right_inv.observed_on
@@ -413,12 +500,13 @@ def _evidence_unavailable_notices(
                 )
                 continue
             if any(
-                hyd.coordinate_source not in {
-                    "explicit_public", "explicit_authorized_private",
+                hyd.coordinate_source
+                not in {
+                    "explicit_public",
+                    "explicit_authorized_private",
                 }
                 or (
-                    hyd.coordinate_privacy_state
-                    not in {"", "open", "public"}
+                    hyd.coordinate_privacy_state not in {"", "open", "public"}
                     and hyd.coordinate_source != "explicit_authorized_private"
                 )
                 for hyd in (left_hyd, right_hyd)
@@ -429,8 +517,10 @@ def _evidence_unavailable_notices(
                 )
                 continue
             points = (
-                left_hyd.latitude, left_hyd.longitude,
-                right_hyd.latitude, right_hyd.longitude,
+                left_hyd.latitude,
+                left_hyd.longitude,
+                right_hyd.latitude,
+                right_hyd.longitude,
             )
             if any(
                 value is None
@@ -451,8 +541,10 @@ def _evidence_unavailable_notices(
                 )
                 continue
             distance = _distance_m(
-                left_hyd.latitude, left_hyd.longitude,  # type: ignore[arg-type]
-                right_hyd.latitude, right_hyd.longitude,  # type: ignore[arg-type]
+                left_hyd.latitude,
+                left_hyd.longitude,  # type: ignore[arg-type]
+                right_hyd.latitude,
+                right_hyd.longitude,  # type: ignore[arg-type]
             )
             if distance > 100.0:
                 notices.append(
@@ -466,21 +558,25 @@ def _evidence_unavailable_notices(
 def _graph_reasons(
     keys: Sequence[tuple[RemoteSite, int]],
     edges: Sequence[ConsolidationEvidenceEdge],
-    *, canonical_mo_id: Optional[int] = None,
+    *,
+    canonical_mo_id: Optional[int] = None,
     canonical_inat_id: Optional[int] = None,
 ) -> list[str]:
-    return list(validate_consolidation_graph(
-        keys,
-        edges,
-        canonical_mo_id=canonical_mo_id,
-        canonical_inat_id=canonical_inat_id,
-    ).reasons)
+    return list(
+        validate_consolidation_graph(
+            keys,
+            edges,
+            canonical_mo_id=canonical_mo_id,
+            canonical_inat_id=canonical_inat_id,
+        ).reasons
+    )
 
 
 def _donor_paths(
     keys: Sequence[tuple[RemoteSite, int]],
     edges: Sequence[ConsolidationEvidenceEdge],
-    canonical_mo_id: Optional[int], canonical_inat_id: Optional[int],
+    canonical_mo_id: Optional[int],
+    canonical_inat_id: Optional[int],
 ) -> tuple[ConsolidationEvidencePath, ...]:
     validation = validate_consolidation_graph(
         keys,
@@ -503,19 +599,23 @@ def _render_donor_paths(
             f"→ {hop.right[0].value} #{hop.right[1]}"
             for hop in path.hops
         )
-        paths.append(ConsolidationEvidencePath(
-            donor_site=path.donor[0],
-            donor_observation_id=path.donor[1],
-            steps=steps,
-            strong_anchor_step=steps[path.strong_anchor_index],
-        ))
+        paths.append(
+            ConsolidationEvidencePath(
+                donor_site=path.donor[0],
+                donor_observation_id=path.donor[1],
+                steps=steps,
+                strong_anchor_step=steps[path.strong_anchor_index],
+            )
+        )
     return tuple(paths)
 
 
 def check_duplicate_set_eligibility(
-    db: ReconciliationDB, profile: ReconciliationProfile,
+    db: ReconciliationDB,
+    profile: ReconciliationProfile,
     hydrated: Sequence[tuple[InventoryObservation, HydratedObservation]],
-    *, retry_consolidation_id: Optional[int] = None,
+    *,
+    retry_consolidation_id: Optional[int] = None,
     allowed_consolidation_id: Optional[int] = None,
     evidence_edges: Sequence[ConsolidationEvidenceEdge] = (),
     evidence_unavailable: Sequence[str] = (),
@@ -529,7 +629,8 @@ def check_duplicate_set_eligibility(
     """
     if len(hydrated) < 2:
         return ConsolidationEligibility(
-            eligible=False, blocking_reasons=("A duplicate set requires at least two records.",),
+            eligible=False,
+            blocking_reasons=("A duplicate set requires at least two records.",),
         )
     profile_id = profile.profile_id
     reasons: list[str] = []
@@ -553,15 +654,23 @@ def check_duplicate_set_eligibility(
         if inv.fungi_status == "nonfungal":
             reasons.append(f"{label} is outside kingdom Fungi.")
         elif inv.fungi_status == "unknown":
-            reasons.append(f"{label} fungal classification is unknown and requires review.")
+            reasons.append(
+                f"{label} fungal classification is unknown and requires review."
+            )
         if inv.deleted or inv.availability_state == "deleted":
             reasons.append(f"{label} is deleted or unavailable.")
         if inv.scope_state not in {"in_scope", "linked_context"}:
-            reasons.append(f"{label} is excluded or outside the selected profile scope.")
+            reasons.append(
+                f"{label} is excluded or outside the selected profile scope."
+            )
         if not hyd.required_values_available:
-            reasons.append(f"{label} has a required specimen-identity value hidden or unavailable.")
+            reasons.append(
+                f"{label} has a required specimen-identity value hidden or unavailable."
+            )
         existing_membership = db.consolidation_membership_for_observation(
-            profile_id, inv.key.site.value, inv.key.observation_id,
+            profile_id,
+            inv.key.site.value,
+            inv.key.observation_id,
         )
         if existing_membership is not None:
             permitted_identity = (
@@ -587,8 +696,12 @@ def check_duplicate_set_eligibility(
     # known until canonical selection and is enforced there instead
     # (see select_canonical). Blocking it here made same-site consolidation of
     # any already-paired record impossible.
-    candidate_mo_ids = {inv.key.observation_id for inv, _ in hydrated if inv.key.site == RemoteSite.MO}
-    candidate_inat_ids = {inv.key.observation_id for inv, _ in hydrated if inv.key.site == RemoteSite.INAT}
+    candidate_mo_ids = {
+        inv.key.observation_id for inv, _ in hydrated if inv.key.site == RemoteSite.MO
+    }
+    candidate_inat_ids = {
+        inv.key.observation_id for inv, _ in hydrated if inv.key.site == RemoteSite.INAT
+    }
     cross_site_set = bool(candidate_mo_ids) and bool(candidate_inat_ids)
     for inv, _ in hydrated:
         if inv.key.site != RemoteSite.MO or not cross_site_set:
@@ -632,10 +745,12 @@ def check_duplicate_set_eligibility(
             for item in unavailable:
                 reasons.append(f"{label}: required evidence unavailable: {item}")
 
-    reasons.extend(_graph_reasons(
-        [(inv.key.site, inv.key.observation_id) for inv, _ in hydrated],
-        evidence_edges,
-    ))
+    reasons.extend(
+        _graph_reasons(
+            [(inv.key.site, inv.key.observation_id) for inv, _ in hydrated],
+            evidence_edges,
+        )
+    )
 
     deduped_reasons = list(dict.fromkeys(reasons))
     return ConsolidationEligibility(
@@ -652,8 +767,11 @@ def check_duplicate_set_eligibility(
 
 
 def _member_snapshot(
-    inv: InventoryObservation, hyd: HydratedObservation, raw: dict[str, Any],
-    *, photo_payload: object = None,
+    inv: InventoryObservation,
+    hyd: HydratedObservation,
+    raw: dict[str, Any],
+    *,
+    photo_payload: object = None,
     link_snapshots: Sequence[AuthoritativeLinkSnapshot] = (),
 ) -> ConsolidationMemberSnapshot:
     remote_uuid = str(raw.get("uuid") or "")
@@ -663,7 +781,11 @@ def _member_snapshot(
         photo_fingerprint = _inat_photos_fingerprint(photos)
     else:
         photos = _mo_photo_snapshots(
-            photo_payload if photo_payload is not None else {"results": raw.get("images") or []},
+            (
+                photo_payload
+                if photo_payload is not None
+                else {"results": raw.get("images") or []}
+            ),
             inv.key.observation_id,
         )
         photo_fingerprint = _mo_photos_fingerprint(photos)
@@ -682,36 +804,66 @@ def _member_snapshot(
         ),
     )
     stable_fingerprint = public_fingerprint(
-        "consolidation_member", inv.key.site.value, inv.key.observation_id,
-        remote_uuid, inv.owner_id, inv.account_id, inv.owner_login,
-        inv.observed_on, inv.taxon_id,
-        (inv.taxon_name or "").casefold(), inv.fungi_status, int(inv.deleted),
-        inv.availability_state, "|", *sorted(hyd.voucher_identifiers), "|",
-        *sorted(hyd.collection_identifiers), "|",
+        "consolidation_member",
+        inv.key.site.value,
+        inv.key.observation_id,
+        remote_uuid,
+        inv.owner_id,
+        inv.account_id,
+        inv.owner_login,
+        inv.observed_on,
+        inv.taxon_id,
+        (inv.taxon_name or "").casefold(),
+        inv.fungi_status,
+        int(inv.deleted),
+        inv.availability_state,
+        "|",
+        *sorted(hyd.voucher_identifiers),
+        "|",
+        *sorted(hyd.collection_identifiers),
+        "|",
         public_fingerprint(hyd.description),
-        photo_fingerprint, geoprivacy, inv.public_locality, "|",
-        int(hyd.coordinates_available), hyd.latitude, hyd.longitude, hyd.accuracy_m,
+        photo_fingerprint,
+        geoprivacy,
+        inv.public_locality,
+        "|",
+        int(hyd.coordinates_available),
+        hyd.latitude,
+        hyd.longitude,
+        hyd.accuracy_m,
     )
     fingerprint = public_fingerprint(
-        stable_fingerprint, inv.updated_at, link_fingerprint,
+        stable_fingerprint,
+        inv.updated_at,
+        link_fingerprint,
     )
-    mutable_components = tuple(sorted({
-        "date": public_fingerprint(inv.observed_on),
-        "description": public_fingerprint(hyd.description),
-        "geoprivacy": public_fingerprint(geoprivacy),
-        "identifiers": public_fingerprint(
-            *sorted(hyd.voucher_identifiers), "|",
-            *sorted(hyd.collection_identifiers),
-        ),
-        "locality_coordinates": public_fingerprint(
-            inv.public_locality, int(hyd.coordinates_available),
-            hyd.latitude, hyd.longitude, hyd.accuracy_m,
-        ),
-        "photos": photo_fingerprint,
-        "taxon": public_fingerprint(
-            inv.taxon_id, (inv.taxon_name or "").casefold(), inv.taxon_rank,
-        ),
-    }.items()))
+    mutable_components = tuple(
+        sorted(
+            {
+                "date": public_fingerprint(inv.observed_on),
+                "description": public_fingerprint(hyd.description),
+                "geoprivacy": public_fingerprint(geoprivacy),
+                "identifiers": public_fingerprint(
+                    *sorted(hyd.voucher_identifiers),
+                    "|",
+                    *sorted(hyd.collection_identifiers),
+                ),
+                "locality_coordinates": public_fingerprint(
+                    inv.public_locality,
+                    int(hyd.coordinates_available),
+                    hyd.latitude,
+                    hyd.longitude,
+                    hyd.accuracy_m,
+                ),
+                "photos": photo_fingerprint,
+                "taxon": public_fingerprint(
+                    inv.taxon_id,
+                    (inv.taxon_name or "").casefold(),
+                    inv.taxon_rank,
+                ),
+            }.items()
+        )
+    )
     return ConsolidationMemberSnapshot(
         site=inv.key.site,
         observation_id=inv.key.observation_id,
@@ -740,7 +892,8 @@ def _member_snapshot(
         reciprocal_link_state=", ".join(
             f"{row.parse_state}→{row.target_observation_id or '?'}"
             for row in link_snapshots
-        ) or "none",
+        )
+        or "none",
         remote_updated_at=inv.updated_at.isoformat() if inv.updated_at else "",
         record_fingerprint=fingerprint,
         preflight_fingerprint=stable_fingerprint,
@@ -760,41 +913,68 @@ def _compute_conflicts(
     conflicts: list[ConsolidationConflict] = []
     dates = {m.observed_on_string for m in members if m.observed_on_string}
     if len(dates) > 1:
-        conflicts.append(ConsolidationConflict(
-            conflict_type="observed_on", description=f"Observation dates differ: {sorted(dates)}.",
-            blocking=False,
-        ))
+        conflicts.append(
+            ConsolidationConflict(
+                conflict_type="observed_on",
+                description=f"Observation dates differ: {sorted(dates)}.",
+                blocking=False,
+            )
+        )
     taxa = {m.taxon_name for m in members if m.taxon_name}
     if len(taxa) > 1:
-        conflicts.append(ConsolidationConflict(
-            conflict_type="taxon", description=f"Taxa differ: {sorted(taxa)}.", blocking=False,
-        ))
+        conflicts.append(
+            ConsolidationConflict(
+                conflict_type="taxon",
+                description=f"Taxa differ: {sorted(taxa)}.",
+                blocking=False,
+            )
+        )
     descriptions = {m.description.strip() for m in members if m.description.strip()}
     if len(descriptions) > 1:
-        conflicts.append(ConsolidationConflict(
-            conflict_type="description", description="Descriptions/notes differ between members.",
-            blocking=False,
-        ))
-    coords = [(m.latitude, m.longitude) for m in members if m.latitude is not None and m.longitude is not None]
+        conflicts.append(
+            ConsolidationConflict(
+                conflict_type="description",
+                description="Descriptions/notes differ between members.",
+                blocking=False,
+            )
+        )
+    coords = [
+        (m.latitude, m.longitude)
+        for m in members
+        if m.latitude is not None and m.longitude is not None
+    ]
     if len(set(coords)) > 1:
-        conflicts.append(ConsolidationConflict(
-            conflict_type="coordinates", description="Coordinates differ between members.", blocking=False,
-        ))
-    voucher_sets = [set(m.voucher_identifiers) for m in members if m.voucher_identifiers]
-    if len(voucher_sets) > 1 and any(s1 != s2 for s1 in voucher_sets for s2 in voucher_sets):
-        conflicts.append(ConsolidationConflict(
-            conflict_type="voucher_identifier",
-            description="Voucher/collection identifiers are not identical across all members.",
-            blocking=False,
-        ))
+        conflicts.append(
+            ConsolidationConflict(
+                conflict_type="coordinates",
+                description="Coordinates differ between members.",
+                blocking=False,
+            )
+        )
+    voucher_sets = [
+        set(m.voucher_identifiers) for m in members if m.voucher_identifiers
+    ]
+    if len(voucher_sets) > 1 and any(
+        s1 != s2 for s1 in voucher_sets for s2 in voucher_sets
+    ):
+        conflicts.append(
+            ConsolidationConflict(
+                conflict_type="voucher_identifier",
+                description="Voucher/collection identifiers are not identical across all members.",
+                blocking=False,
+            )
+        )
     return tuple(conflicts)
 
 
 def prepare_preview(
-    db: ReconciliationDB, profile: ReconciliationProfile,
+    db: ReconciliationDB,
+    profile: ReconciliationProfile,
     candidates: Sequence[tuple[RemoteSite, int, dict[str, Any]]],
     reader: INatReconciliationReader,
-    *, auth_generation: int = 0, mo_key_generation: int = 0,
+    *,
+    auth_generation: int = 0,
+    mo_key_generation: int = 0,
     inat_mo_field_id: Optional[int] = None,
     retry_consolidation_id: Optional[int] = None,
     extension_consolidation_id: Optional[int] = None,
@@ -809,10 +989,16 @@ def prepare_preview(
     """M3 preview: hydrate every candidate, run M2 eligibility, list
     conflicts and the full v1 disclosure list. Canonical is always unset."""
     if not candidates:
-        raise ConsolidationError("A duplicate set requires at least one candidate.", "empty_candidates")
+        raise ConsolidationError(
+            "A duplicate set requires at least one candidate.", "empty_candidates"
+        )
     hydrated = [
         _hydrate_candidate(
-            site, observation_id, raw, profile, reader,
+            site,
+            observation_id,
+            raw,
+            profile,
+            reader,
             inat_mo_field_id=inat_mo_field_id,
         )
         for site, observation_id, raw in candidates
@@ -821,7 +1007,9 @@ def prepare_preview(
     evidence_edges = _supporting_evidence(hydrated, link_snapshots)
     evidence_unavailable = _evidence_unavailable_notices(hydrated)
     eligibility = check_duplicate_set_eligibility(
-        db, profile, hydrated,
+        db,
+        profile,
+        hydrated,
         retry_consolidation_id=retry_consolidation_id,
         allowed_consolidation_id=extension_consolidation_id,
         evidence_edges=evidence_edges,
@@ -830,7 +1018,9 @@ def prepare_preview(
     photo_payloads = photo_payloads or {}
     members = tuple(
         _member_snapshot(
-            inv, hyd, raw,
+            inv,
+            hyd,
+            raw,
             photo_payload=photo_payloads.get((inv.key.site, inv.key.observation_id)),
             link_snapshots=link_snapshots.get(
                 (inv.key.site, inv.key.observation_id), ()
@@ -850,12 +1040,14 @@ def prepare_preview(
             if member.site is RemoteSite.INAT and member.observation_id == inat_id:
                 partner_site, partner_id = RemoteSite.MO, mo_id
                 break
-        enriched_members.append(replace(
-            member,
-            current_pair_partner_site=partner_site,
-            current_pair_partner_id=partner_id,
-            current_pair_review_state="confirmed" if partner_id is not None else "",
-        ))
+        enriched_members.append(
+            replace(
+                member,
+                current_pair_partner_site=partner_site,
+                current_pair_partner_id=partner_id,
+                current_pair_review_state="confirmed" if partner_id is not None else "",
+            )
+        )
     conflicts = _compute_conflicts(members)
     preview = ConsolidationPreview(
         profile_id=profile.profile_id,
@@ -893,12 +1085,16 @@ def select_canonical(
 ) -> ConsolidationPreview:
     """Pure function: returns a new preview with the canonical selection
     applied. Never accepts an id outside the candidate set."""
-    if preview.is_extension and (
-        canonical_mo_observation_id != preview.canonical_mo_observation_id
-        or canonical_inat_observation_id != preview.canonical_inat_observation_id
-    ) and (
-        preview.canonical_mo_observation_id is not None
-        or preview.canonical_inat_observation_id is not None
+    if (
+        preview.is_extension
+        and (
+            canonical_mo_observation_id != preview.canonical_mo_observation_id
+            or canonical_inat_observation_id != preview.canonical_inat_observation_id
+        )
+        and (
+            preview.canonical_mo_observation_id is not None
+            or preview.canonical_inat_observation_id is not None
+        )
     ):
         raise ConsolidationError(
             "Canonical choices are fixed when adding donors to an existing consolidation.",
@@ -916,12 +1112,18 @@ def select_canonical(
             "no_canonical_selected",
         )
     member_keys = {(m.site, m.observation_id) for m in preview.members}
-    if canonical_mo_observation_id is not None and (RemoteSite.MO, canonical_mo_observation_id) not in member_keys:
+    if (
+        canonical_mo_observation_id is not None
+        and (RemoteSite.MO, canonical_mo_observation_id) not in member_keys
+    ):
         raise ConsolidationError(
             f"mo #{canonical_mo_observation_id} is not a member of this candidate set.",
             "canonical_not_in_set",
         )
-    if canonical_inat_observation_id is not None and (RemoteSite.INAT, canonical_inat_observation_id) not in member_keys:
+    if (
+        canonical_inat_observation_id is not None
+        and (RemoteSite.INAT, canonical_inat_observation_id) not in member_keys
+    ):
         raise ConsolidationError(
             f"inat #{canonical_inat_observation_id} is not a member of this candidate set.",
             "canonical_not_in_set",
@@ -956,7 +1158,8 @@ def select_canonical(
             # linked canonical record.
             continue
         wrong_targets = {
-            row.target_observation_id for row in member.reciprocal_links
+            row.target_observation_id
+            for row in member.reciprocal_links
             if row.parse_state not in {"malformed"}
             and row.target_observation_id is not None
             and row.target_observation_id != selected_targets[member.site]
@@ -997,33 +1200,47 @@ def select_canonical(
         blocking_reasons=reasons,
     )
     paths = _render_donor_paths(graph_validation)
-    expected_donors = len(preview.members) - int(
-        canonical_mo_observation_id is not None
-    ) - int(canonical_inat_observation_id is not None)
+    expected_donors = (
+        len(preview.members)
+        - int(canonical_mo_observation_id is not None)
+        - int(canonical_inat_observation_id is not None)
+    )
     if len(paths) != expected_donors:
         eligibility = replace(
             eligibility,
             eligible=False,
-            blocking_reasons=tuple(dict.fromkeys((
-                *eligibility.blocking_reasons,
-                "At least one donor has no auditable evidence path to the selected "
-                "canonical specimen.",
-            ))),
+            blocking_reasons=tuple(
+                dict.fromkeys(
+                    (
+                        *eligibility.blocking_reasons,
+                        "At least one donor has no auditable evidence path to the selected "
+                        "canonical specimen.",
+                    )
+                )
+            ),
         )
 
     local_changes: list[str] = []
-    if canonical_mo_observation_id is not None and canonical_inat_observation_id is not None:
+    if (
+        canonical_mo_observation_id is not None
+        and canonical_inat_observation_id is not None
+    ):
         local_changes.append(
             f"mo #{canonical_mo_observation_id} and inat #{canonical_inat_observation_id} "
             f"become the canonical pair."
         )
     for member in preview.members:
         is_canonical = (
-            (member.site == RemoteSite.MO and member.observation_id == canonical_mo_observation_id)
-            or (member.site == RemoteSite.INAT and member.observation_id == canonical_inat_observation_id)
+            member.site == RemoteSite.MO
+            and member.observation_id == canonical_mo_observation_id
+        ) or (
+            member.site == RemoteSite.INAT
+            and member.observation_id == canonical_inat_observation_id
         )
         if not is_canonical:
-            local_changes.append(f"{member.site.value} #{member.observation_id} will be marked locally superseded.")
+            local_changes.append(
+                f"{member.site.value} #{member.observation_id} will be marked locally superseded."
+            )
     return replace(
         preview,
         eligibility=eligibility,
@@ -1045,8 +1262,12 @@ class ConsolidationService:
     """Synchronous Gate 2B saga service; run only in the action worker pool."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
         link_service: LinkRepairService,
@@ -1062,7 +1283,8 @@ class ConsolidationService:
         self.reader = INatReconciliationReader(inat_client)
 
     def prepare_preview(
-        self, profile_id: int,
+        self,
+        profile_id: int,
         candidates: Sequence[tuple[RemoteSite, int]],
         cancelled: Callable[[], bool],
     ) -> ConsolidationPreview:
@@ -1075,7 +1297,9 @@ class ConsolidationService:
         requested = tuple(candidates)
         memberships = [
             self.db.consolidation_membership_for_observation(
-                profile_id, site.value, observation_id,
+                profile_id,
+                site.value,
+                observation_id,
             )
             for site, observation_id in requested
         ]
@@ -1117,11 +1341,13 @@ class ConsolidationService:
                         local_state=str(row["local_state"]),
                         added_by_attempt_id=(
                             int(row["added_by_attempt_id"])
-                            if row.get("added_by_attempt_id") is not None else None
+                            if row.get("added_by_attempt_id") is not None
+                            else None
                         ),
                         superseded_by_attempt_id=(
                             int(row["superseded_by_attempt_id"])
-                            if row.get("superseded_by_attempt_id") is not None else None
+                            if row.get("superseded_by_attempt_id") is not None
+                            else None
                         ),
                         superseded_at=str(row.get("superseded_at") or ""),
                     )
@@ -1140,7 +1366,8 @@ class ConsolidationService:
                         "extension_attempt_unresolved",
                     )
                 new_candidates = tuple(
-                    item for item, membership in zip(requested, memberships)
+                    item
+                    for item, membership in zip(requested, memberships)
                     if membership is None
                 )
                 extension_retry = latest_state in {"failed", "cancelled"}
@@ -1152,10 +1379,12 @@ class ConsolidationService:
                     )
                 reviewed_donors = new_candidates
                 canonical_specs = tuple(
-                    item for item in (
+                    item
+                    for item in (
                         (RemoteSite.MO, fixed_mo_id) if fixed_mo_id else None,
                         (RemoteSite.INAT, fixed_inat_id) if fixed_inat_id else None,
-                    ) if item is not None
+                    )
+                    if item is not None
                 )
                 candidates = tuple(dict.fromkeys((*canonical_specs, *reviewed_donors)))
             else:
@@ -1165,7 +1394,8 @@ class ConsolidationService:
                 canonical_requested = {
                     (RemoteSite(str(row["site"])), int(row["observation_id"]))
                     for row in self.db.list_consolidation_members(
-                        profile_id, existing_id,
+                        profile_id,
+                        existing_id,
                     )
                     if str(row["role"]) == "canonical"
                 }
@@ -1195,7 +1425,10 @@ class ConsolidationService:
         mo_key_generation = self.mo_key_generation_provider()
         data = self._fetch_review_data(profile, candidates, cancelled)
         preview = prepare_preview(
-            self.db, profile, data["candidates"], self.reader,
+            self.db,
+            profile,
+            data["candidates"],
+            self.reader,
             auth_generation=auth_generation,
             mo_key_generation=mo_key_generation,
             inat_mo_field_id=data["inat_mo_field_id"],
@@ -1218,7 +1451,8 @@ class ConsolidationService:
                 (RemoteSite(str(row["site"])), int(row["observation_id"])): row
                 for row in (
                     self.db.consolidation_attempt_members(profile_id, baseline_id)
-                    if baseline_id is not None else ()
+                    if baseline_id is not None
+                    else ()
                 )
                 if str(row["participation_role"]) == "canonical_context"
             }
@@ -1237,7 +1471,8 @@ class ConsolidationService:
                 )
                 for row in (
                     self.db.consolidation_evidence(profile_id, baseline_id)
-                    if baseline_id is not None else ()
+                    if baseline_id is not None
+                    else ()
                 )
             )
             baseline_anchors = canonical_strong_anchor_signatures(
@@ -1251,12 +1486,16 @@ class ConsolidationService:
                 canonical_inat_id=fixed_inat_id,
             )
             identity_drifted = [
-                member for member in preview.canonical_members
+                member
+                for member in preview.canonical_members
                 if (
                     baseline_by_key.get((member.site, member.observation_id)) is None
-                    or str(baseline_by_key[
-                        (member.site, member.observation_id)
-                    ].get("reviewed_identity_fingerprint") or "")
+                    or str(
+                        baseline_by_key[(member.site, member.observation_id)].get(
+                            "reviewed_identity_fingerprint"
+                        )
+                        or ""
+                    )
                     != member.identity_fingerprint
                 )
             ]
@@ -1272,28 +1511,29 @@ class ConsolidationService:
                     eligibility=replace(
                         preview.eligibility,
                         eligible=False,
-                        blocking_reasons=tuple(dict.fromkeys((
-                            *preview.eligibility.blocking_reasons, reason,
-                        ))),
+                        blocking_reasons=tuple(
+                            dict.fromkeys(
+                                (
+                                    *preview.eligibility.blocking_reasons,
+                                    reason,
+                                )
+                            )
+                        ),
                     ),
                     donor_evidence_paths=(),
                 )
             mutable_change_notices: list[str] = []
             for member in preview.canonical_members:
-                baseline = baseline_by_key.get(
-                    (member.site, member.observation_id)
-                )
+                baseline = baseline_by_key.get((member.site, member.observation_id))
                 if baseline is None:
                     continue
                 try:
-                    baseline_components = json.loads(str(
-                        baseline.get("reviewed_mutable_components") or "{}"
-                    ))
+                    baseline_components = json.loads(
+                        str(baseline.get("reviewed_mutable_components") or "{}")
+                    )
                 except (TypeError, ValueError):
                     baseline_components = {}
-                current_components = dict(
-                    member.mutable_component_fingerprints
-                )
+                current_components = dict(member.mutable_component_fingerprints)
                 if not baseline_components:
                     mutable_change_notices.append(
                         f"{member.site.value} #{member.observation_id}: the "
@@ -1303,7 +1543,8 @@ class ConsolidationService:
                     )
                     continue
                 changed = sorted(
-                    name for name in set(baseline_components) | set(current_components)
+                    name
+                    for name in set(baseline_components) | set(current_components)
                     if baseline_components.get(name) != current_components.get(name)
                 )
                 if changed:
@@ -1322,14 +1563,16 @@ class ConsolidationService:
                     + (
                         " This immutably supersedes the exact prior "
                         "failed/cancelled extension attempt."
-                        if extension_retry else ""
+                        if extension_retry
+                        else ""
                     ),
                     *mutable_change_notices,
                 ),
             )
         if retry_consolidation_id is not None:
             identity = self.db.get_consolidation(
-                profile_id, retry_consolidation_id,
+                profile_id,
+                retry_consolidation_id,
             )
             if identity:
                 preview = replace(
@@ -1355,18 +1598,24 @@ class ConsolidationService:
         return preview
 
     def execute_group(
-        self, profile_id: int, group_id: int,
-        cancelled: Callable[[], bool], progress: Callable[[str], None],
+        self,
+        profile_id: int,
+        group_id: int,
+        cancelled: Callable[[], bool],
+        progress: Callable[[str], None],
     ) -> list[ConsolidationActionResult]:
         ledger = self.db.consolidation_ledger_for_group(profile_id, group_id)
         if not ledger:
-            raise ConsolidationError("The consolidation ledger is missing.", "missing_ledger")
+            raise ConsolidationError(
+                "The consolidation ledger is missing.", "missing_ledger"
+            )
         if str(ledger["state"]) == "succeeded":
             return []
         if str(ledger["state"]) == "outcome_unknown":
             unknown = next(
                 (
-                    row for row in self.db.action_group_rows(profile_id, group_id)
+                    row
+                    for row in self.db.action_group_rows(profile_id, group_id)
                     if str(row["state"]) == "outcome_unknown"
                 ),
                 None,
@@ -1377,7 +1626,9 @@ class ConsolidationService:
                     "unknown_ledger_mismatch",
                 )
             result = self.verify_unknown(
-                profile_id, int(unknown["action_id"]), cancelled,
+                profile_id,
+                int(unknown["action_id"]),
+                cancelled,
             )
             if result.state != "succeeded":
                 return [result]
@@ -1406,7 +1657,8 @@ class ConsolidationService:
             ):
                 row = next(
                     (
-                        item for item in self.db.action_group_rows(profile_id, group_id)
+                        item
+                        for item in self.db.action_group_rows(profile_id, group_id)
                         if str(item["action_type"]) == action_type
                     ),
                     None,
@@ -1415,7 +1667,9 @@ class ConsolidationService:
                     continue
                 if row is not None and str(row["state"]) == "outcome_unknown":
                     result = self.verify_unknown(
-                        profile_id, int(row["action_id"]), cancelled,
+                        profile_id,
+                        int(row["action_id"]),
+                        cancelled,
                     )
                     results.append(result)
                     if result.state != "succeeded":
@@ -1423,16 +1677,23 @@ class ConsolidationService:
                     continue
                 if row is not None and str(row["state"]) in {"failed", "cancelled"}:
                     self.db.set_consolidation_attempt_state(
-                        profile_id, int(ledger["attempt_id"]), str(row["state"]),
+                        profile_id,
+                        int(ledger["attempt_id"]),
+                        str(row["state"]),
                     )
-                    results.append(ConsolidationActionResult(
-                        int(row["action_id"]), str(row["state"]),
-                        "A terminal canonical-link action blocks later consolidation steps.",
-                    ))
+                    results.append(
+                        ConsolidationActionResult(
+                            int(row["action_id"]),
+                            str(row["state"]),
+                            "A terminal canonical-link action blocks later consolidation steps.",
+                        )
+                    )
                     return results
                 if cancelled():
                     self.db.set_consolidation_attempt_state(
-                        profile_id, int(ledger["attempt_id"]), "cancelled",
+                        profile_id,
+                        int(ledger["attempt_id"]),
+                        "cancelled",
                     )
                     return results
                 progress(
@@ -1440,31 +1701,47 @@ class ConsolidationService:
                 )
                 try:
                     fresh = self._require_reviewed_members_unchanged(
-                        profile_id, group_id, cancelled,
+                        profile_id,
+                        group_id,
+                        cancelled,
                     )
                     self._require_same_specimen(fresh, ledger)
                     option, snapshot = self.link_service.prepare_consolidation_add(
-                        profile_id, group_id, site, cancelled,
+                        profile_id,
+                        group_id,
+                        site,
+                        cancelled,
                     )
                 except Exception as exc:
                     self.db.set_consolidation_attempt_state(
-                        profile_id, int(ledger["attempt_id"]), "failed",
+                        profile_id,
+                        int(ledger["attempt_id"]),
+                        "failed",
                     )
-                    results.append(ConsolidationActionResult(
-                        0, "failed", str(exc),
-                    ))
+                    results.append(
+                        ConsolidationActionResult(
+                            0,
+                            "failed",
+                            str(exc),
+                        )
+                    )
                     return results
                 if not option.enabled:
                     self.db.set_consolidation_attempt_state(
-                        profile_id, int(ledger["attempt_id"]), "failed",
+                        profile_id,
+                        int(ledger["attempt_id"]),
+                        "failed",
                     )
                     raise ConsolidationError(
                         option.disabled_reason or "The canonical link is unavailable.",
                         "link_action_disabled",
                     )
                 action_id = self.db.mint_consolidation_action(
-                    profile_id, group_id, action_type,
-                    site=site.value, pair_id=pair_id,
+                    profile_id,
+                    group_id,
+                    action_type,
+                    site=site.value,
+                    pair_id=pair_id,
                     mo_observation_id=int(mo_id),
                     inat_observation_id=int(inat_id),
                     inat_observation_uuid=str(snapshot["inat_observation_uuid"]),
@@ -1483,9 +1760,7 @@ class ConsolidationService:
                     preview_inat_links_fingerprint=str(
                         snapshot["inat_links_fingerprint"]
                     ),
-                    preview_mo_links_fingerprint=str(
-                        snapshot["mo_links_fingerprint"]
-                    ),
+                    preview_mo_links_fingerprint=str(snapshot["mo_links_fingerprint"]),
                 )
                 row = self.db.action(profile_id, action_id)
                 if row is None:
@@ -1494,10 +1769,15 @@ class ConsolidationService:
                         "mint_lost",
                     )
                 link_result = self.link_service.execute_journaled_action(
-                    profile_id, row, cancelled, progress,
+                    profile_id,
+                    row,
+                    cancelled,
+                    progress,
                 )
                 result = ConsolidationActionResult(
-                    link_result.action_id, link_result.state, link_result.message,
+                    link_result.action_id,
+                    link_result.state,
+                    link_result.message,
                 )
                 results.append(result)
                 if result.state != "succeeded":
@@ -1509,27 +1789,34 @@ class ConsolidationService:
                         else "failed"
                     )
                     self.db.set_consolidation_attempt_state(
-                        profile_id, int(ledger["attempt_id"]), terminal,
+                        profile_id,
+                        int(ledger["attempt_id"]),
+                        terminal,
                     )
                     return results
 
         progress("Freshly verifying the canonical specimen and retained donors")
         try:
             fresh = self._require_reviewed_members_unchanged(
-                profile_id, group_id, cancelled,
+                profile_id,
+                group_id,
+                cancelled,
             )
             self._require_same_specimen(fresh, ledger)
             self._require_canonical_links(fresh, ledger)
         except Exception as exc:
             self.db.set_consolidation_attempt_state(
-                profile_id, int(ledger["attempt_id"]), "failed",
+                profile_id,
+                int(ledger["attempt_id"]),
+                "failed",
             )
             results.append(ConsolidationActionResult(0, "failed", str(exc)))
             return results
         rows = self.db.action_group_rows(profile_id, group_id)
         finalize = next(
             (
-                row for row in rows
+                row
+                for row in rows
                 if str(row["action_type"]) == "consolidation_finalize"
             ),
             None,
@@ -1540,7 +1827,8 @@ class ConsolidationService:
                 (
                     str(member["remote_uuid"] or "")
                     for member in self.db.list_consolidation_members(
-                        profile_id, consolidation_id,
+                        profile_id,
+                        consolidation_id,
                     )
                     if str(member["site"]) == "inat"
                     and int(member["observation_id"]) == int(inat_id or 0)
@@ -1548,8 +1836,11 @@ class ConsolidationService:
                 "",
             )
             action_id = self.db.mint_consolidation_action(
-                profile_id, group_id, "consolidation_finalize",
-                site=site, pair_id=pair_id,
+                profile_id,
+                group_id,
+                "consolidation_finalize",
+                site=site,
+                pair_id=pair_id,
                 mo_observation_id=int(mo_id) if mo_id is not None else None,
                 inat_observation_id=int(inat_id) if inat_id is not None else None,
                 inat_observation_uuid=inat_remote_uuid,
@@ -1564,7 +1855,9 @@ class ConsolidationService:
         return results
 
     def verify_unknown(
-        self, profile_id: int, action_id: int,
+        self,
+        profile_id: int,
+        action_id: int,
         cancelled: Callable[[], bool],
     ) -> ConsolidationActionResult:
         row = self.db.action(profile_id, action_id)
@@ -1577,18 +1870,26 @@ class ConsolidationService:
             profile_id, int(row["action_group_id"])
         )
         if not ledger:
-            raise ConsolidationError("The consolidation ledger is missing.", "missing_ledger")
+            raise ConsolidationError(
+                "The consolidation ledger is missing.", "missing_ledger"
+            )
         if str(row["action_type"]) == "consolidation_finalize":
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="verification",
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
                 error_code="verified_local_finalize_not_applied",
                 verification_state="verified_not_applied",
             )
             self.db.resolve_consolidation_unknown(
-                profile_id, int(ledger["attempt_id"]), applied=False,
+                profile_id,
+                int(ledger["attempt_id"]),
+                applied=False,
             )
             return ConsolidationActionResult(
-                action_id, "failed",
+                action_id,
+                "failed",
                 "The interrupted local-only finalization did not commit; no remote write "
                 "was involved. A new reviewed attempt is required.",
             )
@@ -1597,25 +1898,35 @@ class ConsolidationService:
         if link.state == "succeeded":
             if attempt_state == "outcome_unknown":
                 self.db.resolve_consolidation_unknown(
-                    profile_id, int(ledger["attempt_id"]), applied=True,
+                    profile_id,
+                    int(ledger["attempt_id"]),
+                    applied=True,
                 )
         elif link.state == "failed":
             if attempt_state == "outcome_unknown":
                 self.db.resolve_consolidation_unknown(
-                    profile_id, int(ledger["attempt_id"]), applied=False,
+                    profile_id,
+                    int(ledger["attempt_id"]),
+                    applied=False,
                 )
             else:
                 self.db.set_consolidation_attempt_state(
-                    profile_id, int(ledger["attempt_id"]), "failed",
+                    profile_id,
+                    int(ledger["attempt_id"]),
+                    "failed",
                 )
         elif link.state == "outcome_unknown" and attempt_state == "pending":
             self.db.set_consolidation_attempt_state(
-                profile_id, int(ledger["attempt_id"]), "outcome_unknown",
+                profile_id,
+                int(ledger["attempt_id"]),
+                "outcome_unknown",
             )
         return ConsolidationActionResult(link.action_id, link.state, link.message)
 
     def _execute_finalize(
-        self, row: dict[str, Any], cancelled: Callable[[], bool],
+        self,
+        row: dict[str, Any],
+        cancelled: Callable[[], bool],
         progress: Callable[[str], None],
     ) -> ConsolidationActionResult:
         profile_id = int(row["profile_id"])
@@ -1623,7 +1934,9 @@ class ConsolidationService:
         if not self.db.claim_action(profile_id, action_id, "verification"):
             current = self.db.action(profile_id, action_id) or row
             return ConsolidationActionResult(
-                action_id, str(current["state"]), "Finalize is no longer pending.",
+                action_id,
+                str(current["state"]),
+                "Finalize is no longer pending.",
             )
         ledger = self.db.consolidation_ledger_for_group(
             profile_id, int(row["action_group_id"])
@@ -1634,48 +1947,68 @@ class ConsolidationService:
                     "Consolidation cancelled before local finalization"
                 )
             if not ledger:
-                raise ConsolidationError("The consolidation ledger is missing.", "missing_ledger")
+                raise ConsolidationError(
+                    "The consolidation ledger is missing.", "missing_ledger"
+                )
             progress("Finalization: repeating fresh member and specimen verification")
             fresh = self._require_reviewed_members_unchanged(
-                profile_id, int(row["action_group_id"]), cancelled,
+                profile_id,
+                int(row["action_group_id"]),
+                cancelled,
             )
             self._require_same_specimen(fresh, ledger)
             self._require_canonical_links(fresh, ledger)
             self.db.settle_consolidation_finalize_success(
-                profile_id, action_id, int(row["action_group_id"]),
-                int(ledger["attempt_id"]), int(ledger["consolidation_id"]),
+                profile_id,
+                action_id,
+                int(row["action_group_id"]),
+                int(ledger["attempt_id"]),
+                int(ledger["consolidation_id"]),
             )
             return ConsolidationActionResult(
-                action_id, "succeeded",
+                action_id,
+                "succeeded",
                 "Canonical pair verified; donor observations were marked locally "
                 "superseded and remain unchanged online.",
             )
         except ReconciliationCancelled:
             self.db.finish_action(
-                profile_id, action_id, "cancelled", phase="verification",
+                profile_id,
+                action_id,
+                "cancelled",
+                phase="verification",
                 error_code="cancelled_before_local_finalize",
             )
             if ledger:
                 self.db.set_consolidation_attempt_state(
-                    profile_id, int(ledger["attempt_id"]), "cancelled",
+                    profile_id,
+                    int(ledger["attempt_id"]),
+                    "cancelled",
                 )
             return ConsolidationActionResult(
-                action_id, "cancelled",
+                action_id,
+                "cancelled",
                 "Cancelled before local finalization; donors remain active locally and online.",
             )
         except Exception as exc:
             self.db.finish_action(
-                profile_id, action_id, "failed", phase="verification",
+                profile_id,
+                action_id,
+                "failed",
+                phase="verification",
                 error_code=str(getattr(exc, "code", "") or "finalize_failed"),
             )
             if ledger:
                 self.db.set_consolidation_attempt_state(
-                    profile_id, int(ledger["attempt_id"]), "failed",
+                    profile_id,
+                    int(ledger["attempt_id"]),
+                    "failed",
                 )
             return ConsolidationActionResult(action_id, "failed", str(exc))
 
     def _fetch_review_data(
-        self, profile: ReconciliationProfile,
+        self,
+        profile: ReconciliationProfile,
         candidates: Sequence[tuple[RemoteSite, int]],
         cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
@@ -1690,16 +2023,21 @@ class ConsolidationService:
         ):
             raise ConsolidationError(
                 "Fresh private-safe iNaturalist reads require authentication for the "
-                "profile's exact account.", "inat_auth_mismatch",
+                "profile's exact account.",
+                "inat_auth_mismatch",
             )
         binding = self.db.field_binding(profile.profile_id, "mo_url")
-        field_id = int(binding["field_id"]) if (
-            binding is not None and str(binding["verification_state"]) == "verified"
-        ) else None
-        if (
-            field_id is None
-            and {site for site, _ in candidates} == {RemoteSite.MO, RemoteSite.INAT}
-        ):
+        field_id = (
+            int(binding["field_id"])
+            if (
+                binding is not None and str(binding["verification_state"]) == "verified"
+            )
+            else None
+        )
+        if field_id is None and {site for site, _ in candidates} == {
+            RemoteSite.MO,
+            RemoteSite.INAT,
+        }:
             raise ConsolidationError(
                 "The canonical reciprocal-link field binding must be verified first.",
                 "link_binding_unavailable",
@@ -1707,10 +2045,12 @@ class ConsolidationService:
         mo_site_id: Optional[int] = None
         if any(site is RemoteSite.MO for site, _ in candidates):
             site_rows = [
-                row for row in results_from_payload(
+                row
+                for row in results_from_payload(
                     self.mo_client.external_sites(cancelled)
                 )
-                if "inaturalist" in " ".join(
+                if "inaturalist"
+                in " ".join(
                     str(row.get(key) or "")
                     for key in ("name", "site", "url", "base_url")
                 ).casefold()
@@ -1734,7 +2074,9 @@ class ConsolidationService:
             if site is RemoteSite.INAT:
                 raw = _first_result(
                     self.inat_client.get_reconciliation_detail(
-                        observation_id, auth.api_token, deep=True,
+                        observation_id,
+                        auth.api_token,
+                        deep=True,
                     )
                 )
                 if raw is None:
@@ -1743,12 +2085,16 @@ class ConsolidationService:
                         "record_unavailable",
                     )
                 link_snapshots[(site, observation_id)] = _inat_link_snapshots(
-                    raw, observation_id, field_id,
+                    raw,
+                    observation_id,
+                    field_id,
                 )
             else:
                 raw = _first_result(
                     self.mo_client.observation(
-                        observation_id, cancelled, detail="high",
+                        observation_id,
+                        cancelled,
+                        detail="high",
                     )
                 )
                 if raw is None:
@@ -1767,18 +2113,24 @@ class ConsolidationService:
                     if parsed is None or parsed[0] != observation_id:
                         continue
                     _, link = parsed
-                    snapshots.append(AuthoritativeLinkSnapshot(
-                        site=RemoteSite.MO, observation_id=observation_id,
-                        row_id=link.row_id, binding_id=link.external_site_id,
-                        target_observation_id=link.target_observation_id,
-                        parse_state=link.parse_state,
-                        row_fingerprint=link.fingerprint,
-                        display_value=str(
-                            link_raw.get("url") or link_raw.get("link_url")
-                            or link_raw.get("derived_url")
-                            or link_raw.get("external_url") or ""
-                        ),
-                    ))
+                    snapshots.append(
+                        AuthoritativeLinkSnapshot(
+                            site=RemoteSite.MO,
+                            observation_id=observation_id,
+                            row_id=link.row_id,
+                            binding_id=link.external_site_id,
+                            target_observation_id=link.target_observation_id,
+                            parse_state=link.parse_state,
+                            row_fingerprint=link.fingerprint,
+                            display_value=str(
+                                link_raw.get("url")
+                                or link_raw.get("link_url")
+                                or link_raw.get("derived_url")
+                                or link_raw.get("external_url")
+                                or ""
+                            ),
+                        )
+                    )
                 link_snapshots[(site, observation_id)] = tuple(snapshots)
             raw_candidates.append((site, observation_id, raw))
         return {
@@ -1789,7 +2141,9 @@ class ConsolidationService:
         }
 
     def _enrich_mo_fungal_scope(
-        self, raw: dict[str, Any], cancelled: Callable[[], bool],
+        self,
+        raw: dict[str, Any],
+        cancelled: Callable[[], bool],
     ) -> dict[str, Any]:
         inventory = parse_mo_observation(raw, account_id=0)
         if inventory.fungi_status != "unknown" or not inventory.taxon_id:
@@ -1800,6 +2154,7 @@ class ConsolidationService:
         if not name_rows:
             return raw
         from .coordinator import _name_fungi_status
+
         status = _name_fungi_status(name_rows[0])
         if status == "unknown":
             return raw
@@ -1813,12 +2168,19 @@ class ConsolidationService:
         return enriched
 
     def _require_reviewed_members_unchanged(
-        self, profile_id: int, group_id: int,
+        self,
+        profile_id: int,
+        group_id: int,
         cancelled: Callable[[], bool],
-    ) -> dict[tuple[RemoteSite, int], tuple[InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot]]:
+    ) -> dict[
+        tuple[RemoteSite, int],
+        tuple[InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot],
+    ]:
         ledger = self.db.consolidation_ledger_for_group(profile_id, group_id)
         if not ledger:
-            raise ConsolidationError("The consolidation ledger is missing.", "missing_ledger")
+            raise ConsolidationError(
+                "The consolidation ledger is missing.", "missing_ledger"
+            )
         members = self.db.consolidation_attempt_members(
             profile_id, int(ledger["attempt_id"])
         )
@@ -1830,22 +2192,31 @@ class ConsolidationService:
         data = self._fetch_review_data(profile, specs, cancelled)
         by_key: dict[
             tuple[RemoteSite, int],
-            tuple[InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot],
+            tuple[
+                InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot
+            ],
         ] = {}
         for site, observation_id, raw in data["candidates"]:
             inventory, hydrated = _hydrate_candidate(
-                site, observation_id, raw, profile, self.reader,
+                site,
+                observation_id,
+                raw,
+                profile,
+                self.reader,
                 inat_mo_field_id=data["inat_mo_field_id"],
             )
             snapshot = _member_snapshot(
-                inventory, hydrated, raw,
+                inventory,
+                hydrated,
+                raw,
                 photo_payload=data["photo_payloads"].get((site, observation_id)),
                 link_snapshots=data["link_snapshots"].get((site, observation_id), ()),
             )
             by_key[(site, observation_id)] = (inventory, hydrated, snapshot)
         succeeded_link = any(
             str(row["state"]) == "succeeded"
-            and str(row["action_type"]) in {
+            and str(row["action_type"])
+            in {
                 LinkActionType.MO_EXTERNAL_LINK_ADD.value,
                 LinkActionType.INAT_OFV_ADD.value,
             }
@@ -1864,26 +2235,25 @@ class ConsolidationService:
             expected_role = (
                 "canonical"
                 if (
-                    key == (
+                    key
+                    == (
                         RemoteSite.MO,
                         ledger.get("canonical_mo_observation_id"),
                     )
-                    or key == (
+                    or key
+                    == (
                         RemoteSite.INAT,
                         ledger.get("canonical_inat_observation_id"),
                     )
                 )
                 else "donor"
             )
-            if (
-                str(member["role"]) != expected_role
-                or (
-                    str(member["local_state"])
-                    not in (
-                        {"active", "canonical"}
-                        if expected_role == "canonical"
-                        else {"proposed"}
-                    )
+            if str(member["role"]) != expected_role or (
+                str(member["local_state"])
+                not in (
+                    {"active", "canonical"}
+                    if expected_role == "canonical"
+                    else {"proposed"}
                 )
             ):
                 raise ConsolidationError(
@@ -1893,8 +2263,7 @@ class ConsolidationService:
                 )
             is_canonical = expected_role == "canonical"
             if (
-                int(member.get("reviewed_owner_account_id") or 0)
-                != snapshot.owner_id
+                int(member.get("reviewed_owner_account_id") or 0) != snapshot.owner_id
                 or snapshot.owner_id != snapshot.account_id
             ):
                 raise ConsolidationError(
@@ -1923,9 +2292,7 @@ class ConsolidationService:
                 )
             if is_canonical:
                 suffix = "mo" if key[0] is RemoteSite.MO else "inat"
-                reviewed_full = str(
-                    ledger.get(f"canonical_{suffix}_fingerprint") or ""
-                )
+                reviewed_full = str(ledger.get(f"canonical_{suffix}_fingerprint") or "")
                 reviewed_preflight = str(
                     ledger.get(f"canonical_{suffix}_preflight_fingerprint") or ""
                 )
@@ -1935,11 +2302,10 @@ class ConsolidationService:
                     member.get("attempt_preflight_fingerprint") or ""
                 )
             if is_canonical:
-                if (
-                    reviewed_full
-                    != str(member.get("attempt_record_fingerprint") or "")
-                    or reviewed_preflight
-                    != str(member.get("attempt_preflight_fingerprint") or "")
+                if reviewed_full != str(
+                    member.get("attempt_record_fingerprint") or ""
+                ) or reviewed_preflight != str(
+                    member.get("attempt_preflight_fingerprint") or ""
                 ):
                     raise ConsolidationError(
                         "The canonical attempt-member provenance is inconsistent.",
@@ -1950,10 +2316,7 @@ class ConsolidationService:
                     "The immutable attempt is missing a reviewed member fingerprint.",
                     "attempt_fingerprint_missing",
                 )
-            if (
-                not is_canonical
-                or not succeeded_link
-            ):
+            if not is_canonical or not succeeded_link:
                 if snapshot.record_fingerprint != reviewed_full:
                     raise ConsolidationError(
                         f"{key[0].value} #{key[1]} changed after review. No write was sent.",
@@ -1966,7 +2329,9 @@ class ConsolidationService:
                     "canonical_changed",
                 )
             self._require_expected_link_delta(
-                member, snapshot, reviewed_rows,
+                member,
+                snapshot,
+                reviewed_rows,
                 ledger.get("canonical_mo_observation_id"),
                 ledger.get("canonical_inat_observation_id"),
                 allow_canonical_addition=is_canonical and succeeded_link,
@@ -1975,10 +2340,13 @@ class ConsolidationService:
 
     @staticmethod
     def _require_expected_link_delta(
-        member: dict[str, Any], snapshot: ConsolidationMemberSnapshot,
+        member: dict[str, Any],
+        snapshot: ConsolidationMemberSnapshot,
         reviewed_rows: Sequence[dict[str, Any]],
-        canonical_mo_id: object, canonical_inat_id: object,
-        *, allow_canonical_addition: bool,
+        canonical_mo_id: object,
+        canonical_inat_id: object,
+        *,
+        allow_canonical_addition: bool,
     ) -> None:
         initial = {
             (
@@ -2012,9 +2380,7 @@ class ConsolidationService:
         expected_target = (
             canonical_inat_id if str(member["site"]) == "mo" else canonical_mo_id
         )
-        unexpected = {
-            item for item in current - initial if item[1] != expected_target
-        }
+        unexpected = {item for item in current - initial if item[1] != expected_target}
         if unexpected:
             raise ConsolidationError(
                 "An unreviewed reciprocal-link change appeared on a canonical record.",
@@ -2025,17 +2391,25 @@ class ConsolidationService:
         self,
         fresh: dict[
             tuple[RemoteSite, int],
-            tuple[InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot],
+            tuple[
+                InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot
+            ],
         ],
         ledger: dict[str, Any],
     ) -> None:
         values = list(fresh.values())
         for index, (_left_inv, left, _left_snapshot) in enumerate(values):
-            for _right_inv, right, _right_snapshot in values[index + 1:]:
+            for _right_inv, right, _right_snapshot in values[index + 1 :]:
                 conflicts, unavailable = specimen_identity_conflicts(left, right)
                 if conflicts or unavailable:
                     detail = "; ".join(
-                        (*conflicts, *(f"required evidence unavailable: {item}" for item in unavailable))
+                        (
+                            *conflicts,
+                            *(
+                                f"required evidence unavailable: {item}"
+                                for item in unavailable
+                            ),
+                        )
                     )
                     raise ConsolidationError(
                         f"Fresh specimen verification failed: {detail}",
@@ -2058,18 +2432,20 @@ class ConsolidationService:
                     RemoteSite(str(row["right_site"])),
                     int(row["right_observation_id"]),
                 )
-                normalized_edges.append(ConsolidationEvidenceEdge(
-                    left_site=left_site,
-                    left_observation_id=left_id,
-                    right_site=right_site,
-                    right_observation_id=right_id,
-                    evidence_type=str(row["evidence_type"]),
-                    evidence_strength=str(row["evidence_strength"]),
-                    reviewed_evidence_fingerprint=str(
-                        row["reviewed_evidence_fingerprint"]
-                    ),
-                    display_summary=str(row["display_summary"]),
-                ))
+                normalized_edges.append(
+                    ConsolidationEvidenceEdge(
+                        left_site=left_site,
+                        left_observation_id=left_id,
+                        right_site=right_site,
+                        right_observation_id=right_id,
+                        evidence_type=str(row["evidence_type"]),
+                        evidence_strength=str(row["evidence_strength"]),
+                        reviewed_evidence_fingerprint=str(
+                            row["reviewed_evidence_fingerprint"]
+                        ),
+                        display_summary=str(row["display_summary"]),
+                    )
+                )
             reviewed_edges = tuple(normalized_edges)
         except (KeyError, TypeError, ValueError) as exc:
             raise ConsolidationError(
@@ -2078,41 +2454,48 @@ class ConsolidationService:
             ) from exc
         reviewed_graph_fingerprint = consolidation_evidence_graph_fingerprint(
             (
-                edge.left_site.value, edge.left_observation_id,
-                edge.right_site.value, edge.right_observation_id,
-                edge.evidence_type, edge.evidence_strength,
+                edge.left_site.value,
+                edge.left_observation_id,
+                edge.right_site.value,
+                edge.right_observation_id,
+                edge.evidence_type,
+                edge.evidence_strength,
                 edge.reviewed_evidence_fingerprint,
             )
             for edge in reviewed_edges
         )
-        if (
-            not str(ledger.get("reviewed_evidence_graph_fingerprint") or "")
-            or reviewed_graph_fingerprint
-            != str(ledger["reviewed_evidence_graph_fingerprint"])
+        if not str(
+            ledger.get("reviewed_evidence_graph_fingerprint") or ""
+        ) or reviewed_graph_fingerprint != str(
+            ledger["reviewed_evidence_graph_fingerprint"]
         ):
             raise ConsolidationError(
                 "The immutable attempt evidence graph is incomplete or changed.",
                 "malformed_evidence",
             )
         fresh_pairs = [(inventory, hydrated) for inventory, hydrated, _ in values]
-        fresh_links = {
-            key: value[2].reciprocal_links for key, value in fresh.items()
-        }
+        fresh_links = {key: value[2].reciprocal_links for key, value in fresh.items()}
         current_edges = _supporting_evidence(fresh_pairs, fresh_links)
         current_signatures = {
             (
-                edge.left_site, edge.left_observation_id,
-                edge.right_site, edge.right_observation_id,
-                edge.evidence_type, edge.evidence_strength,
+                edge.left_site,
+                edge.left_observation_id,
+                edge.right_site,
+                edge.right_observation_id,
+                edge.evidence_type,
+                edge.evidence_strength,
                 edge.reviewed_evidence_fingerprint,
             )
             for edge in current_edges
         }
         for edge in reviewed_edges:
             signature = (
-                edge.left_site, edge.left_observation_id,
-                edge.right_site, edge.right_observation_id,
-                edge.evidence_type, edge.evidence_strength,
+                edge.left_site,
+                edge.left_observation_id,
+                edge.right_site,
+                edge.right_observation_id,
+                edge.evidence_type,
+                edge.evidence_strength,
                 edge.reviewed_evidence_fingerprint,
             )
             if signature not in current_signatures:
@@ -2126,15 +2509,18 @@ class ConsolidationService:
             reviewed_edges,
             canonical_mo_id=(
                 int(ledger["canonical_mo_observation_id"])
-                if ledger.get("canonical_mo_observation_id") is not None else None
+                if ledger.get("canonical_mo_observation_id") is not None
+                else None
             ),
             canonical_inat_id=(
                 int(ledger["canonical_inat_observation_id"])
-                if ledger.get("canonical_inat_observation_id") is not None else None
+                if ledger.get("canonical_inat_observation_id") is not None
+                else None
             ),
         )
         expected_donors = sum(
-            1 for member in self.db.consolidation_attempt_members(
+            1
+            for member in self.db.consolidation_attempt_members(
                 int(ledger["profile_id"]), int(ledger["attempt_id"])
             )
             if str(member["participation_role"]) == "new_donor"
@@ -2153,7 +2539,9 @@ class ConsolidationService:
     def _require_canonical_links(
         fresh: dict[
             tuple[RemoteSite, int],
-            tuple[InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot],
+            tuple[
+                InventoryObservation, HydratedObservation, ConsolidationMemberSnapshot
+            ],
         ],
         ledger: dict[str, Any],
     ) -> None:
@@ -2164,7 +2552,9 @@ class ConsolidationService:
         mo = fresh.get((RemoteSite.MO, int(mo_id)))
         inat = fresh.get((RemoteSite.INAT, int(inat_id)))
         if not mo or not inat:
-            raise ConsolidationError("The canonical pair is incomplete.", "canonical_missing")
+            raise ConsolidationError(
+                "The canonical pair is incomplete.", "canonical_missing"
+            )
         mo_linked = any(
             row.parse_state != "malformed" and row.target_observation_id == int(inat_id)
             for row in mo[2].reciprocal_links
@@ -2190,7 +2580,9 @@ def _first_result(payload: object) -> Optional[dict[str, Any]]:
 
 
 def _inat_link_snapshots(
-    raw: dict[str, Any], observation_id: int, field_id: Optional[int],
+    raw: dict[str, Any],
+    observation_id: int,
+    field_id: Optional[int],
 ) -> tuple[AuthoritativeLinkSnapshot, ...]:
     if field_id is None:
         return ()
@@ -2207,8 +2599,10 @@ def _inat_link_snapshots(
         )
         try:
             row_field_id = int(
-                row.get("field_id") or row.get("observation_field_id")
-                or field.get("id") or 0
+                row.get("field_id")
+                or row.get("observation_field_id")
+                or field.get("id")
+                or 0
             )
         except (TypeError, ValueError):
             continue
@@ -2219,17 +2613,30 @@ def _inat_link_snapshots(
         row_id = str(row.get("id") or f"ofv:{observation_id}:{index}")
         row_uuid = str(row.get("uuid") or "")
         state = "valid" if target is not None else "malformed"
-        result.append(AuthoritativeLinkSnapshot(
-            site=RemoteSite.INAT, observation_id=observation_id,
-            row_id=row_id, row_uuid=row_uuid, binding_id=field_id,
-            target_observation_id=target, parse_state=state,
-            row_fingerprint=public_fingerprint(
-                row_id, row_uuid, field_id, target, state, value,
-            ),
-            display_value=value,
-        ))
+        result.append(
+            AuthoritativeLinkSnapshot(
+                site=RemoteSite.INAT,
+                observation_id=observation_id,
+                row_id=row_id,
+                row_uuid=row_uuid,
+                binding_id=field_id,
+                target_observation_id=target,
+                parse_state=state,
+                row_fingerprint=public_fingerprint(
+                    row_id,
+                    row_uuid,
+                    field_id,
+                    target,
+                    state,
+                    value,
+                ),
+                display_value=value,
+            )
+        )
     if len(result) > 1:
-        targets = {row.target_observation_id for row in result if row.target_observation_id}
+        targets = {
+            row.target_observation_id for row in result if row.target_observation_id
+        }
         state = "conflicting" if len(targets) > 1 else "duplicate"
         result = [
             replace(

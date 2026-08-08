@@ -6,6 +6,7 @@ in-memory fake remote accounts plus a temporary SQLite file, exercises the
 real ConsolidationService/LinkRepairService/DB path, and removes the database
 after each scenario. No credential is read, printed, or persisted.
 """
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -22,14 +23,21 @@ from observation_workbench.api.auth import AuthState  # noqa: E402
 from observation_workbench.api.client import INatAPIError  # noqa: E402
 from observation_workbench.reconciliation.actions import LinkRepairService  # noqa: E402
 from observation_workbench.reconciliation.consolidation import (  # noqa: E402
-    ConsolidationError, ConsolidationService, select_canonical,
+    ConsolidationError,
+    ConsolidationService,
+    select_canonical,
 )
-from observation_workbench.reconciliation.db import ReconciliationDB, _utc_now  # noqa: E402
+from observation_workbench.reconciliation.db import (
+    ReconciliationDB,
+    _utc_now,
+)  # noqa: E402
 from observation_workbench.reconciliation.mo_client import (  # noqa: E402
-    MOAPIError, ReconciliationCancelled,
+    MOAPIError,
+    ReconciliationCancelled,
 )
 from observation_workbench.reconciliation.types import (  # noqa: E402
-    ConsolidationEvidencePath, RemoteSite,
+    ConsolidationEvidencePath,
+    RemoteSite,
 )
 
 PROFILE_ID = 1
@@ -45,8 +53,11 @@ def _inat(observation_id: int, *, voucher: str = "AR-1") -> dict:
         "uuid": f"inat-uuid-{observation_id}",
         "user": {"id": INAT_USER_ID, "login": "inat_user"},
         "taxon": {
-            "id": 123, "name": "Amanita muscaria", "rank": "species",
-            "iconic_taxon_name": "Fungi", "ancestry": "47170/123",
+            "id": 123,
+            "name": "Amanita muscaria",
+            "rank": "species",
+            "iconic_taxon_name": "Fungi",
+            "ancestry": "47170/123",
         },
         "observed_on": "2026-06-01",
         "updated_at": "2026-07-01T00:00:00+00:00",
@@ -72,8 +83,10 @@ def _mo(observation_id: int, *, voucher: str = "AR-1") -> dict:
         "owner_id": MO_USER_ID,
         "owner": {"id": MO_USER_ID, "login": "mo_user"},
         "consensus": {
-            "id": 321, "text_name": "Amanita muscaria",
-            "rank": "Species", "classification": {"kingdom": "Fungi"},
+            "id": 321,
+            "text_name": "Amanita muscaria",
+            "rank": "Species",
+            "classification": {"kingdom": "Fungi"},
         },
         "date": "2026-06-01",
         "updated_at": "2026-07-01T00:00:00+00:00",
@@ -103,42 +116,53 @@ class FakeINat:
 
     def get_current_user_v2(self, api_token):
         return {
-            "results": [
-                {"id": INAT_USER_ID, "login": "inat_user"}
-            ]
-            if api_token == "offline-inat-token"
-            else []
+            "results": (
+                [{"id": INAT_USER_ID, "login": "inat_user"}]
+                if api_token == "offline-inat-token"
+                else []
+            )
         }
 
     def get_observation_fields_autocomplete(self, query):
         return {
-            "results": [{
-                "id": FIELD_ID,
-                "name": "Mushroom Observer URL",
-                "datatype": "text",
-            }]
-            if query == "Mushroom Observer URL"
-            else []
+            "results": (
+                [
+                    {
+                        "id": FIELD_ID,
+                        "name": "Mushroom Observer URL",
+                        "datatype": "text",
+                    }
+                ]
+                if query == "Mushroom Observer URL"
+                else []
+            )
         }
 
     def create_reconciliation_field_value_v2(
-        self, api_token, observation_uuid, observation_field_id, value,
+        self,
+        api_token,
+        observation_uuid,
+        observation_field_id,
+        value,
     ):
         with self._lock:
             observation = next(
-                item for item in self.observations.values()
+                item
+                for item in self.observations.values()
                 if item["uuid"] == observation_uuid
             )
             self.write_calls += 1
-            observation["ofvs"].append({
-                "id": f"link-{self.write_calls}",
-                "uuid": f"link-uuid-{self.write_calls}",
-                "observation_field": {
-                    "id": observation_field_id,
-                    "name": "Mushroom Observer URL",
-                },
-                "value": value,
-            })
+            observation["ofvs"].append(
+                {
+                    "id": f"link-{self.write_calls}",
+                    "uuid": f"link-uuid-{self.write_calls}",
+                    "observation_field": {
+                        "id": observation_field_id,
+                        "name": "Mushroom Observer URL",
+                    },
+                    "value": value,
+                }
+            )
             hook = self.after_write
             lose = self.lose_next_response
             self.lose_next_response = False
@@ -146,8 +170,10 @@ class FakeINat:
             hook()
         if lose:
             raise INatAPIError(
-                "simulated lost response", endpoint="/observation_field_values",
-                request_phase="unsafe_write", method="POST",
+                "simulated lost response",
+                endpoint="/observation_field_values",
+                request_phase="unsafe_write",
+                method="POST",
             )
         return {"results": [{"uuid": f"link-uuid-{self.write_calls}"}]}
 
@@ -164,10 +190,13 @@ class FakeMO:
 
     def external_sites(self, cancelled):
         return {
-            "results": [{
-                "id": EXTERNAL_SITE_ID, "name": "iNaturalist",
-                "url": "https://www.inaturalist.org",
-            }]
+            "results": [
+                {
+                    "id": EXTERNAL_SITE_ID,
+                    "name": "iNaturalist",
+                    "url": "https://www.inaturalist.org",
+                }
+            ]
         }
 
     def observation(self, observation_id, cancelled, *, detail="high"):
@@ -189,7 +218,8 @@ class FakeMO:
         with self._lock:
             return {
                 "results": [
-                    deepcopy(row) for row in self.links
+                    deepcopy(row)
+                    for row in self.links
                     if int(row["observation"]) in wanted
                 ]
             }
@@ -201,16 +231,23 @@ class FakeMO:
         return expected_user_id if api_key == "offline-mo-key" else None
 
     def create_external_link(
-        self, api_key, observation_id, external_site_id, url, cancelled,
+        self,
+        api_key,
+        observation_id,
+        external_site_id,
+        url,
+        cancelled,
     ):
         with self._lock:
             self.write_calls += 1
-            self.links.append({
-                "id": self.write_calls,
-                "observation": int(observation_id),
-                "external_site": int(external_site_id),
-                "url": url,
-            })
+            self.links.append(
+                {
+                    "id": self.write_calls,
+                    "observation": int(observation_id),
+                    "external_site": int(external_site_id),
+                    "url": url,
+                }
+            )
             hook = self.after_write
             lose = self.lose_next_response
             self.lose_next_response = False
@@ -220,8 +257,11 @@ class FakeMO:
             hook()
         if lose:
             raise MOAPIError(
-                "external_links", None, "simulated lost response",
-                response_received=False, outcome_unknown=True,
+                "external_links",
+                None,
+                "simulated lost response",
+                response_received=False,
+                outcome_unknown=True,
                 error_code="simulated_lost_response",
             )
         return {"results": [{"id": self.write_calls}]}
@@ -229,7 +269,9 @@ class FakeMO:
 
 class Environment:
     def __init__(
-        self, mo_ids: tuple[int, ...], inat_ids: tuple[int, ...],
+        self,
+        mo_ids: tuple[int, ...],
+        inat_ids: tuple[int, ...],
     ) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="gate2b-")
         self.path = Path(self.temp.name) / "reconciliation.db"
@@ -239,13 +281,22 @@ class Environment:
             "INSERT INTO sync_profiles(profile_id,inat_user_id,inat_login,"
             "mo_user_id,mo_login,created_at,last_used_at) VALUES(?,?,?,?,?,?,?)",
             (
-                PROFILE_ID, INAT_USER_ID, "inat_user", MO_USER_ID, "mo_user",
-                now, now,
+                PROFILE_ID,
+                INAT_USER_ID,
+                "inat_user",
+                MO_USER_ID,
+                "mo_user",
+                now,
+                now,
             ),
         )
         self.db.save_field_binding(
-            PROFILE_ID, "mo_url", FIELD_ID, "Mushroom Observer URL",
-            "text", "verified",
+            PROFILE_ID,
+            "mo_url",
+            FIELD_ID,
+            "Mushroom Observer URL",
+            "text",
+            "verified",
         )
         self.inat = FakeINat({value: _inat(value) for value in inat_ids})
         self.mo = FakeMO({value: _mo(value) for value in mo_ids})
@@ -254,12 +305,22 @@ class Environment:
 
     def _build_services(self) -> None:
         self.links = LinkRepairService(
-            self.db, self.inat, self.mo, lambda: self.auth,
-            lambda _profile_id: "offline-mo-key", lambda: 0, lambda: 0,
+            self.db,
+            self.inat,
+            self.mo,
+            lambda: self.auth,
+            lambda _profile_id: "offline-mo-key",
+            lambda: 0,
+            lambda: 0,
         )
         self.service = ConsolidationService(
-            self.db, self.inat, self.mo, lambda: self.auth,
-            lambda _profile_id: "offline-mo-key", lambda: 0, lambda: 0,
+            self.db,
+            self.inat,
+            self.mo,
+            lambda: self.auth,
+            lambda _profile_id: "offline-mo-key",
+            lambda: 0,
+            lambda: 0,
             self.links,
         )
 
@@ -269,8 +330,11 @@ class Environment:
         self._build_services()
 
     def preview(
-        self, mo_ids: tuple[int, ...], inat_ids: tuple[int, ...],
-        canonical_mo: int | None, canonical_inat: int | None,
+        self,
+        mo_ids: tuple[int, ...],
+        inat_ids: tuple[int, ...],
+        canonical_mo: int | None,
+        canonical_inat: int | None,
     ):
         preview = self.service.prepare_preview(
             PROFILE_ID,
@@ -287,7 +351,10 @@ class Environment:
 
     def run(self, group_id: int):
         return self.service.execute_group(
-            PROFILE_ID, group_id, lambda: False, lambda _message: None,
+            PROFILE_ID,
+            group_id,
+            lambda: False,
+            lambda _message: None,
         )
 
     def close(self) -> None:
@@ -296,18 +363,23 @@ class Environment:
 
 
 def _scenario_shape(
-    label: str, mo_ids: tuple[int, ...], inat_ids: tuple[int, ...],
-    canonical_mo: int | None, canonical_inat: int | None,
+    label: str,
+    mo_ids: tuple[int, ...],
+    inat_ids: tuple[int, ...],
+    canonical_mo: int | None,
+    canonical_inat: int | None,
 ) -> None:
     env = Environment(mo_ids, inat_ids)
     try:
         donor_mo_before = {
             value: deepcopy(env.mo.observations[value])
-            for value in mo_ids if value != canonical_mo
+            for value in mo_ids
+            if value != canonical_mo
         }
         donor_inat_before = {
             value: deepcopy(env.inat.observations[value])
-            for value in inat_ids if value != canonical_inat
+            for value in inat_ids
+            if value != canonical_inat
         }
         preview = env.preview(mo_ids, inat_ids, canonical_mo, canonical_inat)
         consolidation_id, _attempt_id, group_id = env.journal(preview)
@@ -317,17 +389,19 @@ def _scenario_shape(
         assert detail and detail["state"] == "finalized"
         members = detail["members"]
         assert all(
-            row["local_state"] == (
-                "canonical" if row["role"] == "canonical" else "superseded"
-            )
+            row["local_state"]
+            == ("canonical" if row["role"] == "canonical" else "superseded")
             for row in members
         )
         assert all(
             row["admitted_from_attempt_member_id"] is not None
             and row["added_by_attempt_id"] == row["superseded_by_attempt_id"]
-            for row in members if row["role"] == "donor"
+            for row in members
+            if row["role"] == "donor"
         )
-        expected_link_writes = int(canonical_mo is not None and canonical_inat is not None)
+        expected_link_writes = int(
+            canonical_mo is not None and canonical_inat is not None
+        )
         assert env.mo.write_calls == expected_link_writes
         assert env.inat.write_calls == expected_link_writes
         assert donor_mo_before == {
@@ -336,10 +410,15 @@ def _scenario_shape(
         assert donor_inat_before == {
             value: env.inat.observations[value] for value in donor_inat_before
         }
-        assert env.db.connection().execute(
-            "SELECT COUNT(*) FROM sync_actions WHERE action_type LIKE '%remove%' "
-            "OR action_type LIKE '%delete%'"
-        ).fetchone()[0] == 0
+        assert (
+            env.db.connection()
+            .execute(
+                "SELECT COUNT(*) FROM sync_actions WHERE action_type LIKE '%remove%' "
+                "OR action_type LIKE '%delete%'"
+            )
+            .fetchone()[0]
+            == 0
+        )
         print(f"{label}: PASS")
     finally:
         env.close()
@@ -353,9 +432,12 @@ def scenario_cancel_and_no_canonical() -> None:
             [(RemoteSite.MO, 10), (RemoteSite.MO, 11), (RemoteSite.INAT, 20)],
             lambda: False,
         )
-        assert env.db.connection().execute(
-            "SELECT COUNT(*) FROM sync_consolidations"
-        ).fetchone()[0] == 0
+        assert (
+            env.db.connection()
+            .execute("SELECT COUNT(*) FROM sync_consolidations")
+            .fetchone()[0]
+            == 0
+        )
         try:
             select_canonical(preview, None, None)
             raise AssertionError("canonical selection unexpectedly succeeded")
@@ -399,16 +481,15 @@ def scenario_evidence_edge_removed() -> None:
         result = env.run(group_id)
         assert result[-1].state == "failed", result
         assert env.mo.write_calls == 0 and env.inat.write_calls == 0
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, attempt_id
-        )["state"] == "failed"
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 11
-        ) is None
+        assert env.db.consolidation_attempt(PROFILE_ID, attempt_id)["state"] == "failed"
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 11)
+            is None
+        )
         proposed = next(
-            row for row in env.db.consolidation_attempt_members(
-                PROFILE_ID, attempt_id
-            ) if row["observation_id"] == 11
+            row
+            for row in env.db.consolidation_attempt_members(PROFILE_ID, attempt_id)
+            if row["observation_id"] == 11
         )
         assert proposed["local_state"] == "proposed"
         print("reviewed edge removed while alternate edge remains: PASS")
@@ -421,16 +502,20 @@ def scenario_journal_rebuilds_graph_paths() -> None:
     try:
         preview = env.preview((10, 11), (20,), 10, 20)
         canonical_edge = next(
-            edge for edge in preview.evidence_edges
+            edge
+            for edge in preview.evidence_edges
             if edge.evidence_strength == "strong"
             if {
                 (edge.left_site, edge.left_observation_id),
                 (edge.right_site, edge.right_observation_id),
-            } == {(RemoteSite.MO, 10), (RemoteSite.INAT, 20)}
+            }
+            == {(RemoteSite.MO, 10), (RemoteSite.INAT, 20)}
         )
         donor_edge = next(
-            edge for edge in preview.evidence_edges
-            if (RemoteSite.MO, 11) in {
+            edge
+            for edge in preview.evidence_edges
+            if (RemoteSite.MO, 11)
+            in {
                 (edge.left_site, edge.left_observation_id),
                 (edge.right_site, edge.right_observation_id),
             }
@@ -449,7 +534,9 @@ def scenario_journal_rebuilds_graph_paths() -> None:
             ),
             donor_evidence_paths=(
                 ConsolidationEvidencePath(
-                    RemoteSite.MO, 11, ("fabricated display path",),
+                    RemoteSite.MO,
+                    11,
+                    ("fabricated display path",),
                     strong_anchor_step="fabricated nonempty anchor",
                 ),
             ),
@@ -488,12 +575,18 @@ def scenario_journal_rebuilds_graph_paths() -> None:
                 raise AssertionError("journal accepted forged evidence semantics")
             except ValueError as exc:
                 assert expected in str(exc).lower()
-        assert env.db.connection().execute(
-            "SELECT COUNT(*) FROM sync_consolidation_attempts"
-        ).fetchone()[0] == 0
-        assert env.db.connection().execute(
-            "SELECT COUNT(*) FROM sync_consolidations"
-        ).fetchone()[0] == 0
+        assert (
+            env.db.connection()
+            .execute("SELECT COUNT(*) FROM sync_consolidation_attempts")
+            .fetchone()[0]
+            == 0
+        )
+        assert (
+            env.db.connection()
+            .execute("SELECT COUNT(*) FROM sync_consolidations")
+            .fetchone()[0]
+            == 0
+        )
         print(
             "journal reconstructs paths and rejects forged evidence "
             "types/strengths: PASS"
@@ -635,9 +728,10 @@ def scenario_concurrent_resume() -> None:
         env.run(group_id)
         assert env.mo.write_calls == 1
         assert env.inat.write_calls == 1
-        assert env.db.consolidation_ledger_for_group(
-            PROFILE_ID, group_id
-        )["state"] == "succeeded"
+        assert (
+            env.db.consolidation_ledger_for_group(PROFILE_ID, group_id)["state"]
+            == "succeeded"
+        )
         print("two concurrent resumes produce one write per canonical link: PASS")
     finally:
         env.close()
@@ -659,7 +753,8 @@ def scenario_finalize_rollback() -> None:
         except SystemExit:
             pass
         finalize = next(
-            row for row in env.db.action_group_rows(PROFILE_ID, group_id)
+            row
+            for row in env.db.action_group_rows(PROFILE_ID, group_id)
             if row["action_type"] == "consolidation_finalize"
         )
         # Deliberately violate one required provenance invariant, then let the
@@ -671,19 +766,19 @@ def scenario_finalize_rollback() -> None:
         env.service._execute_finalize = original_finalize
         result = env.run(group_id)
         assert result[-1].state == "failed", result
-        members = env.db.consolidation_detail(
-            PROFILE_ID, consolidation_id
-        )["members"]
+        members = env.db.consolidation_detail(PROFILE_ID, consolidation_id)["members"]
         assert all(row["local_state"] == "active" for row in members)
-        pair = env.db.connection().execute(
-            "SELECT review_state FROM sync_pairs WHERE profile_id=? "
-            "AND mo_observation_id=10 AND inat_observation_id=20",
-            (PROFILE_ID,),
-        ).fetchone()
+        pair = (
+            env.db.connection()
+            .execute(
+                "SELECT review_state FROM sync_pairs WHERE profile_id=? "
+                "AND mo_observation_id=10 AND inat_observation_id=20",
+                (PROFILE_ID,),
+            )
+            .fetchone()
+        )
         assert pair and pair["review_state"] == "provisional"
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, attempt_id
-        )["state"] == "failed"
+        assert env.db.consolidation_attempt(PROFILE_ID, attempt_id)["state"] == "failed"
         print("local finalization invariant failure rolls back atomically: PASS")
     finally:
         env.close()
@@ -693,9 +788,7 @@ def scenario_immutable_superseding_attempt() -> None:
     env = Environment((10, 11, 12), (20,))
     try:
         first_preview = env.preview((10, 11), (20,), 10, 20)
-        consolidation_id, first_attempt_id, first_group_id = env.journal(
-            first_preview
-        )
+        consolidation_id, first_attempt_id, first_group_id = env.journal(first_preview)
         first_attempt_before = dict(
             env.db.consolidation_attempt(PROFILE_ID, first_attempt_id)
         )
@@ -708,14 +801,10 @@ def scenario_immutable_superseding_attempt() -> None:
         same_id, second_attempt_id, second_group_id = env.journal(second_preview)
         assert same_id == consolidation_id
         assert second_attempt_id != first_attempt_id
-        second_attempt = env.db.consolidation_attempt(
-            PROFILE_ID, second_attempt_id
-        )
+        second_attempt = env.db.consolidation_attempt(PROFILE_ID, second_attempt_id)
         assert second_attempt["supersedes_attempt_id"] == first_attempt_id
         assert second_attempt["action_group_id"] != first_group_id
-        first_attempt_after = env.db.consolidation_attempt(
-            PROFILE_ID, first_attempt_id
-        )
+        first_attempt_after = env.db.consolidation_attempt(PROFILE_ID, first_attempt_id)
         for immutable_column in (
             "action_group_id",
             "correlation_marker",
@@ -731,9 +820,12 @@ def scenario_immutable_superseding_attempt() -> None:
             )
         completed = env.run(second_group_id)
         assert completed[-1].state == "succeeded", completed
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == second_attempt_id
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == second_attempt_id
+        )
         extension = env.service.prepare_preview(
             PROFILE_ID,
             [(RemoteSite.MO, 10), (RemoteSite.MO, 12)],
@@ -743,9 +835,12 @@ def scenario_immutable_superseding_attempt() -> None:
         _, third_attempt_id, third_group_id = env.journal(extension)
         extended = env.run(third_group_id)
         assert extended[-1].state == "succeeded", extended
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == third_attempt_id
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == third_attempt_id
+        )
         print(
             "failed attempt → changed canonical → successful retry baseline "
             "→ valid extension: PASS"
@@ -765,25 +860,32 @@ def scenario_initial_canonical_abandonment_boundary() -> None:
         assert env.mo.write_calls == 0 and env.inat.write_calls == 0
 
         replacement = env.preview((10, 11, 12), (20,), 11, 20)
-        replacement_id, replacement_attempt_id, replacement_group_id = (
-            env.journal(replacement)
+        replacement_id, replacement_attempt_id, replacement_group_id = env.journal(
+            replacement
         )
         assert replacement_id != abandoned_id
-        assert env.db.get_consolidation(
-            PROFILE_ID, abandoned_id
-        )["state"] == "cancelled"
+        assert (
+            env.db.get_consolidation(PROFILE_ID, abandoned_id)["state"] == "cancelled"
+        )
         assert not env.db.list_consolidation_members(PROFILE_ID, abandoned_id)
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, failed_attempt_id
-        )["state"] == "failed"
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, replacement_attempt_id
-        )["supersedes_attempt_id"] == failed_attempt_id
+        assert (
+            env.db.consolidation_attempt(PROFILE_ID, failed_attempt_id)["state"]
+            == "failed"
+        )
+        assert (
+            env.db.consolidation_attempt(PROFILE_ID, replacement_attempt_id)[
+                "supersedes_attempt_id"
+            ]
+            == failed_attempt_id
+        )
         completed = env.run(replacement_group_id)
         assert completed[-1].state == "succeeded", completed
-        assert env.db.get_consolidation(
-            PROFILE_ID, replacement_id
-        )["canonical_mo_observation_id"] == 11
+        assert (
+            env.db.get_consolidation(PROFILE_ID, replacement_id)[
+                "canonical_mo_observation_id"
+            ]
+            == 11
+        )
 
         # Once any remote write starts, canonical choices stay locked.
         env2 = Environment((30, 31), (40,))
@@ -803,9 +905,10 @@ def scenario_initial_canonical_abandonment_boundary() -> None:
                 )
             except ValueError as exc:
                 assert "canonical choices are locked" in str(exc).lower()
-            assert env2.db.get_consolidation(
-                PROFILE_ID, locked_id
-            )["state"] in {"confirmed", "draft"}
+            assert env2.db.get_consolidation(PROFILE_ID, locked_id)["state"] in {
+                "confirmed",
+                "draft",
+            }
         finally:
             env2.close()
         print("no-write canonical abandonment / post-write lock: PASS")
@@ -823,9 +926,12 @@ def scenario_unsupported_and_filtering() -> None:
         items = env.db.consolidation_items(PROFILE_ID, attempt_id)
         assert items and all(item["state"] == "disabled" for item in items)
         assert not any(
-            row["action_type"] in {
-                "inat_photo_attach", "mo_photo_attach",
-                "inat_its_add", "mo_sequence_add",
+            row["action_type"]
+            in {
+                "inat_photo_attach",
+                "mo_photo_attach",
+                "inat_its_add",
+                "mo_sequence_add",
             }
             for row in env.db.action_group_rows(PROFILE_ID, group_id)
         )
@@ -872,20 +978,20 @@ def scenario_extension_noop_and_history() -> None:
             env.db.consolidation_attempt(PROFILE_ID, first_attempt_id)
         )
         first_evidence_before = [
-            dict(row) for row in env.db.consolidation_evidence(
-                PROFILE_ID, first_attempt_id
-            )
+            dict(row)
+            for row in env.db.consolidation_evidence(PROFILE_ID, first_attempt_id)
         ]
         prior_donor_before = next(
-            dict(row) for row in env.db.list_consolidation_members(
-                PROFILE_ID, consolidation_id
-            ) if row["site"] == "mo" and row["observation_id"] == 11
+            dict(row)
+            for row in env.db.list_consolidation_members(PROFILE_ID, consolidation_id)
+            if row["site"] == "mo" and row["observation_id"] == 11
         )
         writes_before = (env.mo.write_calls, env.inat.write_calls)
         extension = env.service.prepare_preview(
             PROFILE_ID,
             [
-                (RemoteSite.MO, 10), (RemoteSite.MO, 12),
+                (RemoteSite.MO, 10),
+                (RemoteSite.MO, 12),
                 (RemoteSite.INAT, 21),
             ],
             lambda: False,
@@ -903,23 +1009,25 @@ def scenario_extension_noop_and_history() -> None:
         assert (env.mo.write_calls, env.inat.write_calls) == writes_before
         members = env.db.list_consolidation_members(PROFILE_ID, consolidation_id)
         prior_donor_after = next(
-            dict(row) for row in members
+            dict(row)
+            for row in members
             if row["site"] == "mo" and row["observation_id"] == 11
         )
         assert prior_donor_after == prior_donor_before
-        assert dict(env.db.consolidation_attempt(
-            PROFILE_ID, first_attempt_id
-        )) == first_attempt_before
+        assert (
+            dict(env.db.consolidation_attempt(PROFILE_ID, first_attempt_id))
+            == first_attempt_before
+        )
         assert [
-            dict(row) for row in env.db.consolidation_evidence(
-                PROFILE_ID, first_attempt_id
-            )
+            dict(row)
+            for row in env.db.consolidation_evidence(PROFILE_ID, first_attempt_id)
         ] == first_evidence_before
         assert all(
             row["local_state"] == "superseded"
             and row["added_by_attempt_id"] == second_attempt_id
             and row["superseded_by_attempt_id"] == second_attempt_id
-            for row in members if row["observation_id"] in {12, 21}
+            for row in members
+            if row["observation_id"] in {12, 21}
         )
         detail = env.db.consolidation_detail(PROFILE_ID, consolidation_id)
         assert len(detail["attempts"]) == 2
@@ -939,9 +1047,12 @@ def scenario_extension_noop_and_history() -> None:
         _, third_attempt_id, third_group_id = env.journal(drifted)
         third_result = env.run(third_group_id)
         assert third_result[-1].state == "succeeded", third_result
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == third_attempt_id
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == third_attempt_id
+        )
         print(
             "extension donors / canonical no-op / mutable canonical review / "
             "history preserved: PASS"
@@ -1036,24 +1147,28 @@ def scenario_login_change_is_reviewable() -> None:
         )
         assert preview.eligibility.eligible
         renamed = next(
-            member for member in preview.canonical_members
+            member
+            for member in preview.canonical_members
             if member.site is RemoteSite.INAT
         )
         assert renamed.account_id == INAT_USER_ID
         assert renamed.owner_login == "renamed_inat_user"
         _same, attempt_id, group_id = env.journal(preview)
         persisted = next(
-            row for row in env.db.consolidation_attempt_members(
-                PROFILE_ID, attempt_id
-            ) if row["site"] == "inat"
+            row
+            for row in env.db.consolidation_attempt_members(PROFILE_ID, attempt_id)
+            if row["site"] == "inat"
         )
         assert persisted["reviewed_owner_account_id"] == INAT_USER_ID
         assert persisted["reviewed_owner_login"] == "renamed_inat_user"
         result = env.run(group_id)
         assert result[-1].state == "succeeded", result
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == attempt_id
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == attempt_id
+        )
 
         pinned = env.service.prepare_preview(
             PROFILE_ID,
@@ -1091,7 +1206,9 @@ def scenario_baseline_pointer_guards() -> None:
         ):
             try:
                 conn.execute(statement, values)
-                raise AssertionError("cross-consolidation baseline pointer was accepted")
+                raise AssertionError(
+                    "cross-consolidation baseline pointer was accepted"
+                )
             except sqlite3.IntegrityError:
                 pass
 
@@ -1165,9 +1282,10 @@ def scenario_baseline_pointer_guards() -> None:
         )
         rejected = env.run(extension_group)
         assert rejected[-1].state == "failed", rejected
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 14
-        ) is None
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 14)
+            is None
+        )
         assert first_consolidation != second_consolidation
         print(
             "cross-consolidation/cross-profile baseline guards and independent "
@@ -1181,10 +1299,7 @@ def scenario_extension_missing_link_unknown_resume() -> None:
     env = Environment((10, 11, 12, 13), (20,))
     try:
         consolidation_id, _first_attempt_id = _finalize_initial(env)
-        env.mo.links = [
-            row for row in env.mo.links
-            if int(row["observation"]) != 10
-        ]
+        env.mo.links = [row for row in env.mo.links if int(row["observation"]) != 10]
         extension = env.service.prepare_preview(
             PROFILE_ID,
             [(RemoteSite.MO, 10), (RemoteSite.MO, 12)],
@@ -1196,11 +1311,10 @@ def scenario_extension_missing_link_unknown_resume() -> None:
         first = env.run(group_id)
         assert first[-1].state == "outcome_unknown", first
         assert (env.mo.write_calls, env.inat.write_calls) == (
-            writes_before[0] + 1, writes_before[1],
+            writes_before[0] + 1,
+            writes_before[1],
         )
-        donor = env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 12
-        )
+        donor = env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 12)
         assert donor and donor["local_state"] == "proposed"
         try:
             env.service.prepare_preview(
@@ -1216,16 +1330,18 @@ def scenario_extension_missing_link_unknown_resume() -> None:
         assert resumed[-1].state == "succeeded", resumed
         assert env.mo.write_calls == writes_before[0] + 1
         assert env.inat.write_calls == writes_before[1]
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, attempt_id
-        )["state"] == "succeeded"
+        assert (
+            env.db.consolidation_attempt(PROFILE_ID, attempt_id)["state"] == "succeeded"
+        )
         donor = next(
-            row for row in env.db.list_consolidation_members(
-                PROFILE_ID, consolidation_id
-            ) if row["observation_id"] == 12
+            row
+            for row in env.db.list_consolidation_members(PROFILE_ID, consolidation_id)
+            if row["observation_id"] == 12
         )
         assert donor["local_state"] == "superseded"
-        print("extension one-link repair / unknown blocks / verifier resumes once: PASS")
+        print(
+            "extension one-link repair / unknown blocks / verifier resumes once: PASS"
+        )
     finally:
         env.close()
 
@@ -1239,19 +1355,26 @@ def scenario_canonical_link_noop_matrix() -> None:
         env = Environment((10, 11), (20,))
         try:
             if mo_present:
-                env.mo.links.append({
-                    "id": 900, "observation": 10,
-                    "external_site": EXTERNAL_SITE_ID,
-                    "url": "https://www.inaturalist.org/observations/20",
-                })
+                env.mo.links.append(
+                    {
+                        "id": 900,
+                        "observation": 10,
+                        "external_site": EXTERNAL_SITE_ID,
+                        "url": "https://www.inaturalist.org/observations/20",
+                    }
+                )
             if inat_present:
-                env.inat.observations[20]["ofvs"].append({
-                    "id": "existing-link", "uuid": "existing-link-uuid",
-                    "observation_field": {
-                        "id": FIELD_ID, "name": "Mushroom Observer URL",
-                    },
-                    "value": "https://mushroomobserver.org/obs/10",
-                })
+                env.inat.observations[20]["ofvs"].append(
+                    {
+                        "id": "existing-link",
+                        "uuid": "existing-link-uuid",
+                        "observation_field": {
+                            "id": FIELD_ID,
+                            "name": "Mushroom Observer URL",
+                        },
+                        "value": "https://mushroomobserver.org/obs/10",
+                    }
+                )
             preview = env.preview((10, 11), (20,), 10, 20)
             _cid, _attempt_id, group_id = env.journal(preview)
             result = env.run(group_id)
@@ -1264,11 +1387,14 @@ def scenario_canonical_link_noop_matrix() -> None:
 
     env = Environment((10, 11), (20, 999))
     try:
-        env.mo.links.append({
-            "id": 901, "observation": 11,
-            "external_site": EXTERNAL_SITE_ID,
-            "url": "https://www.inaturalist.org/observations/999",
-        })
+        env.mo.links.append(
+            {
+                "id": 901,
+                "observation": 11,
+                "external_site": EXTERNAL_SITE_ID,
+                "url": "https://www.inaturalist.org/observations/999",
+            }
+        )
         donor_links_before = deepcopy(env.mo.links)
         preview = env.preview((10, 11), (20,), 10, 20)
         _cid, _attempt_id, group_id = env.journal(preview)
@@ -1285,11 +1411,14 @@ def scenario_canonical_link_noop_matrix() -> None:
 
     env = Environment((10, 11), (20, 999))
     try:
-        env.mo.links.append({
-            "id": 902, "observation": 10,
-            "external_site": EXTERNAL_SITE_ID,
-            "url": "https://www.inaturalist.org/observations/999",
-        })
+        env.mo.links.append(
+            {
+                "id": 902,
+                "observation": 10,
+                "external_site": EXTERNAL_SITE_ID,
+                "url": "https://www.inaturalist.org/observations/999",
+            }
+        )
         preview = env.preview((10, 11), (20,), 10, 20)
         assert not preview.eligibility.eligible
         try:
@@ -1316,25 +1445,24 @@ def scenario_failed_extension_retry() -> None:
         env.mo.observations[12]["notes"] += " changed after review"
         failed = env.run(group_id)
         assert failed[-1].state == "failed"
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 12
-        ) is None
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 12)
+            is None
+        )
         retry = env.service.prepare_preview(
             PROFILE_ID,
             [(RemoteSite.MO, 10), (RemoteSite.MO, 12)],
             lambda: False,
         )
         _same_id, retry_attempt_id, retry_group_id = env.journal(retry)
-        retry_attempt = env.db.consolidation_attempt(
-            PROFILE_ID, retry_attempt_id
-        )
+        retry_attempt = env.db.consolidation_attempt(PROFILE_ID, retry_attempt_id)
         assert retry_attempt["supersedes_attempt_id"] == failed_attempt_id
         completed = env.run(retry_group_id)
         assert completed[-1].state == "succeeded", completed
         donor = next(
-            row for row in env.db.list_consolidation_members(
-                PROFILE_ID, consolidation_id
-            ) if row["observation_id"] == 12
+            row
+            for row in env.db.list_consolidation_members(PROFILE_ID, consolidation_id)
+            if row["observation_id"] == 12
         )
         assert donor["added_by_attempt_id"] == retry_attempt_id
         assert donor["superseded_by_attempt_id"] == retry_attempt_id
@@ -1357,33 +1485,37 @@ def scenario_cancelled_extension_different_donor() -> None:
         env.db.set_consolidation_attempt_state(
             PROFILE_ID, cancelled_attempt_id, "cancelled"
         )
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 12
-        ) is None
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == baseline_attempt_id
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 12)
+            is None
+        )
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == baseline_attempt_id
+        )
 
         replacement = env.service.prepare_preview(
             PROFILE_ID,
             [(RemoteSite.MO, 10), (RemoteSite.MO, 13)],
             lambda: False,
         )
-        _, replacement_attempt_id, replacement_group_id = env.journal(
-            replacement
-        )
+        _, replacement_attempt_id, replacement_group_id = env.journal(replacement)
         completed = env.run(replacement_group_id)
         assert completed[-1].state == "succeeded", completed
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 12
-        ) is None
-        admitted = env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 13
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 12)
+            is None
         )
+        admitted = env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 13)
         assert admitted and admitted["local_state"] == "superseded"
-        assert env.db.get_consolidation(
-            PROFILE_ID, consolidation_id
-        )["current_finalized_attempt_id"] == replacement_attempt_id
+        assert (
+            env.db.get_consolidation(PROFILE_ID, consolidation_id)[
+                "current_finalized_attempt_id"
+            ]
+            == replacement_attempt_id
+        )
         print("cancelled extension releases donor and accepts a different set: PASS")
     finally:
         env.close()
@@ -1446,26 +1578,34 @@ def scenario_read_auth_and_cancellation_guards() -> None:
             raise AssertionError("cancelled preview unexpectedly completed")
         except ReconciliationCancelled:
             pass
-        assert env.db.connection().execute(
-            "SELECT COUNT(*) FROM sync_consolidation_attempts"
-        ).fetchone()[0] == 0
+        assert (
+            env.db.connection()
+            .execute("SELECT COUNT(*) FROM sync_consolidation_attempts")
+            .fetchone()[0]
+            == 0
+        )
 
         preview = env.preview((10, 11), (20,), 10, 20)
         _cid, attempt_id, group_id = env.journal(preview)
         cancelled = {"value": False}
         env.mo.after_write = lambda: cancelled.update(value=True)
         env.service.execute_group(
-            PROFILE_ID, group_id, lambda: cancelled["value"],
+            PROFILE_ID,
+            group_id,
+            lambda: cancelled["value"],
             lambda _message: None,
         )
         assert env.mo.write_calls == 1 and env.inat.write_calls == 0
-        assert env.db.consolidation_attempt(
-            PROFILE_ID, attempt_id
-        )["state"] == "cancelled"
-        assert env.db.consolidation_membership_for_observation(
-            PROFILE_ID, "mo", 11
-        ) is None
-        print("auth/malformed reads/cancel-before-journal/cancel-between-ordinals: PASS")
+        assert (
+            env.db.consolidation_attempt(PROFILE_ID, attempt_id)["state"] == "cancelled"
+        )
+        assert (
+            env.db.consolidation_membership_for_observation(PROFILE_ID, "mo", 11)
+            is None
+        )
+        print(
+            "auth/malformed reads/cancel-before-journal/cancel-between-ordinals: PASS"
+        )
     finally:
         env.close()
 
@@ -1473,15 +1613,24 @@ def scenario_read_auth_and_cancellation_guards() -> None:
 def main() -> int:
     _scenario_shape(
         "one MO donor + MO canonical + iNaturalist counterpart",
-        (10, 11), (20,), 10, 20,
+        (10, 11),
+        (20,),
+        10,
+        20,
     )
     _scenario_shape(
         "one iNaturalist donor + iNaturalist canonical + MO counterpart",
-        (10,), (20, 21), 10, 20,
+        (10,),
+        (20, 21),
+        10,
+        20,
     )
     _scenario_shape(
         "duplicates on both sites",
-        (10, 11), (20, 21), 10, 20,
+        (10, 11),
+        (20, 21),
+        10,
+        20,
     )
     # Mixed-width observation ids on one site. Every other scenario uses
     # uniform 2-digit ids, which sort identically whether the reviewed evidence
@@ -1490,15 +1639,24 @@ def main() -> int:
     # 7-9 digits and MO ids 5-6, so this shape is the common case in production.
     _scenario_shape(
         "mixed-width observation ids (evidence-graph fingerprint ordering)",
-        (9, 1011), (20,), 9, 20,
+        (9, 1011),
+        (20,),
+        9,
+        20,
     )
     _scenario_shape(
         "MO-only duplicate set",
-        (10, 11), (), 10, None,
+        (10, 11),
+        (),
+        10,
+        None,
     )
     _scenario_shape(
         "iNaturalist-only duplicate set",
-        (), (20, 21), None, 20,
+        (),
+        (20, 21),
+        None,
+        20,
     )
     scenario_cancel_and_no_canonical()
     scenario_stale_member(canonical=False)

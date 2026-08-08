@@ -6,9 +6,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from observation_workbench.models import StudyIdentification, StudyObservation, StudyTaxon
+from observation_workbench.models import (
+    StudyIdentification,
+    StudyObservation,
+    StudyTaxon,
+)
 from observation_workbench.services.bulk_identification import BulkAgreeCandidate
-from observation_workbench.services.identification_actions import AgreeResult, AgreeTarget
+from observation_workbench.services.identification_actions import (
+    AgreeResult,
+    AgreeTarget,
+)
 from observation_workbench.ui import main_window
 
 
@@ -17,7 +24,9 @@ class BulkProvisionalTargetChangeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _make_obs(self, obs_id: int, taxon_id: int, taxon_name: str, login: str, ident_id: int):
+    def _make_obs(
+        self, obs_id: int, taxon_id: int, taxon_name: str, login: str, ident_id: int
+    ):
         taxon = StudyTaxon(taxon_id=taxon_id, name=taxon_name)
         ident = StudyIdentification(
             ident_id=ident_id,
@@ -52,23 +61,31 @@ class BulkProvisionalTargetChangeTests(unittest.TestCase):
             candidate=candidate,
         )
         results = []
-        worker.signals.finished.connect(lambda candidate, result: results.append((candidate, result)))
+        worker.signals.finished.connect(
+            lambda candidate, result: results.append((candidate, result))
+        )
 
-        with patch("observation_workbench.ui.main_window.refresh_observation", return_value=fresh_obs), patch(
-            "observation_workbench.ui.main_window.post_agreement",
-            return_value=AgreeResult(
-                "posted",
-                "Added identification: Amanita sp. 'kryorhodon'",
-                target=AgreeTarget(
-                    observation_id=1,
-                    taxon_id=123,
-                    taxon_name="Amanita sp. 'kryorhodon'",
-                    source_login="morphie",
-                    source_ident_id=222,
-                ),
-                refreshed_observation=fresh_obs,
+        with (
+            patch(
+                "observation_workbench.ui.main_window.refresh_observation",
+                return_value=fresh_obs,
             ),
-        ) as post_mock:
+            patch(
+                "observation_workbench.ui.main_window.post_agreement",
+                return_value=AgreeResult(
+                    "posted",
+                    "Added identification: Amanita sp. 'kryorhodon'",
+                    target=AgreeTarget(
+                        observation_id=1,
+                        taxon_id=123,
+                        taxon_name="Amanita sp. 'kryorhodon'",
+                        source_login="morphie",
+                        source_ident_id=222,
+                    ),
+                    refreshed_observation=fresh_obs,
+                ),
+            ) as post_mock,
+        ):
             worker.run()
 
         self.assertEqual(len(results), 1)
@@ -98,11 +115,17 @@ class BulkProvisionalTargetChangeTests(unittest.TestCase):
             candidate=candidate,
         )
         results = []
-        worker.signals.finished.connect(lambda candidate, result: results.append(result))
+        worker.signals.finished.connect(
+            lambda candidate, result: results.append(result)
+        )
 
-        with patch("observation_workbench.ui.main_window.refresh_observation", return_value=fresh_obs), patch(
-            "observation_workbench.ui.main_window.post_agreement"
-        ) as post_mock:
+        with (
+            patch(
+                "observation_workbench.ui.main_window.refresh_observation",
+                return_value=fresh_obs,
+            ),
+            patch("observation_workbench.ui.main_window.post_agreement") as post_mock,
+        ):
             worker.run()
 
         self.assertEqual(len(results), 1)

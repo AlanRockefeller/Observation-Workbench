@@ -5,6 +5,7 @@ taxon is always selected from an API result carrying its numeric iNaturalist
 ID.  Network work stays in a QRunnable and results are correlated with the
 text generation that started them.
 """
+
 from __future__ import annotations
 
 import logging
@@ -168,7 +169,9 @@ class TaxonAutocompleteField(QWidget):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         self.line_edit = QLineEdit(self)
-        self.line_edit.setPlaceholderText("Type at least two characters to search taxa…")
+        self.line_edit.setPlaceholderText(
+            "Type at least two characters to search taxa…"
+        )
         self.line_edit.textEdited.connect(self._text_edited)
         self.line_edit.installEventFilter(self)
         row.addWidget(self.line_edit)
@@ -297,7 +300,9 @@ class TaxonAutocompleteField(QWidget):
         if isinstance(signals, _TaxonAutocompleteSignals):
             self._live_signals.discard(signals)
         if self._closed or not isinstance(result, TaxonAutocompleteResult):
-            log.debug("Ignoring taxon autocomplete callback for a closed or invalid field")
+            log.debug(
+                "Ignoring taxon autocomplete callback for a closed or invalid field"
+            )
             return
         if result.generation != self._generation:
             log.debug(
@@ -315,7 +320,9 @@ class TaxonAutocompleteField(QWidget):
         if result.diagnostic:
             self._items = ()
             self._hide_suggestions()
-            self.search_status_changed.emit("Taxon search is temporarily unavailable. Try again.")
+            self.search_status_changed.emit(
+                "Taxon search is temporarily unavailable. Try again."
+            )
             log.debug(
                 "Taxon autocomplete generation %s ended with %s",
                 result.generation,

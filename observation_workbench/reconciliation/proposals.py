@@ -15,6 +15,7 @@ The two sites use different models, so this module keeps them strictly separate:
   pair name-synchronized. If a real endpoint is added later, a submission step
   can be built on top of the existing draft records.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,8 +31,11 @@ from .mo_parsing import parse_mo_observation, positive_int
 from .normalization import public_fingerprint
 from .specimen_state import evaluate_specimen_state
 from .types import (
-    NameProposalCandidate, NameProposalPreview, NameProposalStatus,
-    ReconciliationProfile, RemoteSite,
+    NameProposalCandidate,
+    NameProposalPreview,
+    NameProposalStatus,
+    ReconciliationProfile,
+    RemoteSite,
 )
 
 FUNGI_TAXON_ID = "47170"
@@ -65,8 +69,12 @@ class NameProposalService:
     """Fresh-read eligibility resolution plus MO proposal lifecycle tracking."""
 
     def __init__(
-        self, db: ReconciliationDB, inat_client: INatClient, mo_client: MOClient,
-        auth_provider: Callable[[], AuthState], mo_key_provider: Callable[[int], str],
+        self,
+        db: ReconciliationDB,
+        inat_client: INatClient,
+        mo_client: MOClient,
+        auth_provider: Callable[[], AuthState],
+        mo_key_provider: Callable[[int], str],
         auth_generation_provider: Callable[[], int],
         mo_key_generation_provider: Callable[[], int],
     ) -> None:
@@ -81,7 +89,9 @@ class NameProposalService:
     # Preview ----------------------------------------------------------
 
     def prepare_preview(
-        self, profile_id: int, pair_id: int,
+        self,
+        profile_id: int,
+        pair_id: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> NameProposalPreview:
         pair = self._eligible_pair(profile_id, pair_id)
@@ -98,31 +108,45 @@ class NameProposalService:
         current = _first_result(self.inat_client.get_current_user_v2(token))
         if positive_int(current.get("id") if current else None) != profile.inat_user_id:
             raise NameProposalError(
-                "The authenticated iNaturalist account does not match the profile.", "inat_auth_mismatch",
+                "The authenticated iNaturalist account does not match the profile.",
+                "inat_auth_mismatch",
             )
 
         inat_id = int(pair["inat_observation_id"])
         mo_id = int(pair["mo_observation_id"])
-        inat_raw = _first_result(self.inat_client.get_reconciliation_detail(inat_id, token, deep=False))
+        inat_raw = _first_result(
+            self.inat_client.get_reconciliation_detail(inat_id, token, deep=False)
+        )
         if not inat_raw or positive_int(inat_raw.get("id")) != inat_id:
-            raise NameProposalError("The iNaturalist observation is unavailable.", "inat_unavailable")
+            raise NameProposalError(
+                "The iNaturalist observation is unavailable.", "inat_unavailable"
+            )
         inat_uuid = str(inat_raw.get("uuid") or "").strip()
         inat_user_raw = inat_raw.get("user")
         inat_user = inat_user_raw if isinstance(inat_user_raw, dict) else {}
         if not inat_uuid or positive_int(inat_user.get("id")) != profile.inat_user_id:
-            raise NameProposalError("The iNaturalist record identity or owner changed.", "inat_owner_changed")
+            raise NameProposalError(
+                "The iNaturalist record identity or owner changed.",
+                "inat_owner_changed",
+            )
         inat_taxon_raw = inat_raw.get("taxon")
         inat_taxon = inat_taxon_raw if isinstance(inat_taxon_raw, dict) else {}
         inat_name = str(inat_taxon.get("name") or "").strip()
         inat_taxon_id = positive_int(inat_taxon.get("id"))
         inat_ancestry = str(inat_taxon.get("ancestry") or "")
 
-        mo_raw = _first_result(self.mo_client.observation(mo_id, cancelled, detail="high"))
+        mo_raw = _first_result(
+            self.mo_client.observation(mo_id, cancelled, detail="high")
+        )
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_id:
-            raise NameProposalError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+            raise NameProposalError(
+                "The Mushroom Observer observation is unavailable.", "mo_unavailable"
+            )
         mo_observation = parse_mo_observation(mo_raw, profile.mo_user_id)
         if mo_observation.owner_id != profile.mo_user_id:
-            raise NameProposalError("The Mushroom Observer record owner changed.", "mo_owner_changed")
+            raise NameProposalError(
+                "The Mushroom Observer record owner changed.", "mo_owner_changed"
+            )
         mo_name = mo_observation.taxon_name
         mo_name_id = mo_observation.taxon_id
         mo_rank = mo_observation.taxon_rank
@@ -130,19 +154,29 @@ class NameProposalService:
         warnings: list[str] = []
         raw_candidates = [
             self._mo_to_inat_candidate(mo_name, mo_rank, inat_name, warnings),
-            self._inat_to_mo_candidate(inat_name, inat_taxon.get("rank"), inat_ancestry, mo_name, warnings),
+            self._inat_to_mo_candidate(
+                inat_name, inat_taxon.get("rank"), inat_ancestry, mo_name, warnings
+            ),
         ]
         candidates = [item for item in raw_candidates if item is not None]
         if not candidates:
-            warnings.append("Both sites already agree on the name, or no source name is available.")
+            warnings.append(
+                "Both sites already agree on the name, or no source name is available."
+            )
         # A name proposal must still prove the two records are the same collection.
         # The name difference under review is not a specimen conflict, so the full
         # specimen check (owner, fungal scope, deletion, date, vouchers,
         # collections, coordinates) applies without any name-specific exclusion.
         reader = INatReconciliationReader(self.inat_client)
         specimen_conflict, _fp, specimen_warnings = evaluate_specimen_state(
-            self.db, profile, pair, inat_raw, mo_raw, reader,
-            mo_client=self.mo_client, cancelled=cancelled,
+            self.db,
+            profile,
+            pair,
+            inat_raw,
+            mo_raw,
+            reader,
+            mo_client=self.mo_client,
+            cancelled=cancelled,
             tolerate_unknown_inat_scope=True,
         )
         warnings.extend(specimen_warnings)
@@ -153,18 +187,29 @@ class NameProposalService:
             )
             candidates = []
         return NameProposalPreview(
-            profile_id=profile_id, pair_id=pair_id,
-            auth_generation=auth_generation, mo_key_generation=mo_key_generation,
+            profile_id=profile_id,
+            pair_id=pair_id,
+            auth_generation=auth_generation,
+            mo_key_generation=mo_key_generation,
             source_fingerprint=_pair_fingerprint(pair),
-            mo_observation_id=mo_id, inat_observation_id=inat_id,
-            inat_observation_uuid=inat_uuid, inat_login=profile.inat_login,
-            inat_current_name=inat_name, inat_current_taxon_id=inat_taxon_id,
-            mo_current_name=mo_name, mo_current_name_id=mo_name_id,
-            candidates=tuple(candidates), warnings=tuple(warnings),
+            mo_observation_id=mo_id,
+            inat_observation_id=inat_id,
+            inat_observation_uuid=inat_uuid,
+            inat_login=profile.inat_login,
+            inat_current_name=inat_name,
+            inat_current_taxon_id=inat_taxon_id,
+            mo_current_name=mo_name,
+            mo_current_name_id=mo_name_id,
+            candidates=tuple(candidates),
+            warnings=tuple(warnings),
         )
 
     def _mo_to_inat_candidate(
-        self, mo_name: str, mo_rank: str, inat_name: str, warnings: list[str],
+        self,
+        mo_name: str,
+        mo_rank: str,
+        inat_name: str,
+        warnings: list[str],
     ) -> Optional[NameProposalCandidate]:
         if not mo_name:
             return None
@@ -173,13 +218,19 @@ class NameProposalService:
         # Resolve to a SINGLE UNAMBIGUOUS exact iNaturalist taxon; a fuzzy string
         # match must never become a proposal, and an exact string that maps to
         # several taxa (homonyms/inactive records) must be selected explicitly.
-        matches = _autocomplete_results(self.inat_client.get_taxa_autocomplete(mo_name, per_page=30))
+        matches = _autocomplete_results(
+            self.inat_client.get_taxa_autocomplete(mo_name, per_page=30)
+        )
         exact, reason = _resolve_exact_taxon(matches, mo_name, expected_rank=mo_rank)
         if reason == "no_exact":
             return NameProposalCandidate(
-                target_site=RemoteSite.INAT, source_site=RemoteSite.MO,
-                source_name=mo_name, proposed_name=mo_name, proposed_rank=mo_rank,
-                current_destination_name=inat_name, string_similarity_only=True,
+                target_site=RemoteSite.INAT,
+                source_site=RemoteSite.MO,
+                source_name=mo_name,
+                proposed_name=mo_name,
+                proposed_rank=mo_rank,
+                current_destination_name=inat_name,
+                string_similarity_only=True,
                 enabled=False,
                 disabled_reason="No exact iNaturalist taxon matches the Mushroom Observer name.",
             )
@@ -199,31 +250,51 @@ class NameProposalService:
                 ),
             }.get(reason, "The iNaturalist taxon could not be resolved unambiguously.")
             return NameProposalCandidate(
-                target_site=RemoteSite.INAT, source_site=RemoteSite.MO,
-                source_name=mo_name, proposed_name=mo_name, proposed_rank=mo_rank,
-                current_destination_name=inat_name, string_similarity_only=False,
-                enabled=False, disabled_reason=disabled_reason,
+                target_site=RemoteSite.INAT,
+                source_site=RemoteSite.MO,
+                source_name=mo_name,
+                proposed_name=mo_name,
+                proposed_rank=mo_rank,
+                current_destination_name=inat_name,
+                string_similarity_only=False,
+                enabled=False,
+                disabled_reason=disabled_reason,
             )
         taxon_id = positive_int(exact.get("id"))
         ancestry = str(exact.get("ancestry") or "")
-        kingdom_ok = FUNGI_TAXON_ID in ancestry.split("/") or str(
-            exact.get("iconic_taxon_name") or ""
-        ).casefold() == "fungi"
+        kingdom_ok = (
+            FUNGI_TAXON_ID in ancestry.split("/")
+            or str(exact.get("iconic_taxon_name") or "").casefold() == "fungi"
+        )
         if not kingdom_ok:
-            warnings.append("The resolved iNaturalist taxon is outside Fungi; resolve the kingdom conflict first.")
+            warnings.append(
+                "The resolved iNaturalist taxon is outside Fungi; resolve the kingdom conflict first."
+            )
         return NameProposalCandidate(
-            target_site=RemoteSite.INAT, source_site=RemoteSite.MO,
-            source_name=mo_name, proposed_name=str(exact.get("name") or mo_name),
-            proposed_rank=str(exact.get("rank") or mo_rank), proposed_taxon_id=taxon_id,
+            target_site=RemoteSite.INAT,
+            source_site=RemoteSite.MO,
+            source_name=mo_name,
+            proposed_name=str(exact.get("name") or mo_name),
+            proposed_rank=str(exact.get("rank") or mo_rank),
+            proposed_taxon_id=taxon_id,
             current_destination_name=inat_name,
-            synonyms=_synonyms(exact), kingdom_compatible=kingdom_ok,
+            synonyms=_synonyms(exact),
+            kingdom_compatible=kingdom_ok,
             enabled=bool(taxon_id) and kingdom_ok,
-            disabled_reason="" if (taxon_id and kingdom_ok) else "An incompatible-kingdom taxon cannot be proposed.",
+            disabled_reason=(
+                ""
+                if (taxon_id and kingdom_ok)
+                else "An incompatible-kingdom taxon cannot be proposed."
+            ),
         )
 
     def _inat_to_mo_candidate(
-        self, inat_name: str, inat_rank: object, inat_ancestry: str,
-        mo_name: str, warnings: list[str],
+        self,
+        inat_name: str,
+        inat_rank: object,
+        inat_ancestry: str,
+        mo_name: str,
+        warnings: list[str],
     ) -> Optional[NameProposalCandidate]:
         if not inat_name:
             return None
@@ -231,23 +302,35 @@ class NameProposalService:
             return None
         kingdom_ok = FUNGI_TAXON_ID in inat_ancestry.split("/")
         if not kingdom_ok:
-            warnings.append("The iNaturalist source taxon is outside Fungi; a Mushroom Observer proposal is blocked.")
+            warnings.append(
+                "The iNaturalist source taxon is outside Fungi; a Mushroom Observer proposal is blocked."
+            )
         warnings.append(
             "Mushroom Observer has no per-observation name-proposal endpoint, so this gate is draft-only: "
             "the proposal is tracked locally as pending and never submitted remotely."
         )
         return NameProposalCandidate(
-            target_site=RemoteSite.MO, source_site=RemoteSite.INAT,
-            source_name=inat_name, proposed_name=inat_name,
-            proposed_rank=str(inat_rank or ""), current_destination_name=mo_name,
-            kingdom_compatible=kingdom_ok, enabled=kingdom_ok,
-            disabled_reason="" if kingdom_ok else "An incompatible-kingdom source cannot be proposed.",
+            target_site=RemoteSite.MO,
+            source_site=RemoteSite.INAT,
+            source_name=inat_name,
+            proposed_name=inat_name,
+            proposed_rank=str(inat_rank or ""),
+            current_destination_name=mo_name,
+            kingdom_compatible=kingdom_ok,
+            enabled=kingdom_ok,
+            disabled_reason=(
+                ""
+                if kingdom_ok
+                else "An incompatible-kingdom source cannot be proposed."
+            ),
         )
 
     # iNaturalist delegation (synchronous; no network) -----------------
 
     def inat_delegation_params(
-        self, preview: NameProposalPreview, candidate: NameProposalCandidate,
+        self,
+        preview: NameProposalPreview,
+        candidate: NameProposalCandidate,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> INatDelegationParams:
         """Freshly revalidate the candidate and return Identify enqueue params.
@@ -262,19 +345,35 @@ class NameProposalService:
         reads the network, it must be called off the UI thread.
         """
         if candidate.target_site is not RemoteSite.INAT:
-            raise NameProposalError("This candidate is not an iNaturalist identification.", "invalid_candidate")
+            raise NameProposalError(
+                "This candidate is not an iNaturalist identification.",
+                "invalid_candidate",
+            )
         if not candidate.enabled or not candidate.proposed_taxon_id:
-            raise NameProposalError("A disabled or unresolved candidate cannot be delegated.", "invalid_candidate")
+            raise NameProposalError(
+                "A disabled or unresolved candidate cannot be delegated.",
+                "invalid_candidate",
+            )
         if candidate.string_similarity_only:
-            raise NameProposalError("A string-similarity-only candidate cannot be proposed.", "string_similarity_only")
+            raise NameProposalError(
+                "A string-similarity-only candidate cannot be proposed.",
+                "string_similarity_only",
+            )
         if not candidate.kingdom_compatible:
-            raise NameProposalError("An incompatible-kingdom candidate cannot be proposed.", "kingdom_conflict")
+            raise NameProposalError(
+                "An incompatible-kingdom candidate cannot be proposed.",
+                "kingdom_conflict",
+            )
         pair = self._eligible_pair(preview.profile_id, preview.pair_id)
         if _pair_fingerprint(pair) != preview.source_fingerprint:
-            raise NameProposalError("The confirmed pair changed after preview.", "pair_changed")
+            raise NameProposalError(
+                "The confirmed pair changed after preview.", "pair_changed"
+            )
         profile = self.db.profile(preview.profile_id)
         inat_raw, mo_raw, inat_name, inat_taxon_id, mo_observation = self._reread_pair(
-            profile, pair, cancelled,
+            profile,
+            pair,
+            cancelled,
         )
 
         # The destination iNaturalist taxon must still be the reviewed baseline.
@@ -295,7 +394,8 @@ class NameProposalService:
                 "mo_name_changed",
             )
         if (
-            preview.mo_current_name_id and mo_observation.taxon_id
+            preview.mo_current_name_id
+            and mo_observation.taxon_id
             and int(mo_observation.taxon_id) != int(preview.mo_current_name_id)
         ):
             raise NameProposalError(
@@ -308,7 +408,9 @@ class NameProposalService:
             self.inat_client.get_taxa_autocomplete(candidate.source_name, per_page=30)
         )
         exact, reason = _resolve_exact_taxon(
-            matches, candidate.source_name, expected_rank=candidate.proposed_rank,
+            matches,
+            candidate.source_name,
+            expected_rank=candidate.proposed_rank,
         )
         if reason == "ambiguous":
             raise NameProposalError(
@@ -326,17 +428,24 @@ class NameProposalService:
                 "taxon_rank_mismatch",
             )
         resolved_id = positive_int(exact.get("id")) if exact else None
-        if not exact or reason == "no_exact" or resolved_id != int(candidate.proposed_taxon_id):
+        if (
+            not exact
+            or reason == "no_exact"
+            or resolved_id != int(candidate.proposed_taxon_id)
+        ):
             raise NameProposalError(
                 "The iNaturalist taxon resolution for the source name changed after preview.",
                 "taxon_resolution_changed",
             )
         ancestry = str(exact.get("ancestry") or "")
-        kingdom_ok = FUNGI_TAXON_ID in ancestry.split("/") or str(
-            exact.get("iconic_taxon_name") or ""
-        ).casefold() == "fungi"
+        kingdom_ok = (
+            FUNGI_TAXON_ID in ancestry.split("/")
+            or str(exact.get("iconic_taxon_name") or "").casefold() == "fungi"
+        )
         if not kingdom_ok:
-            raise NameProposalError("The resolved iNaturalist taxon is outside Fungi.", "kingdom_conflict")
+            raise NameProposalError(
+                "The resolved iNaturalist taxon is outside Fungi.", "kingdom_conflict"
+            )
         # Tolerate the name difference under review, but block on any unrelated
         # specimen-identity conflict.
         reader = INatReconciliationReader(self.inat_client)
@@ -346,13 +455,20 @@ class NameProposalService:
         # whose taxon is KNOWN to be non-fungal, and the Mushroom Observer side
         # must still prove its scope.
         specimen_conflict, _fp, _warn = evaluate_specimen_state(
-            self.db, profile, pair, inat_raw, mo_raw, reader,
-            mo_client=self.mo_client, cancelled=cancelled,
+            self.db,
+            profile,
+            pair,
+            inat_raw,
+            mo_raw,
+            reader,
+            mo_client=self.mo_client,
+            cancelled=cancelled,
             tolerate_unknown_inat_scope=True,
         )
         if specimen_conflict:
             raise NameProposalError(
-                "Specimen-identity evidence conflicts; the name proposal is blocked: " + specimen_conflict,
+                "Specimen-identity evidence conflicts; the name proposal is blocked: "
+                + specimen_conflict,
                 "specimen_conflict",
             )
         return INatDelegationParams(
@@ -365,7 +481,9 @@ class NameProposalService:
         )
 
     def _reread_pair(
-        self, profile: ReconciliationProfile, pair: dict[str, Any],
+        self,
+        profile: ReconciliationProfile,
+        pair: dict[str, Any],
         cancelled: Callable[[], bool],
     ) -> tuple[dict[str, Any], dict[str, Any], str, Optional[int], Any]:
         """Fresh authenticated reread of both observations with owner/identity checks.
@@ -382,38 +500,62 @@ class NameProposalService:
         current = _first_result(self.inat_client.get_current_user_v2(token))
         if positive_int(current.get("id") if current else None) != profile.inat_user_id:
             raise NameProposalError(
-                "The authenticated iNaturalist account does not match the profile.", "inat_auth_mismatch",
+                "The authenticated iNaturalist account does not match the profile.",
+                "inat_auth_mismatch",
             )
         inat_id = int(pair["inat_observation_id"])
         mo_id = int(pair["mo_observation_id"])
-        inat_raw = _first_result(self.inat_client.get_reconciliation_detail(inat_id, token, deep=False))
+        inat_raw = _first_result(
+            self.inat_client.get_reconciliation_detail(inat_id, token, deep=False)
+        )
         if not inat_raw or positive_int(inat_raw.get("id")) != inat_id:
-            raise NameProposalError("The iNaturalist observation is unavailable.", "inat_unavailable")
+            raise NameProposalError(
+                "The iNaturalist observation is unavailable.", "inat_unavailable"
+            )
         inat_user_raw = inat_raw.get("user")
         inat_user = inat_user_raw if isinstance(inat_user_raw, dict) else {}
-        if not str(inat_raw.get("uuid") or "").strip() or positive_int(inat_user.get("id")) != profile.inat_user_id:
-            raise NameProposalError("The iNaturalist record identity or owner changed.", "inat_owner_changed")
+        if (
+            not str(inat_raw.get("uuid") or "").strip()
+            or positive_int(inat_user.get("id")) != profile.inat_user_id
+        ):
+            raise NameProposalError(
+                "The iNaturalist record identity or owner changed.",
+                "inat_owner_changed",
+            )
         if _fungi_status(inat_raw) == "nonfungal":
-            raise NameProposalError("The iNaturalist observation is now outside Fungi.", "inat_out_of_scope")
+            raise NameProposalError(
+                "The iNaturalist observation is now outside Fungi.", "inat_out_of_scope"
+            )
         inat_taxon_raw = inat_raw.get("taxon")
         inat_taxon = inat_taxon_raw if isinstance(inat_taxon_raw, dict) else {}
         inat_name = str(inat_taxon.get("name") or "").strip()
         inat_taxon_id = positive_int(inat_taxon.get("id"))
 
-        mo_raw = _first_result(self.mo_client.observation(mo_id, cancelled, detail="high"))
+        mo_raw = _first_result(
+            self.mo_client.observation(mo_id, cancelled, detail="high")
+        )
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_id:
-            raise NameProposalError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+            raise NameProposalError(
+                "The Mushroom Observer observation is unavailable.", "mo_unavailable"
+            )
         mo_observation = parse_mo_observation(mo_raw, profile.mo_user_id)
         if mo_observation.owner_id != profile.mo_user_id:
-            raise NameProposalError("The Mushroom Observer record owner changed.", "mo_owner_changed")
+            raise NameProposalError(
+                "The Mushroom Observer record owner changed.", "mo_owner_changed"
+            )
         if mo_observation.fungi_status == "nonfungal":
-            raise NameProposalError("The Mushroom Observer observation is now outside Fungi.", "mo_out_of_scope")
+            raise NameProposalError(
+                "The Mushroom Observer observation is now outside Fungi.",
+                "mo_out_of_scope",
+            )
         return inat_raw, mo_raw, inat_name, inat_taxon_id, mo_observation
 
     # Mushroom Observer proposal lifecycle -----------------------------
 
     def record_mo_proposal_draft(
-        self, preview: NameProposalPreview, candidate: NameProposalCandidate,
+        self,
+        preview: NameProposalPreview,
+        candidate: NameProposalCandidate,
         cancelled: Callable[[], bool],
     ) -> NameProposalResult:
         """Record a local Mushroom Observer name-proposal draft (pending).
@@ -429,17 +571,29 @@ class NameProposalService:
         conflicts) so a draft is never recorded from stale name information.
         """
         if candidate.target_site is not RemoteSite.MO:
-            raise NameProposalError("This candidate is not a Mushroom Observer proposal.", "invalid_candidate")
+            raise NameProposalError(
+                "This candidate is not a Mushroom Observer proposal.",
+                "invalid_candidate",
+            )
         if not candidate.enabled or not candidate.proposed_name:
-            raise NameProposalError("A disabled or empty candidate cannot be proposed.", "invalid_candidate")
+            raise NameProposalError(
+                "A disabled or empty candidate cannot be proposed.", "invalid_candidate"
+            )
         if not candidate.kingdom_compatible:
-            raise NameProposalError("An incompatible-kingdom candidate cannot be proposed.", "kingdom_conflict")
+            raise NameProposalError(
+                "An incompatible-kingdom candidate cannot be proposed.",
+                "kingdom_conflict",
+            )
         pair = self._eligible_pair(preview.profile_id, preview.pair_id)
         if _pair_fingerprint(pair) != preview.source_fingerprint:
-            raise NameProposalError("The confirmed pair changed after preview.", "pair_changed")
+            raise NameProposalError(
+                "The confirmed pair changed after preview.", "pair_changed"
+            )
         profile = self.db.profile(preview.profile_id)
         inat_raw, mo_raw, inat_name, _inat_taxon_id, mo_observation = self._reread_pair(
-            profile, pair, cancelled,
+            profile,
+            pair,
+            cancelled,
         )
         # The source of an MO draft is the iNaturalist name; it must still match
         # both the reviewed candidate and the reviewed baseline.
@@ -466,7 +620,8 @@ class NameProposalService:
                 "mo_name_changed",
             )
         if (
-            preview.mo_current_name_id and mo_current_id
+            preview.mo_current_name_id
+            and mo_current_id
             and int(mo_current_id) != int(preview.mo_current_name_id)
         ):
             raise NameProposalError(
@@ -486,19 +641,30 @@ class NameProposalService:
         # gates ``enabled`` on exactly that), so an unknown scope on this side is
         # a genuine change since preview and must block.
         specimen_conflict, _fp, _warn = evaluate_specimen_state(
-            self.db, profile, pair, inat_raw, mo_raw, reader,
-            mo_client=self.mo_client, cancelled=cancelled,
+            self.db,
+            profile,
+            pair,
+            inat_raw,
+            mo_raw,
+            reader,
+            mo_client=self.mo_client,
+            cancelled=cancelled,
         )
         if specimen_conflict:
             raise NameProposalError(
-                "Specimen-identity evidence conflicts; the name proposal is blocked: " + specimen_conflict,
+                "Specimen-identity evidence conflicts; the name proposal is blocked: "
+                + specimen_conflict,
                 "specimen_conflict",
             )
         mo_id = int(pair["mo_observation_id"])
         current_effective = mo_observation.taxon_name
         proposal_id = self.db.record_mo_proposal(
-            preview.profile_id, preview.pair_id, mo_id, candidate.proposed_name,
-            candidate.proposed_name_id, current_effective,
+            preview.profile_id,
+            preview.pair_id,
+            mo_id,
+            candidate.proposed_name,
+            candidate.proposed_name_id,
+            current_effective,
         )
         return NameProposalResult(
             "recorded_draft",
@@ -509,59 +675,92 @@ class NameProposalService:
         )
 
     def refresh_proposal_effectiveness(
-        self, profile_id: int, pair_id: int, cancelled: Callable[[], bool],
+        self,
+        profile_id: int,
+        pair_id: int,
+        cancelled: Callable[[], bool],
     ) -> NameProposalResult:
         """Re-read the MO consensus name and update the tracked proposal status."""
         proposal = self.db.mo_proposal_for_pair(profile_id, pair_id)
         if not proposal:
-            raise NameProposalError("No Mushroom Observer proposal is tracked for this pair.", "no_proposal")
+            raise NameProposalError(
+                "No Mushroom Observer proposal is tracked for this pair.", "no_proposal"
+            )
         proposal_id = int(proposal["proposal_id"])
         mo_id = int(proposal["mo_observation_id"])
-        mo_raw = _first_result(self.mo_client.observation(mo_id, cancelled, detail="high"))
+        mo_raw = _first_result(
+            self.mo_client.observation(mo_id, cancelled, detail="high")
+        )
         if not mo_raw or positive_int(mo_raw.get("id")) != mo_id:
-            raise NameProposalError("The Mushroom Observer observation is unavailable.", "mo_unavailable")
+            raise NameProposalError(
+                "The Mushroom Observer observation is unavailable.", "mo_unavailable"
+            )
         effective_name = parse_mo_observation(mo_raw, 0).taxon_name
         proposed = str(proposal["proposed_name"])
         now = _utc_now()
         if effective_name and effective_name.casefold() == proposed.casefold():
             self.db.update_mo_proposal_status(
-                profile_id, proposal_id, NameProposalStatus.EFFECTIVE.value,
-                current_effective_name=effective_name, became_effective_at=now,
+                profile_id,
+                proposal_id,
+                NameProposalStatus.EFFECTIVE.value,
+                current_effective_name=effective_name,
+                became_effective_at=now,
             )
-            return NameProposalResult("effective", "The proposed name is now the Mushroom Observer consensus.", proposal_id=proposal_id)
+            return NameProposalResult(
+                "effective",
+                "The proposed name is now the Mushroom Observer consensus.",
+                proposal_id=proposal_id,
+            )
         # Draft-only: nothing is submitted remotely, so a draft is simply "pending"
         # until the consensus happens to match it. Supersession is only a
         # meaningful outcome once a real submission exists, so it is not asserted
         # here (that logic is intentionally absent, not dead-gated on a submitted
         # flag that is never set).
         self.db.update_mo_proposal_status(
-            profile_id, proposal_id, NameProposalStatus.PENDING.value,
+            profile_id,
+            proposal_id,
+            NameProposalStatus.PENDING.value,
             current_effective_name=effective_name,
         )
-        return NameProposalResult("pending", "The proposal is still pending; the consensus has not changed to it.", proposal_id=proposal_id)
+        return NameProposalResult(
+            "pending",
+            "The proposal is still pending; the consensus has not changed to it.",
+            proposal_id=proposal_id,
+        )
 
     # Eligibility ------------------------------------------------------
 
     def _eligible_pair(self, profile_id: int, pair_id: int) -> dict[str, Any]:
         pair = self.db.pair_detail(profile_id, pair_id)
         if not pair or pair.get("review_state") != "confirmed" or pair.get("excluded"):
-            raise NameProposalError("Only a currently confirmed, non-excluded pair can produce name proposals.")
+            raise NameProposalError(
+                "Only a currently confirmed, non-excluded pair can produce name proposals."
+            )
         if self.db.confirmed_pair_conflict(
-            profile_id, int(pair["mo_observation_id"]), int(pair["inat_observation_id"]),
+            profile_id,
+            int(pair["mo_observation_id"]),
+            int(pair["inat_observation_id"]),
         ):
-            raise NameProposalError("Another confirmed one-to-one pairing conflicts with this pair.", "one_to_one_conflict")
+            raise NameProposalError(
+                "Another confirmed one-to-one pairing conflicts with this pair.",
+                "one_to_one_conflict",
+            )
         return pair
 
 
 def _is_fungi_taxon(taxon: dict[str, Any]) -> bool:
     ancestry = str(taxon.get("ancestry") or "")
-    return FUNGI_TAXON_ID in ancestry.split("/") or str(
-        taxon.get("iconic_taxon_name") or ""
-    ).casefold() == "fungi"
+    return (
+        FUNGI_TAXON_ID in ancestry.split("/")
+        or str(taxon.get("iconic_taxon_name") or "").casefold() == "fungi"
+    )
 
 
 def _resolve_exact_taxon(
-    matches: list[dict[str, Any]], name: str, *, expected_rank: str = "",
+    matches: list[dict[str, Any]],
+    name: str,
+    *,
+    expected_rank: str = "",
 ) -> tuple[Optional[dict[str, Any]], str]:
     """Resolve one unambiguous, active, rank-compatible exact-name taxon.
 
@@ -577,7 +776,9 @@ def _resolve_exact_taxon(
     compatibility are REQUIRED, not merely preferred.
     """
     folded = name.casefold()
-    exact = [item for item in matches if str(item.get("name") or "").casefold() == folded]
+    exact = [
+        item for item in matches if str(item.get("name") or "").casefold() == folded
+    ]
     if not exact:
         return None, "no_exact"
     # Require an active taxon (never resolve to an inactive record).
@@ -595,11 +796,17 @@ def _resolve_exact_taxon(
     if expected_rank:
         with_rank = [item for item in pool if str(item.get("rank") or "").strip()]
         if with_rank:
-            ranked = [item for item in with_rank if str(item.get("rank") or "").casefold() == expected_rank.casefold()]
+            ranked = [
+                item
+                for item in with_rank
+                if str(item.get("rank") or "").casefold() == expected_rank.casefold()
+            ]
             if not ranked:
                 return None, "rank_mismatch"
             pool = ranked
-    ids = {positive_int(item.get("id")) for item in pool if positive_int(item.get("id"))}
+    ids = {
+        positive_int(item.get("id")) for item in pool if positive_int(item.get("id"))
+    }
     if len(ids) == 1 and pool:
         # A single distinct taxon id (even if duplicated across framework rows).
         chosen = next(item for item in pool if positive_int(item.get("id")) in ids)
@@ -646,8 +853,12 @@ def _first_result(payload: object) -> Optional[dict[str, Any]]:
 
 def _pair_fingerprint(pair: dict[str, Any]) -> str:
     return public_fingerprint(
-        "pair", pair.get("pair_id"), pair.get("updated_at"), pair.get("review_state"),
-        pair.get("link_state"), pair.get("confirmed_by"),
+        "pair",
+        pair.get("pair_id"),
+        pair.get("updated_at"),
+        pair.get("review_state"),
+        pair.get("link_state"),
+        pair.get("confirmed_by"),
     )
 
 
@@ -662,4 +873,5 @@ def _fungi_status(raw: dict[str, Any]) -> str:
 
 def _utc_now() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
