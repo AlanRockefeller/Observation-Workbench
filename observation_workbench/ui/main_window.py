@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import random
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -1488,20 +1489,6 @@ class MainWindow(QMainWindow):
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
 
-        # View
-        view_menu = mb.addMenu("&View")
-        act_toggle_zoom = QAction("Toggle zoom (L)", self)
-        act_toggle_zoom.triggered.connect(self._viewer.toggle_zoom)
-        view_menu.addAction(act_toggle_zoom)
-
-        act_open_obs = QAction("Open observation in browser (O)", self)
-        act_open_obs.triggered.connect(self._open_obs_in_browser)
-        view_menu.addAction(act_open_obs)
-
-        act_open_img = QAction("Open image in browser (I)", self)
-        act_open_img.triggered.connect(self._open_image_in_browser)
-        view_menu.addAction(act_open_img)
-
         # Action
         action_menu = mb.addMenu("&Action")
         self._act_auth = QAction("Authenticate to iNaturalist…", self)
@@ -1520,12 +1507,16 @@ class MainWindow(QMainWindow):
         self._act_pending_identify_actions.triggered.connect(
             self._open_pending_identify_actions
         )
+        # Hidden until the durable journal actually holds pending rows.
+        self._act_pending_identify_actions.setVisible(False)
         action_menu.addAction(self._act_pending_identify_actions)
         self._act_retry_identify_refresh = QAction("Retry safe Identify refresh", self)
         self._act_retry_identify_refresh.setToolTip(
             "Retry a failed read of a confirmed observation; this never resends its write"
         )
         self._act_retry_identify_refresh.setEnabled(False)
+        # Hidden unless a confirmed-observation read is actually retryable.
+        self._act_retry_identify_refresh.setVisible(False)
         self._act_retry_identify_refresh.triggered.connect(
             self._retry_confirmed_refresh_warning
         )
@@ -1538,16 +1529,6 @@ class MainWindow(QMainWindow):
         act_reconcile.triggered.connect(self._open_reconciliation)
         action_menu.addAction(act_reconcile)
         action_menu.addSeparator()
-
-        act_agree_recent = QAction("Agree with most recent ID (a)", self)
-        act_agree_recent.setToolTip("Requires iNaturalist authentication")
-        act_agree_recent.triggered.connect(lambda: self._agree_current("recent"))
-        action_menu.addAction(act_agree_recent)
-
-        act_agree_consensus = QAction("Agree with consensus ID (A)", self)
-        act_agree_consensus.setToolTip("Requires iNaturalist authentication")
-        act_agree_consensus.triggered.connect(lambda: self._agree_current("consensus"))
-        action_menu.addAction(act_agree_consensus)
 
         act_bulk_provisional = QAction("Agree to provisional IDs…", self)
         act_bulk_provisional.setToolTip(
@@ -1625,6 +1606,10 @@ class MainWindow(QMainWindow):
         act_shortcuts = QAction("&Keyboard shortcuts", self)
         act_shortcuts.triggered.connect(self._show_shortcuts)
         help_menu.addAction(act_shortcuts)
+
+        act_readme = QAction("View &Readme", self)
+        act_readme.triggered.connect(self._show_readme)
+        help_menu.addAction(act_readme)
 
     def _open_identify_setup(self) -> None:
         """Open planning separately so this window remains the study browser."""
@@ -1865,10 +1850,11 @@ class MainWindow(QMainWindow):
             self._act_pending_identify_actions.setText(
                 f"Pending Identify actions…{suffix}"
             )
+            self._act_pending_identify_actions.setVisible(bool(pending_count))
         if hasattr(self, "_act_retry_identify_refresh"):
-            self._act_retry_identify_refresh.setEnabled(
-                bool(self._identify_refresh_warnings)
-            )
+            retryable = bool(self._identify_refresh_warnings)
+            self._act_retry_identify_refresh.setEnabled(retryable)
+            self._act_retry_identify_refresh.setVisible(retryable)
 
     def _request_confirmed_observation_refresh(
         self, observation_id: int, observation_uuid: str
@@ -5835,6 +5821,50 @@ class MainWindow(QMainWindow):
         outer.addWidget(bb)
 
         dlg.adjustSize()
+        dlg.exec()
+
+    def _readme_path(self) -> Optional[Path]:
+        """Locate README.md in a frozen bundle or in a source checkout."""
+        candidates: list[Path] = []
+        bundle_dir = getattr(sys, "_MEIPASS", "")
+        if getattr(sys, "frozen", False) and bundle_dir:
+            candidates.append(Path(bundle_dir) / "README.md")
+        candidates.append(Path(__file__).resolve().parents[2] / "README.md")
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _show_readme(self) -> None:
+        from PySide6.QtWidgets import QTextBrowser
+
+        path = self._readme_path()
+        if path is None:
+            QMessageBox.information(
+                self,
+                "Readme unavailable",
+                "README.md could not be found in this installation.",
+            )
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Readme unavailable", f"Could not read README.md:\n{exc}"
+            )
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Readme")
+        layout = QVBoxLayout(dlg)
+        browser = QTextBrowser(dlg)
+        browser.setOpenExternalLinks(True)
+        browser.setMarkdown(text)
+        layout.addWidget(browser)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.reject)
+        layout.addWidget(bb)
+        dlg.resize(760, 620)
         dlg.exec()
 
     # ------------------------------------------------------------------

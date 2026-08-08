@@ -31,7 +31,8 @@ a = Analysis(
     [str(ROOT / "main.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    # Help ▸ View Readme reads README.md from the bundle root at runtime.
+    datas=[(str(ROOT / "README.md"), ".")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
