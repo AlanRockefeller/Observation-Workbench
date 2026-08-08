@@ -21,6 +21,10 @@ with open(ROOT / "pyproject.toml", "rb") as f:
 
 APP_NAME = "ObservationWorkbench"
 
+# Windows uses .ico, macOS uses .icns; PyInstaller ignores icon= on Linux.
+ICON_ICO = str(ROOT / "packaging" / "icon" / "icon.ico")
+ICON_ICNS = str(ROOT / "packaging" / "icon" / "icon.icns")
+
 block_cipher = None
 
 a = Analysis(
@@ -55,6 +59,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=ICON_ICO if sys.platform == "win32" else None,
 )
 
 coll = COLLECT(
@@ -72,7 +77,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name=f"{APP_NAME}.app",
-        icon=None,
+        icon=ICON_ICNS,
         bundle_identifier="com.alanrockefeller.observationworkbench",
         info_plist={
             "CFBundleShortVersionString": VERSION,
