@@ -43,13 +43,25 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller packaging/observation_workbench.spec --noconfirm --clean
 
+      # Windows and Linux ship an onedir folder (exe/binary + libs as loose
+      # files) — zip its *contents* at the archive root so extracting the
+      # release zip doesn't add an extra ObservationWorkbench/ folder on top
+      # of the one Explorer/most extractors already create from the zip name.
       - name: Zip artifact (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path "${{ matrix.artifact_path }}" -DestinationPath "${{ matrix.asset_name }}.zip"
+        run: Compress-Archive -Path "${{ matrix.artifact_path }}\*" -DestinationPath "${{ matrix.asset_name }}.zip"
         shell: pwsh
 
-      - name: Zip artifact (macOS / Linux)
-        if: runner.os != 'Windows'
+      - name: Zip artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd "${{ matrix.artifact_path }}"
+          zip -r "${GITHUB_WORKSPACE}/${{ matrix.asset_name }}.zip" .
+
+      # macOS is the opposite: the .app bundle itself must stay intact as a
+      # single folder for Finder/Launch Services to treat it as one app.
+      - name: Zip artifact (macOS)
+        if: runner.os == 'macOS'
         run: |
           cd "$(dirname "${{ matrix.artifact_path }}")"
           zip -r "${GITHUB_WORKSPACE}/${{ matrix.asset_name }}.zip" "$(basename "${{ matrix.artifact_path }}")"
