@@ -251,4 +251,12 @@ def _apply_dark_palette(app: QApplication) -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "--hidpi-probe":
+        # Internal entry point: a frozen build re-invokes its own exe to run
+        # the HiDPI probe (see observation_workbench.ui.hidpi.probe_display),
+        # since there is no separate `python` interpreter to spawn one under.
+        # Dispatch immediately, before argparse/instance-lock/main() run, so
+        # this never recurses into a second full app launch.
+        from observation_workbench.ui.hidpi import _run_probe
+        sys.exit(_run_probe())
     main()
