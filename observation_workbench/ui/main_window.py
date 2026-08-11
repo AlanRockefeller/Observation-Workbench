@@ -1102,7 +1102,11 @@ class MainWindow(QMainWindow):
 
         # Core dependencies
         self._settings = AppSettings()
+        # The disk cache may be reconfigured in Settings, but live image
+        # workers keep using the startup location until a safe restart.
+        self._active_cache_dir = self._settings.cache_dir
         self._db = self._init_db()
+        self._reset_image_index_after_cache_move()
         self._client = INatClient(calls_per_second=1.0)
         self._auth_service = AuthService(self._settings)
         self._auth_state: AuthState = self._auth_service.load()
@@ -1363,16 +1367,24 @@ class MainWindow(QMainWindow):
             pass
 
     def _init_db(self) -> CacheDB:
-        cache_dir = self._settings.cache_dir
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        db_path = cache_dir / "metadata.db"
+        journal_dir = self._settings.journal_dir
+        journal_dir.mkdir(parents=True, exist_ok=True)
+        db_path = journal_dir / "metadata.db"
         return CacheDB(db_path)
 
     def _init_image_cache(self) -> ImageCache:
-        cache_dir = self._settings.cache_dir / "images"
+        cache_dir = self._active_cache_dir / "images"
         cache_dir.mkdir(parents=True, exist_ok=True)
         max_bytes = int(self._settings.cache_max_gb * 1024**3)
         return ImageCache(cache_dir, self._db, max_bytes)
+
+    def _reset_image_index_after_cache_move(self) -> None:
+        """Keep the shared LRU table scoped to the active image directory."""
+        if self._settings.indexed_cache_dir == self._active_cache_dir:
+            return
+        self._db.clear_all_image_logs()
+        self._settings.indexed_cache_dir = self._active_cache_dir
+        self._settings.sync()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -5744,17 +5756,27 @@ class MainWindow(QMainWindow):
                         authenticated_login=self._auth_state.login,
                     )
             self._taxon_tree._reload()
+            if self._settings.cache_dir != self._active_cache_dir:
+                self._status_label.setText(
+                    "Image cache directory change saved; restart to apply it."
+                )
 
     def _show_cache_info(self) -> None:
         total_bytes = self._disk_cache.total_size_bytes()
         total_mb = total_bytes / (1024**2)
         limit_gb = self._settings.cache_max_gb
-        cache_dir = str(self._settings.cache_dir)
+        cache_dir = str(self._active_cache_dir)
+        configured_cache_dir = self._settings.cache_dir
+        restart_note = (
+            f"\nAfter restart: {configured_cache_dir}"
+            if configured_cache_dir != self._active_cache_dir
+            else ""
+        )
         QMessageBox.information(
             self,
             "Cache Info",
             f"Image cache: {total_mb:.1f} MB / {limit_gb:.1f} GB limit\n"
-            f"Location: {cache_dir}",
+            f"Location: {cache_dir}{restart_note}",
         )
 
     def _clear_caches(self) -> None:

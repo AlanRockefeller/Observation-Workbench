@@ -141,7 +141,11 @@ def parse_mo_observation(raw: dict[str, Any], account_id: int) -> InventoryObser
         or positive_int(raw.get("user_id"))
     )
     owner_login = str(
-        owner.get("login") or owner.get("name") or raw.get("owner_login") or ""
+        owner.get("login_name")
+        or owner.get("login")
+        or owner.get("name")
+        or raw.get("owner_login")
+        or ""
     ).strip()
 
     consensus = (

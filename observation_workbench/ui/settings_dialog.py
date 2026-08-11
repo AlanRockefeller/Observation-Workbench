@@ -53,6 +53,12 @@ class SettingsDialog(QDialog):
         browse_btn.clicked.connect(self._browse_cache_dir)
         dir_layout.addWidget(browse_btn)
         cache_form.addRow("Cache directory:", dir_row)
+        cache_restart_label = QLabel(
+            "Directory changes take effect after Observation Workbench is restarted. "
+            "Existing files in the previous images subfolder are not moved or deleted."
+        )
+        cache_restart_label.setWordWrap(True)
+        cache_form.addRow("", cache_restart_label)
 
         self._max_gb_spin = QDoubleSpinBox()
         self._max_gb_spin.setRange(0.1, 100.0)

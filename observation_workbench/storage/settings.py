@@ -25,8 +25,10 @@ ORG_NAME = "ObservationWorkbench"
 LEGACY_APP_NAME = "iNatStudyViewer"
 LEGACY_ORG_NAME = "iNatStudy"
 
-# Cache/journal directory.  Also renamed, also migrated — see
-# _migrate_legacy_cache_dir().
+# The historical cache directory also contains the metadata database.  It is
+# renamed/migrated by _migrate_legacy_cache_dir(); AppSettings then pins that
+# database location independently so later image-cache changes cannot strand
+# the durable Identify journal.
 DEFAULT_CACHE_DIR_NAME = "observation_workbench"
 LEGACY_CACHE_DIR_NAME = "inat_study"
 
@@ -42,8 +44,10 @@ class AppSettings:
     def __init__(self) -> None:
         self._s = QSettings(ORG_NAME, APP_NAME)
         self._migrate_legacy_settings()
-        self._restrict_file_permissions()
         self._migrate_legacy_cache_dir()
+        self._pin_journal_dir()
+        self._pin_indexed_cache_dir()
+        self._restrict_file_permissions()
 
     def _migrate_legacy_settings(self) -> None:
         """Copy the pre-rename settings store forward, once.
@@ -112,6 +116,26 @@ class AppSettings:
             self._s.sync()
             return
         log.info("Migrated cache directory %s -> %s", legacy, current)
+
+    def _pin_journal_dir(self) -> None:
+        """Keep durable application state independent of image-cache changes.
+
+        Before this setting existed, ``metadata.db`` lived directly in the
+        configured cache directory.  Pinning the current value once preserves
+        every existing installation's database while allowing only disposable
+        images to move when ``cache_dir`` is changed later.
+        """
+        if self._s.contains("storage/journal_dir"):
+            return
+        self._s.setValue("storage/journal_dir", str(self.cache_dir))
+        self._s.sync()
+
+    def _pin_indexed_cache_dir(self) -> None:
+        """Remember which image directory the shared LRU index describes."""
+        if self._s.contains("cache/indexed_dir"):
+            return
+        self._s.setValue("cache/indexed_dir", str(self.cache_dir))
+        self._s.sync()
 
     def _restrict_file_permissions(self) -> None:
         """Best-effort POSIX hardening for the file containing API credentials."""
@@ -605,6 +629,12 @@ class AppSettings:
     # ------------------------------------------------------------------
 
     @property
+    def journal_dir(self) -> Path:
+        """Stable location of metadata and the durable Identify journal."""
+        value = self._s.value("storage/journal_dir", "", type=str).strip()
+        return Path(value) if value else self.cache_dir
+
+    @property
     def cache_dir(self) -> Path:
         default = str(Path.home() / ".cache" / DEFAULT_CACHE_DIR_NAME)
         v = self._s.value("cache/dir", default, type=str)
@@ -613,6 +643,16 @@ class AppSettings:
     @cache_dir.setter
     def cache_dir(self, v: Path) -> None:
         self._s.setValue("cache/dir", str(v))
+
+    @property
+    def indexed_cache_dir(self) -> Path:
+        """Image-cache root currently represented by metadata.db's LRU rows."""
+        value = self._s.value("cache/indexed_dir", "", type=str).strip()
+        return Path(value) if value else self.cache_dir
+
+    @indexed_cache_dir.setter
+    def indexed_cache_dir(self, v: Path) -> None:
+        self._s.setValue("cache/indexed_dir", str(v))
 
     @property
     def cache_max_gb(self) -> float:

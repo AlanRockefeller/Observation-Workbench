@@ -132,13 +132,13 @@ def main() -> None:
     # for the full application lifetime so another live process can never
     # reclassify a write that this process still owns.
     try:
-        journal_dir = AppSettings().cache_dir
+        journal_dir = AppSettings().journal_dir
         journal_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         QMessageBox.critical(
             None,
             "Cannot Start Observation Workbench",
-            f"The application cache directory could not be prepared:\n{exc}",
+            f"The application data directory could not be prepared:\n{exc}",
         )
         return
     instance_lock = QLockFile(str(journal_dir / "observation-workbench-instance.lock"))

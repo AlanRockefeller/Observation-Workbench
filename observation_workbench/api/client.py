@@ -93,6 +93,11 @@ V2_OBSERVATION_VERIFICATION_FIELDS = (
 _SUPPORTED_QUALITY_METRICS = frozenset({"wild"})
 _SUPPORTED_QUALITY_METRIC_VOTES = frozenset({"agree", "disagree", "remove"})
 
+# These responses establish that an unsafe request was rejected. Server-side
+# failures are intentionally absent: a backend or proxy can return 5xx after
+# the mutation committed, so repeating that write could duplicate it.
+_UNSAFE_WRITE_DEFINITE_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 409, 422})
+
 
 class INatAPIError(RuntimeError):
     """Machine-readable error from an iNaturalist API request.
@@ -495,14 +500,11 @@ class INatClient:
                     continue
 
                 if response.is_error:
-                    outcome_unknown = not retry_safe and response.status_code not in {
-                        400,
-                        401,
-                        403,
-                        404,
-                        409,
-                        422,
-                    }
+                    outcome_unknown = not retry_safe and (
+                        response.status_code >= 500
+                        or response.status_code
+                        not in _UNSAFE_WRITE_DEFINITE_REJECTION_STATUSES
+                    )
                     raise INatAPIError(
                         f"iNaturalist returned HTTP {response.status_code}",
                         endpoint=endpoint,

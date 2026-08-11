@@ -125,9 +125,10 @@ class _PlaceAutocompleteWorker(QRunnable):
 
 
 class _UserValidateSignals(QObject):
-    found = Signal(str)  # canonical login
-    not_found = Signal()
+    found = Signal(str, int)  # canonical login, generation
+    not_found = Signal(int)
     error = Signal(str)
+    finished = Signal()
 
 
 class _UserValidateWorker(QRunnable):
@@ -143,18 +144,22 @@ class _UserValidateWorker(QRunnable):
         self.signals = _UserValidateSignals()
 
     def run(self) -> None:
-        if self.get_gen() != self.generation:
-            return
         try:
+            if self.get_gen() != self.generation:
+                return
             user = self.client.get_user(self.login)
             if self.get_gen() == self.generation:
                 if user:
-                    self.signals.found.emit(user.get("login", self.login))
+                    self.signals.found.emit(
+                        user.get("login", self.login), self.generation
+                    )
                 else:
-                    self.signals.not_found.emit()
+                    self.signals.not_found.emit(self.generation)
         except Exception as exc:
             if self.get_gen() == self.generation:
                 self.signals.error.emit(str(exc))
+        finally:
+            self.signals.finished.emit()
 
 
 class FilterBar(QWidget):
@@ -553,14 +558,15 @@ class FilterBar(QWidget):
         self.load_requested.emit(filters)
 
     def _on_username_text_changed(self, text: str) -> None:
+        # Invalidate a worker as soon as its query changes, including during
+        # the debounce interval before the replacement worker is started.
+        self._username_gen += 1
+        self._username_timer.stop()
         self._username_check.setVisible(False)
         if is_probable_url_input(text):
-            self._username_timer.stop()
             return
         if len(text.strip()) >= 2:
             self._username_timer.start(500)
-        else:
-            self._username_timer.stop()
 
     def _on_place_text_changed(self, text: str) -> None:
         # Clear resolved ID when user edits manually and reset tooltip indicator
@@ -681,25 +687,21 @@ class FilterBar(QWidget):
         login = self._username_edit.text().strip().replace(" ", "_")
         if not login:
             return
-        self._username_gen += 1
         gen = self._username_gen
         worker = _UserValidateWorker(
             self._client, login, gen, lambda: self._username_gen
         )
         sigs = worker.signals
         self._live_ac_signals.add(sigs)
-        sigs.found.connect(
-            lambda name, s=sigs: (
-                self._live_ac_signals.discard(s),
-                self._on_username_validated(name),
-            )
-        )
-        sigs.not_found.connect(lambda s=sigs: self._live_ac_signals.discard(s))
-        sigs.error.connect(lambda _e, s=sigs: self._live_ac_signals.discard(s))
+        sigs.found.connect(self._on_username_validated)
+        sigs.not_found.connect(self._on_username_not_found)
+        sigs.finished.connect(self._on_username_validation_finished)
         self._pool.start(worker)
 
-    @Slot(str)
-    def _on_username_validated(self, login: str) -> None:
+    @Slot(str, int)
+    def _on_username_validated(self, login: str, generation: int) -> None:
+        if generation != self._username_gen:
+            return
         self._username_check.setVisible(True)
         self._add_to_username_history(login)
         current = self._username_edit.text()
@@ -710,6 +712,17 @@ class FilterBar(QWidget):
             self._username_edit.setText(login)
         log.debug("Validated username: %s", login)
 
+    @Slot(int)
+    def _on_username_not_found(self, generation: int) -> None:
+        if generation == self._username_gen:
+            self._username_check.setVisible(False)
+
+    @Slot()
+    def _on_username_validation_finished(self) -> None:
+        signals = self.sender()
+        if isinstance(signals, QObject):
+            self._live_ac_signals.discard(signals)
+
     def _add_to_username_history(self, login: str) -> None:
         if login in self._username_history:
             self._username_history.remove(login)
@@ -719,6 +732,8 @@ class FilterBar(QWidget):
 
     @Slot(str)
     def _on_username_history_selected(self, text: str) -> None:
+        self._username_gen += 1
+        self._username_timer.stop()
         self._username_check.setVisible(False)
         if len(text.strip()) >= 2 and not is_probable_url_input(text):
             self._username_timer.start(200)
