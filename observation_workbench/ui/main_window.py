@@ -133,6 +133,7 @@ from observation_workbench.ui.result_list import ResultList
 from observation_workbench.ui.scroll_speed import ScrollSpeedFilter
 from observation_workbench.ui.taxon_tree_panel import TaxonTreePanel
 from observation_workbench.ui.viewer_panel import ViewerPanel
+from observation_workbench.ui.dna_linking import DNALinkingController
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ class _LoadSignals(QObject):
 
 
 class _AuthSignals(QObject):
-    authenticated = Signal(str, str)  # token, login
+    authenticated = Signal(str, str, int)  # token, login, numeric user ID
     error = Signal(str)
 
 
@@ -169,9 +170,12 @@ class _AuthWorker(QRunnable):
         try:
             raw = self.client.get_current_user(self.token)
             login = _extract_login(raw)
+            user_id = _extract_user_id(raw)
             if not login:
                 raise RuntimeError("Token validated, but no login was returned.")
-            self.signals.authenticated.emit(self.token, login)
+            if not user_id:
+                raise RuntimeError("Token validated, but no numeric user ID was returned.")
+            self.signals.authenticated.emit(self.token, login, user_id)
         except Exception as exc:
             self.signals.error.emit(str(exc))
 
@@ -1142,8 +1146,10 @@ class MainWindow(QMainWindow):
         # application-scoped manager rather than a private one.
         if self._reconciliation is not None:
             self._reconciliation.set_identify_manager(self._identify_actions)
-        # Separate client for taxon summary so its requests don't share the
-        # rate-limiter with the main identification fetching client.
+        # Separate client (own connection pool and call counter) for taxon
+        # summary work. It deliberately shares the process-wide rate limiter:
+        # iNaturalist's ceiling is per user/IP, so two independent 1 req/s
+        # budgets just added up to 2 req/s and drew a steady stream of 429s.
         self._summary_client = INatClient(calls_per_second=1.0)
         self._disk_cache = self._init_image_cache()
         self._loader = StudyLoader(self._client, self._db)
@@ -1256,6 +1262,17 @@ class MainWindow(QMainWindow):
 
         self._pool = QThreadPool.globalInstance()
         self._pool.setMaxThreadCount(6)
+        self._dna_linking: Optional[DNALinkingController] = None
+        self._dna_linking_error = ""
+        try:
+            self._dna_linking = DNALinkingController(
+                self._client, self._settings, lambda: self._auth_state,
+                lambda: self._identify_refresh_auth_generation,
+                self._pool, self,
+            )
+        except Exception as exc:
+            log.exception("DNA linking subsystem unavailable")
+            self._dna_linking_error = str(exc)
 
         # Capture the unscaled system font size before any scaling is applied.
         self._system_font_pt = QApplication.font().pointSize()
@@ -1540,6 +1557,15 @@ class MainWindow(QMainWindow):
         )
         act_reconcile.triggered.connect(self._open_reconciliation)
         action_menu.addAction(act_reconcile)
+        act_dna_linking = QAction("Link observations to DNA barcodes…", self)
+        act_dna_linking.setToolTip(
+            "Discover public nearby observation pairs and explicitly review durable DNA links"
+        )
+        act_dna_linking.triggered.connect(self._open_dna_linking)
+        action_menu.addAction(act_dna_linking)
+        act_dna_recovery = QAction("Recover uncertain DNA-link writes…", self)
+        act_dna_recovery.triggered.connect(self._open_dna_recovery)
+        action_menu.addAction(act_dna_recovery)
         action_menu.addSeparator()
 
         act_bulk_provisional = QAction("Agree to provisional IDs…", self)
@@ -2077,9 +2103,9 @@ class MainWindow(QMainWindow):
         sigs = worker.signals
         self._live_auth_signals.add(sigs)
 
-        def authenticated(valid_token: str, login: str) -> None:
+        def authenticated(valid_token: str, login: str, user_id: int) -> None:
             self._live_auth_signals.discard(sigs)
-            self._on_authenticated(valid_token, login)
+            self._on_authenticated(valid_token, login, user_id)
             if on_success is not None:
                 on_success(valid_token, login)
 
@@ -2108,9 +2134,9 @@ class MainWindow(QMainWindow):
             on_failure=on_failure,
         )
 
-    @Slot(str, str)
-    def _on_authenticated(self, token: str, login: str) -> None:
-        self._auth_state = self._auth_service.save(token, login)
+    @Slot(str, str, int)
+    def _on_authenticated(self, token: str, login: str, user_id: int = 0) -> None:
+        self._auth_state = self._auth_service.save(token, login, user_id)
         self._identify_actions.authentication_changed()
         self._reconciliation_authentication_changed()
         self._update_auth_ui()
@@ -5929,6 +5955,41 @@ class MainWindow(QMainWindow):
                 )
             )
 
+    def _open_dna_linking(self) -> None:
+        if self._dna_linking is None:
+            QMessageBox.critical(
+                self,
+                "DNA linking unavailable",
+                "The DNA linking database could not be opened.\n\n"
+                + self._dna_linking_error,
+            )
+            return
+        if not self._auth_state.is_authenticated:
+            QMessageBox.information(
+                self,
+                "Authentication required",
+                "Authenticate to iNaturalist before starting DNA linking. Discovery is public, "
+                "but the numeric account identity is part of durable scan state.",
+            )
+            self._authenticate_to_inaturalist(
+                on_success=lambda _token, _login: self._dna_linking.start()
+                if self._dna_linking is not None else None
+            )
+            return
+        self._dna_linking.start()
+
+    def _open_dna_recovery(self) -> None:
+        if self._dna_linking is None:
+            QMessageBox.warning(self, "DNA-link recovery unavailable", self._dna_linking_error)
+            return
+        if not self._auth_state.is_authenticated:
+            QMessageBox.information(
+                self, "Authentication required",
+                "Authenticate as the account captured by the uncertain operation before verification.",
+            )
+            return
+        self._dna_linking.recover()
+
     # ------------------------------------------------------------------
     # Window close
     # ------------------------------------------------------------------
@@ -5964,6 +6025,8 @@ class MainWindow(QMainWindow):
         self._identify_actions.prepare_shutdown()
         if self._reconciliation is not None:
             self._reconciliation.shutdown()
+        if self._dna_linking is not None:
+            self._dna_linking.shutdown()
         # Give already in-flight background workers (image prefetch, Identify
         # detail reads) a short bounded chance to finish before the shared
         # httpx client underneath them closes, so a normal quit does not log
@@ -5982,6 +6045,17 @@ def _extract_login(raw: dict) -> str:
     else:
         raw_user = raw.get("user") if isinstance(raw.get("user"), dict) else raw
     return (raw_user or {}).get("login", "") or ""
+
+
+def _extract_user_id(raw: dict) -> int:
+    if isinstance(raw.get("results"), list):
+        raw_user = raw["results"][0] if raw["results"] else {}
+    else:
+        raw_user = raw.get("user") if isinstance(raw.get("user"), dict) else raw
+    try:
+        return int((raw_user or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _format_api_error(exc: Exception) -> str:

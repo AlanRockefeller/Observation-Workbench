@@ -505,10 +505,70 @@ class AppSettings:
     def inat_login(self, v: str) -> None:
         self._s.setValue("auth/inat_login", v.strip())
 
+    @property
+    def inat_user_id(self) -> int:
+        try:
+            return int(self._s.value("auth/inat_user_id", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @inat_user_id.setter
+    def inat_user_id(self, value: int) -> None:
+        self._s.setValue("auth/inat_user_id", int(value or 0))
+
     def clear_auth(self) -> None:
         self._s.remove("auth/inat_api_token")
         self._s.remove("auth/inat_login")
+        self._s.remove("auth/inat_user_id")
         self.sync()
+
+    # DNA linking stores only UI preferences here. Durable scan/review/write
+    # state lives independently in dna_linking.db.
+    @property
+    def dna_linking_url(self) -> str:
+        return self._s.value(
+            "dna_linking/url",
+            "https://www.inaturalist.org/observations?taxon_id=47170&field:DNA%20Barcode%20ITS=",
+            type=str,
+        )
+
+    @dna_linking_url.setter
+    def dna_linking_url(self, value: str) -> None:
+        self._s.setValue("dna_linking/url", str(value).strip())
+
+    @property
+    def dna_linking_candidate_login(self) -> str:
+        return self._s.value(
+            "dna_linking/candidate_login", "", type=str
+        ).strip()
+
+    @dna_linking_candidate_login.setter
+    def dna_linking_candidate_login(self, value: str) -> None:
+        self._s.setValue("dna_linking/candidate_login", str(value).strip())
+
+    @property
+    def dna_linking_radius_m(self) -> float:
+        return max(1.0, min(10000.0, float(self._s.value("dna_linking/radius_m", 100.0))))
+
+    @dna_linking_radius_m.setter
+    def dna_linking_radius_m(self, value: float) -> None:
+        self._s.setValue("dna_linking/radius_m", float(value))
+
+    @property
+    def dna_linking_window_minutes(self) -> float:
+        return max(0.1, min(1440.0, float(self._s.value("dna_linking/window_minutes", 15.0))))
+
+    @dna_linking_window_minutes.setter
+    def dna_linking_window_minutes(self, value: float) -> None:
+        self._s.setValue("dna_linking/window_minutes", float(value))
+
+    @property
+    def dna_linking_chunk_size(self) -> int:
+        return max(1, min(2000, int(self._s.value("dna_linking/chunk_size", 100))))
+
+    @dna_linking_chunk_size.setter
+    def dna_linking_chunk_size(self, value: int) -> None:
+        self._s.setValue("dna_linking/chunk_size", max(1, min(2000, int(value))))
 
     # Identify is intentionally separate from the study-viewer settings.
     @property
