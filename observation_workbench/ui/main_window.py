@@ -33,6 +33,7 @@ from PySide6.QtCore import (
     QThreadPool,
     Qt,
     QTimer,
+    QSize,
     Signal,
     Slot,
     QEvent,
@@ -78,6 +79,10 @@ from observation_workbench.services.bulk_identification import (
     BulkAgreePlanResult,
     BulkAgreePlanStats,
     plan_provisional_candidates,
+)
+from observation_workbench.services.autovalidated_ids import (
+    plan_autovalidated_id_candidates,
+    post_autovalidated_identification,
 )
 from observation_workbench.services.bulk_disagree import (
     DQA_POSTING_ENABLED,
@@ -134,6 +139,7 @@ from observation_workbench.ui.scroll_speed import ScrollSpeedFilter
 from observation_workbench.ui.taxon_tree_panel import TaxonTreePanel
 from observation_workbench.ui.viewer_panel import ViewerPanel
 from observation_workbench.ui.dna_linking import DNALinkingController
+from observation_workbench.ui.dna_vote_review import DNAVoteReviewController
 
 log = logging.getLogger(__name__)
 
@@ -441,6 +447,55 @@ class _BulkPostWorker(QRunnable):
             self.signals.error.emit(self.candidate, _format_api_error(exc))
 
 
+class _AutovalidatedIdPlanSignals(QObject):
+    planned = Signal(object)
+    progress = Signal(int, int)
+    error = Signal(str)
+
+
+class _AutovalidatedIdPlanWorker(QRunnable):
+    """Scan for autovalidated observations whose consensus lags the automated ID."""
+
+    def __init__(
+        self,
+        loader: StudyLoader,
+        token: str,
+        login: str,
+        generation: int,
+        get_gen,
+        options: dict,
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.loader = loader
+        self.token = token
+        self.login = login
+        self.generation = generation
+        self.get_gen = get_gen
+        self.options = options
+        self.signals = _AutovalidatedIdPlanSignals()
+
+    def run(self) -> None:
+        try:
+            result = plan_autovalidated_id_candidates(
+                self.loader,
+                self.login,
+                self.token,
+                observation_query=self.options.get("observation_query"),
+                report_unresolved_names=not self.options.get(
+                    "skip_unresolved_names", True
+                ),
+                max_observations=self.options["max_observations"],
+                is_cancelled=lambda: self.get_gen() != self.generation,
+                progress=lambda seen, total: self.signals.progress.emit(seen, total),
+            )
+            if self.get_gen() == self.generation:
+                self.signals.planned.emit(result)
+        except Exception as exc:
+            if self.get_gen() == self.generation:
+                self.signals.error.emit(_format_api_error(exc))
+
+
 class _BulkDisagreePlanSignals(QObject):
     planned = Signal(object)
     progress = Signal(int, int)
@@ -527,7 +582,10 @@ class _BulkDisagreePostWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            result = post_bulk_disagreement(
+            # Workflows that carry their own pre-post safeguards supply their own
+            # poster under "post_fn"; it takes the same arguments as the default.
+            post = self.options.get("post_fn") or post_bulk_disagreement
+            result = post(
                 self.client,
                 self.token,
                 self.login,
@@ -985,6 +1043,20 @@ class _NavFilter(QObject):
         return self._mw.handle_nav_key(key, ke.modifiers())
 
 
+# A compositor that renegotiates its output (WSLg, RDP, or a laptop panel
+# coming back from hibernate/suspend) briefly advertises a placeholder-sized
+# screen before the real mode is restored. Fitting a window to those bogus
+# metrics shrinks it to almost nothing, and nothing grows it back afterwards,
+# so treat anything below this as "not a real screen yet".
+_MIN_SANE_SCREEN_W = 640
+_MIN_SANE_SCREEN_H = 480
+
+
+def _screen_is_plausible(avail) -> bool:
+    """True when screen metrics look like a real display rather than a stub."""
+    return avail.width() >= _MIN_SANE_SCREEN_W and avail.height() >= _MIN_SANE_SCREEN_H
+
+
 def _fit_window_to_available_screen(widget: QWidget) -> None:
     """Shrink and reposition a window so it fits within its screen.
 
@@ -1001,6 +1073,9 @@ def _fit_window_to_available_screen(widget: QWidget) -> None:
         if screen is None:
             return
         avail = screen.availableGeometry()
+        if not _screen_is_plausible(avail):
+            # Transient/placeholder screen metrics: leave the window alone.
+            return
         geo = widget.geometry()
         frame = widget.frameGeometry()
         # Window-decoration thickness (0 on WMs that don't report it yet).
@@ -1099,6 +1174,11 @@ class MainWindow(QMainWindow):
         # larger than the compositor configured — a fatal Wayland protocol
         # error that kills the app on startup.
         self.setMinimumSize(640, 400)
+        # Size the user last chose for the un-maximized window. Kept so a
+        # display that shrinks (hibernate/resume, monitor unplug) and then
+        # comes back doesn't leave the window stuck at the shrunken size.
+        self._preferred_size: Optional[QSize] = None
+        self._refitting = False
         self._apply_default_geometry()
         self._watched_screen: Optional[QScreen] = None
         self._screen_watch_installed = False
@@ -1273,6 +1353,11 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log.exception("DNA linking subsystem unavailable")
             self._dna_linking_error = str(exc)
+        # Read-only, so it has no database of its own and cannot fail to open.
+        self._dna_vote_review = DNAVoteReviewController(
+            self._client, self._settings, lambda: self._auth_state.login,
+            self._pool, self,
+        )
 
         # Capture the unscaled system font size before any scaling is applied.
         self._system_font_pt = QApplication.font().pointSize()
@@ -1333,12 +1418,45 @@ class MainWindow(QMainWindow):
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
             self.resize(1400, 900)
+            self._preferred_size = self.size()
             return
         avail = screen.availableGeometry()
         self.resize(
             min(1400, int(avail.width() * 0.9)),
             min(900, int(avail.height() * 0.9)),
         )
+        self._preferred_size = self.size()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Only deliberate, normal-state resizes define the preferred size; a
+        # refit driven by a shrinking display must not overwrite it.
+        if self._refitting:
+            return
+        if self.isMaximized() or self.isFullScreen() or self.isMinimized():
+            return
+        self._preferred_size = event.size()
+
+    def _restore_preferred_size(self) -> None:
+        """Grow the window back after the display returns to a usable size."""
+        pref = self._preferred_size
+        if pref is None:
+            return
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        if not _screen_is_plausible(avail):
+            return
+        geo = self.geometry()
+        frame = self.frameGeometry()
+        extra_w = max(0, frame.width() - geo.width())
+        extra_h = max(0, frame.height() - geo.height())
+        margin = 8
+        target_w = min(pref.width(), max(1, avail.width() - extra_w - margin))
+        target_h = min(pref.height(), max(1, avail.height() - extra_h - margin))
+        if target_w > geo.width() or target_h > geo.height():
+            self.resize(max(geo.width(), target_w), max(geo.height(), target_h))
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1379,7 +1497,12 @@ class MainWindow(QMainWindow):
                 # a client must not setGeometry() while maximized (fatal
                 # protocol error on Wayland).
                 return
-            _fit_window_to_available_screen(self)
+            self._refitting = True
+            try:
+                self._restore_preferred_size()
+                _fit_window_to_available_screen(self)
+            finally:
+                self._refitting = False
         except RuntimeError:
             pass
 
@@ -1566,6 +1689,13 @@ class MainWindow(QMainWindow):
         act_dna_recovery = QAction("Recover uncertain DNA-link writes…", self)
         act_dna_recovery.triggered.connect(self._open_dna_recovery)
         action_menu.addAction(act_dna_recovery)
+        act_dna_vote_review = QAction("Review DNA-contested identifications…", self)
+        act_dna_vote_review.setToolTip(
+            "Find DNA-barcoded observations where your vote (or the community "
+            "consensus) looks worth revisiting; read-only"
+        )
+        act_dna_vote_review.triggered.connect(self._open_dna_vote_review)
+        action_menu.addAction(act_dna_vote_review)
         action_menu.addSeparator()
 
         act_bulk_provisional = QAction("Agree to provisional IDs…", self)
@@ -1581,6 +1711,14 @@ class MainWindow(QMainWindow):
         )
         act_bulk_disagree.triggered.connect(self._start_bulk_disagree_setup)
         action_menu.addAction(act_bulk_disagree)
+
+        act_autovalidated = QAction("Apply autovalidated identifications…", self)
+        act_autovalidated.setToolTip(
+            "Find DNA-barcoded observations that MycoMap autovalidated but whose "
+            "consensus is not yet the autovalidated name, then review and post them"
+        )
+        act_autovalidated.triggered.connect(self._start_autovalidated_ids_setup)
+        action_menu.addAction(act_autovalidated)
 
         act_propose_name = QAction("Propose a name to observation numbers…", self)
         act_propose_name.setToolTip(
@@ -5016,6 +5154,186 @@ class MainWindow(QMainWindow):
             return
         self._start_bulk_disagree_execution(candidates)
 
+    # ------------------------------------------------------------------
+    # Apply autovalidated identifications
+    # ------------------------------------------------------------------
+
+    def _autovalidated_ids_setup_defaults(self) -> dict:
+        return {
+            "url": self._settings.autovalidated_ids_url,
+            "comment": self._settings.autovalidated_ids_comment,
+            "max_observations": self._settings.autovalidated_ids_max_observations,
+            "skip_unresolved_names": self._settings.autovalidated_ids_skip_unresolved_names,
+            "delay_min_seconds": self._settings.autovalidated_ids_delay_min_seconds,
+            "delay_max_seconds": self._settings.autovalidated_ids_delay_max_seconds,
+            "dry_run": self._settings.autovalidated_ids_dry_run,
+        }
+
+    def _save_autovalidated_ids_setup_defaults(self, dlg) -> None:
+        self._settings.autovalidated_ids_url = dlg.narrowing_url()
+        self._settings.autovalidated_ids_comment = dlg.comment()
+        self._settings.autovalidated_ids_max_observations = dlg.max_observations()
+        self._settings.autovalidated_ids_skip_unresolved_names = (
+            dlg.skip_unresolved_names()
+        )
+        self._settings.autovalidated_ids_delay_min_seconds = dlg.delay_min_seconds()
+        self._settings.autovalidated_ids_delay_max_seconds = dlg.delay_max_seconds()
+        self._settings.autovalidated_ids_dry_run = dlg.dry_run()
+        self._settings.sync()
+
+    def _start_autovalidated_ids_setup(self) -> None:
+        if not self._require_auth():
+            return
+        from observation_workbench.ui.autovalidated_id_dialogs import (
+            AutovalidatedIdSetupDialog,
+        )
+
+        dlg = AutovalidatedIdSetupDialog(
+            defaults=self._autovalidated_ids_setup_defaults(),
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            self._status_label.setText(
+                "Autovalidated-identification workflow cancelled before planning."
+            )
+            return
+
+        self._save_autovalidated_ids_setup_defaults(dlg)
+        self._disagree_default_comment = dlg.comment()
+        # Every candidate carries its own autovalidated target taxon, so the
+        # shared options hold no target: the posting worker reads each candidate.
+        # post_autovalidated_identification re-verifies the autovalidation itself,
+        # which is why the URL source-taxon safeguard is off here.
+        self._disagree_options = {
+            "source_taxon_id": 0,
+            "source_taxon_name": "",
+            "target_taxon_id": 0,
+            "target_taxon_name": "",
+            "target_taxon_rank": "",
+            "explicit_disagreement": None,
+            "skip_with_dna_barcode_its": False,
+            "only_with_dna_barcode_its": True,
+            "require_source_taxon_match": False,
+            "max_observations": dlg.max_observations(),
+            "skip_unresolved_names": dlg.skip_unresolved_names(),
+            "observation_query": dlg.observation_query(),
+            "dqa_vote_requested": False,
+            "dqa_vote_planned": False,
+            "dry_run": dlg.dry_run(),
+            "tag_other_identifiers": dlg.tag_other_identifiers(),
+            "delay_min_seconds": dlg.delay_min_seconds(),
+            "delay_max_seconds": dlg.delay_max_seconds(),
+            "post_fn": post_autovalidated_identification,
+        }
+        self._disagree_progress_title = "Apply Autovalidated Identifications"
+        self._start_autovalidated_ids_plan()
+
+    def _start_autovalidated_ids_plan(self) -> None:
+        self._disagree_generation = getattr(self, "_disagree_generation", 0) + 1
+        gen = self._disagree_generation
+        self._status_label.setText("Scanning for autovalidated identifications…")
+        worker = _AutovalidatedIdPlanWorker(
+            self._loader,
+            self._auth_state.api_token,
+            self._auth_state.login,
+            gen,
+            lambda: getattr(self, "_disagree_generation", 0),
+            self._disagree_options,
+        )
+        sigs = worker.signals
+        self._live_bulk_signals.add(sigs)
+        sigs.progress.connect(self._on_autovalidated_ids_plan_progress)
+        sigs.planned.connect(
+            lambda result, s=sigs: (
+                self._live_bulk_signals.discard(s),
+                self._on_autovalidated_ids_plan_finished(result),
+            )
+        )
+        sigs.error.connect(
+            lambda msg, s=sigs: (
+                self._live_bulk_signals.discard(s),
+                self._on_bulk_disagree_plan_error(msg),
+            )
+        )
+        self._pool.start(worker)
+
+    @Slot(int, int)
+    def _on_autovalidated_ids_plan_progress(self, seen: int, total: int) -> None:
+        self._status_label.setText(
+            f"Scanning autovalidated observations: {seen} of {total} checked…"
+        )
+
+    def _on_autovalidated_ids_plan_finished(
+        self,
+        result: BulkDisagreePlanResult,
+    ) -> None:
+        from observation_workbench.ui.autovalidated_id_dialogs import (
+            UnresolvedAutovalidatedNamesDialog,
+            format_autovalidated_stats,
+        )
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            BulkDisagreePreviewDialog,
+        )
+
+        self._disagree_plan_stats = result.stats
+        stats_text = format_autovalidated_stats(result.stats)
+        unresolved = list(getattr(result.stats, "unresolved_names", []))
+
+        if not result.candidates:
+            self._status_label.setText("No autovalidated identifications to apply.")
+            QMessageBox.information(
+                self,
+                "Apply Autovalidated Identifications",
+                "No scanned observation needs its autovalidated identification "
+                "posted.\n\n" + stats_text,
+            )
+            if unresolved:
+                UnresolvedAutovalidatedNamesDialog(unresolved, parent=self).exec()
+            return
+
+        if unresolved:
+            UnresolvedAutovalidatedNamesDialog(unresolved, parent=self).exec()
+
+        self._status_label.setText(
+            f"Found {len(result.candidates)} autovalidated identification(s) to preview."
+        )
+        dlg = BulkDisagreePreviewDialog(
+            result.candidates,
+            result.stats,
+            client=self._client,
+            disk_cache=self._disk_cache,
+            api_token=self._auth_state.api_token,
+            login=self._auth_state.login,
+            require_source_taxon_match=False,
+            default_comment=self._disagree_default_comment,
+            on_skip_forever=self._add_bulk_disagree_skip_for_candidate,
+            on_unskip_forever=self._remove_bulk_disagree_skip_for_candidate,
+            request_reauthentication=self._reauthenticate_photo_browser,
+            dry_run=self._disagree_options.get("dry_run", False),
+            window_title="Preview Autovalidated Identifications",
+            photo_browser_title="Browse Autovalidated Observation Photos",
+            source_column_label="Autovalidated name",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            if dlg.back_requested():
+                self._status_label.setText(
+                    "Returned to autovalidated-identification setup."
+                )
+                QTimer.singleShot(0, self._start_autovalidated_ids_setup)
+                return
+            self._status_label.setText(
+                "Autovalidated-identification workflow cancelled before posting."
+            )
+            return
+        candidates = dlg.candidates()
+        if not candidates:
+            self._status_label.setText(
+                "Autovalidated-identification workflow cancelled: no candidates remain."
+            )
+            return
+        self._start_bulk_disagree_execution(candidates)
+
     def _bulk_disagree_setup_defaults(self) -> dict:
         return {
             "url": self._settings.bulk_disagree_url,
@@ -5955,6 +6273,48 @@ class MainWindow(QMainWindow):
                 )
             )
 
+    def _ensure_numeric_identity(self, purpose: str, on_ready: Callable[[], None]) -> None:
+        """Run ``on_ready`` only once a validated numeric account ID is known.
+
+        ``AuthState.is_authenticated`` proves only that a token and login string
+        are stored. Settings written by a build that predates the numeric
+        account ID load with ``user_id == 0``, which is not enough for DNA
+        linking: the numeric identity is written into durable operation state
+        and compared again during recovery. Rather than force every other
+        workflow to reauthenticate, the stored token is revalidated here in the
+        background and the ID is filled in before the workflow starts.
+        """
+        auth = self._auth_state
+        if auth.is_authenticated and auth.user_id > 0:
+            on_ready()
+            return
+        if not auth.is_authenticated:
+            QMessageBox.information(self, "Authentication required", purpose)
+            self._authenticate_to_inaturalist(on_success=lambda _token, _login: on_ready())
+            return
+
+        self._status_label.setText("Validating iNaturalist account identity…")
+        worker = _AuthWorker(self._client, auth.api_token)
+        sigs = worker.signals
+        self._live_auth_signals.add(sigs)
+
+        def validated(token: str, login: str, user_id: int) -> None:
+            self._live_auth_signals.discard(sigs)
+            self._on_authenticated(token, login, user_id)
+            if self._auth_state.user_id > 0:
+                on_ready()
+
+        def validation_failed(msg: str) -> None:
+            self._live_auth_signals.discard(sigs)
+            log.warning("Stored iNaturalist token could not be revalidated: %s", msg)
+            self._status_label.setText("iNaturalist account identity could not be confirmed.")
+            QMessageBox.information(self, "Authentication required", purpose)
+            self._authenticate_to_inaturalist(on_success=lambda _token, _login: on_ready())
+
+        sigs.authenticated.connect(validated)
+        sigs.error.connect(validation_failed)
+        self._pool.start(worker)
+
     def _open_dna_linking(self) -> None:
         if self._dna_linking is None:
             QMessageBox.critical(
@@ -5964,31 +6324,33 @@ class MainWindow(QMainWindow):
                 + self._dna_linking_error,
             )
             return
-        if not self._auth_state.is_authenticated:
-            QMessageBox.information(
-                self,
-                "Authentication required",
-                "Authenticate to iNaturalist before starting DNA linking. Discovery is public, "
-                "but the numeric account identity is part of durable scan state.",
-            )
-            self._authenticate_to_inaturalist(
-                on_success=lambda _token, _login: self._dna_linking.start()
-                if self._dna_linking is not None else None
-            )
-            return
-        self._dna_linking.start()
+        self._ensure_numeric_identity(
+            "Authenticate to iNaturalist before starting DNA linking. Discovery is public, "
+            "but the numeric account identity is part of durable scan state.",
+            lambda: self._dna_linking.start() if self._dna_linking is not None else None,
+        )
 
     def _open_dna_recovery(self) -> None:
         if self._dna_linking is None:
             QMessageBox.warning(self, "DNA-link recovery unavailable", self._dna_linking_error)
             return
-        if not self._auth_state.is_authenticated:
-            QMessageBox.information(
-                self, "Authentication required",
-                "Authenticate as the account captured by the uncertain operation before verification.",
-            )
-            return
-        self._dna_linking.recover()
+        # Recovery still fails closed further down: the service compares the
+        # freshly validated numeric ID and login against the account recorded
+        # with the uncertain operation before it verifies anything.
+        self._ensure_numeric_identity(
+            "Authenticate as the account captured by the uncertain operation before "
+            "verification. The numeric account identity is compared against the durable "
+            "record of that write.",
+            lambda: self._dna_linking.recover() if self._dna_linking is not None else None,
+        )
+
+    def _open_dna_vote_review(self) -> None:
+        """Open the read-only DNA vote review scan.
+
+        Discovery is entirely public, so authentication is optional here; it is
+        only used to prefill the username with the logged-in account.
+        """
+        self._dna_vote_review.start()
 
     # ------------------------------------------------------------------
     # Window close
@@ -6027,6 +6389,7 @@ class MainWindow(QMainWindow):
             self._reconciliation.shutdown()
         if self._dna_linking is not None:
             self._dna_linking.shutdown()
+        self._dna_vote_review.shutdown()
         # Give already in-flight background workers (image prefetch, Identify
         # detail reads) a short bounded chance to finish before the shared
         # httpx client underneath them closes, so a normal quit does not log

@@ -10,7 +10,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import (
     QEvent,
     QObject,
+    QPointF,
     QRunnable,
+    QSize,
     QStringListModel,
     QThreadPool,
     Qt,
@@ -18,7 +20,19 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFont,
+    QIcon,
+    QKeyEvent,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,6 +50,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTextEdit,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -3093,6 +3108,89 @@ class BulkDisagreeKeptReviewDialog(QDialog):
         )
 
 
+# Rows whose observation taxon disagrees with the taxon about to be posted are
+# lifted to the top of the preview and tinted, worst first. A sequence matched to
+# another family is the shape a mis-applied DNA barcode takes, so it outranks a
+# mere genus mismatch. Workflows that never set `taxon_conflict` sort and render
+# exactly as before.
+_TAXON_CONFLICT_SORT_ORDER = {"family": 0, "genus": 1}
+
+# Hidden last column carrying that ordering, so it survives a repopulate.
+_PRIORITY_COLUMN = 10
+_OBS_ID_COLUMN = 0
+_LINK_ICON_SIZE = 14
+_OBS_URL_ROLE = Qt.ItemDataRole.UserRole + 1
+_LINK_ICON_TOOLTIP = (
+    "Click the link icon to open this observation in your browser; "
+    "double-click the cell to copy its URL."
+)
+_link_icon_cache: Dict[str, QIcon] = {}
+
+
+def _external_link_icon(color: QColor) -> QIcon:
+    """Small 'open in browser' glyph, tinted to stay legible on coloured rows."""
+    key = color.name()
+    cached = _link_icon_cache.get(key)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(_LINK_ICON_SIZE, _LINK_ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(color)
+        pen.setWidthF(1.3)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        painter.setPen(pen)
+        # Box with the top-right corner left open for the escaping arrow.
+        painter.drawPolyline(
+            [
+                QPointF(9.5, 7.0),
+                QPointF(9.5, 11.5),
+                QPointF(2.5, 11.5),
+                QPointF(2.5, 4.5),
+                QPointF(7.0, 4.5),
+            ]
+        )
+        painter.drawLine(QPointF(6.5, 7.5), QPointF(11.5, 2.5))
+        painter.drawPolyline(
+            [
+                QPointF(7.5, 2.5),
+                QPointF(11.5, 2.5),
+                QPointF(11.5, 6.5),
+            ]
+        )
+    finally:
+        painter.end()
+    icon = QIcon(pixmap)
+    _link_icon_cache[key] = icon
+    return icon
+
+# (background, foreground), following the pale-tint/strong-text pairing the
+# reconciliation table already uses.
+_TAXON_CONFLICT_COLORS = {
+    "family": ("#f7d7d7", "#a51d24"),
+    "genus": ("#fce3c8", "#8a4b08"),
+}
+
+_TAXON_CONFLICT_TOOLTIPS = {
+    "family": (
+        "The current observation taxon is in a different family from the "
+        "autovalidated name. Check whether the DNA barcode belongs to this "
+        "observation."
+    ),
+    "genus": (
+        "The current observation taxon does not confirm the genus of the "
+        "autovalidated name. Worth a look before posting."
+    ),
+}
+
+
+def _taxon_conflict_of(candidate: BulkDisagreeCandidate) -> str:
+    """The candidate's conflict level, tolerating candidates that never set one."""
+    return getattr(candidate, "taxon_conflict", "") or ""
+
+
 class BulkDisagreePreviewDialog(QDialog):
     def __init__(
         self,
@@ -3116,6 +3214,7 @@ class BulkDisagreePreviewDialog(QDialog):
         dry_run: bool = False,
         window_title: str = "Preview Bulk Disagree to Taxon",
         photo_browser_title: str = "Browse Bulk Disagree Photos",
+        source_column_label: str = "Source taxon from URL",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -3155,7 +3254,22 @@ class BulkDisagreePreviewDialog(QDialog):
         stats_label.setWordWrap(True)
         layout.addWidget(stats_label)
 
-        self._table = QTableWidget(0, 10)
+        # Only the workflows that classify taxon conflicts colour any rows, so the
+        # legend appears only when there is something to explain.
+        if any(_taxon_conflict_of(c) for c in self._candidates):
+            legend = QLabel(
+                "Rows are sorted with the least corroborated first. "
+                "<span style='background-color:#f7d7d7; color:#a51d24;'>&nbsp;Red&nbsp;</span>"
+                ": the observation taxon is in a different family from the name being "
+                "posted. "
+                "<span style='background-color:#fce3c8; color:#8a4b08;'>&nbsp;Orange&nbsp;</span>"
+                ": it does not confirm the genus. "
+                "Both are worth checking for a DNA barcode attached to the wrong observation."
+            )
+            legend.setWordWrap(True)
+            layout.addWidget(legend)
+
+        self._table = QTableWidget(0, _PRIORITY_COLUMN + 1)
         self._table.setHorizontalHeaderLabels(
             [
                 "Observation ID",
@@ -3163,15 +3277,24 @@ class BulkDisagreePreviewDialog(QDialog):
                 "Observer",
                 "Current observation taxon",
                 "Community taxon",
-                "Source taxon from URL",
+                source_column_label,
                 "Target taxon to add",
                 "DNA Barcode ITS present?",
                 "Your current ID",
                 "DQA vote planned?",
+                # Hidden: re-enabling sorting after a repopulate re-applies the
+                # header's sort indicator, so the conflict-first order has to live
+                # in a sortable column rather than in row insertion order.
+                "Conflict priority",
             ]
         )
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         enable_click_sorting(self._table)
+        self._table.setColumnHidden(_PRIORITY_COLUMN, True)
+        self._table.setIconSize(QSize(_LINK_ICON_SIZE, _LINK_ICON_SIZE))
+        self._table.viewport().installEventFilter(self)
+        self._table.itemDoubleClicked.connect(self._copy_observation_url)
+        self._initial_sort_applied = False
         layout.addWidget(self._table, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -3207,7 +3330,16 @@ class BulkDisagreePreviewDialog(QDialog):
         self._back_requested = True
         self.reject()
 
+    def _sort_candidates(self) -> None:
+        """Lift conflicting rows to the top, worst first, preserving scan order within."""
+        self._candidates.sort(
+            key=lambda candidate: _TAXON_CONFLICT_SORT_ORDER.get(
+                _taxon_conflict_of(candidate), 2
+            )
+        )
+
     def _populate_table(self) -> None:
+        self._sort_candidates()
         with sorting_suspended(self._table):
             self._table.setRowCount(len(self._candidates))
             for row, candidate in enumerate(self._candidates):
@@ -3226,10 +3358,75 @@ class BulkDisagreePreviewDialog(QDialog):
                         f"{_dqa_table_text(candidate)}; "
                         f"explicit disagreement: {'yes' if candidate.explicit_disagreement else 'no'}"
                     ),
+                    # Conflict rank first, scan order second, as one sortable number.
+                    str(
+                        _TAXON_CONFLICT_SORT_ORDER.get(
+                            _taxon_conflict_of(candidate), 2
+                        )
+                        * 100000
+                        + row
+                    ),
                 ]
+                conflict = _taxon_conflict_of(candidate)
+                colors = _TAXON_CONFLICT_COLORS.get(conflict)
+                tooltip = _TAXON_CONFLICT_TOOLTIPS.get(conflict, "")
                 for col, value in enumerate(values):
-                    self._table.setItem(row, col, SortableTableWidgetItem(value))
+                    item = SortableTableWidgetItem(value)
+                    if colors:
+                        background, foreground = colors
+                        item.setBackground(QColor(background))
+                        item.setForeground(QColor(foreground))
+                        item.setToolTip(tooltip)
+                    if col == _OBS_ID_COLUMN and obs.url:
+                        text_color = (
+                            QColor(colors[1])
+                            if colors
+                            else self._table.palette().color(QPalette.ColorRole.Text)
+                        )
+                        item.setIcon(_external_link_icon(text_color))
+                        item.setData(_OBS_URL_ROLE, obs.url)
+                        item.setToolTip(
+                            f"{tooltip}\n\n{_LINK_ICON_TOOLTIP}"
+                            if tooltip
+                            else _LINK_ICON_TOOLTIP
+                        )
+                    self._table.setItem(row, col, item)
+        if not self._initial_sort_applied and any(
+            _taxon_conflict_of(c) for c in self._candidates
+        ):
+            # Once only: a sort the user picks afterwards must survive the
+            # repopulate that follows the photo browser.
+            self._table.sortItems(_PRIORITY_COLUMN, Qt.SortOrder.AscendingOrder)
+            self._initial_sort_applied = True
         self._table.resizeColumnsToContents()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        """Open the observation when the Observation ID cell's link icon is clicked."""
+        if (
+            obj is self._table.viewport()
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            position = event.position().toPoint()
+            index = self._table.indexAt(position)
+            if index.isValid() and index.column() == _OBS_ID_COLUMN:
+                item = self._table.item(index.row(), index.column())
+                url = item.data(_OBS_URL_ROLE) if item else None
+                cell = self._table.visualRect(index)
+                icon_right = cell.left() + _LINK_ICON_SIZE + 8
+                if url and position.x() <= icon_right:
+                    open_external_url_silently(str(url))
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _copy_observation_url(self, item) -> None:
+        if item is None or item.column() != _OBS_ID_COLUMN:
+            return
+        url = item.data(_OBS_URL_ROLE)
+        if not url:
+            return
+        QApplication.clipboard().setText(str(url))
+        QToolTip.showText(QCursor.pos(), "Observation URL copied", self._table)
 
     def _browse_photos(self) -> None:
         if not self._client or not self._disk_cache:
@@ -3636,9 +3833,15 @@ def _dqa_table_text(candidate: BulkDisagreeCandidate) -> str:
 
 
 def _source_taxon_text(candidate: BulkDisagreeCandidate) -> str:
-    if not candidate.source_taxon_id:
-        return "(no source taxon)"
-    return f"{candidate.source_taxon_name} ({candidate.source_taxon_id})"
+    if candidate.source_taxon_id:
+        return f"{candidate.source_taxon_name} ({candidate.source_taxon_id})"
+    # Workflows with no numeric source identify their source by an observation
+    # field value instead: the name the candidate was built from.
+    return (
+        candidate.source_display_name
+        or candidate.source_provisional_name
+        or "(no source taxon)"
+    )
 
 
 def _detect_image_ext(data: bytes) -> str:
@@ -3691,14 +3894,5 @@ def _int_or_none(value) -> Optional[int]:
 
 
 def _format_plan_stats(stats: BulkDisagreePlanStats) -> str:
-    return (
-        f"Scanned {stats.total_url_results_scanned} observation(s); "
-        f"{stats.candidate_count} candidate(s). "
-        f"Skipped: {stats.skipped_dna_barcode_its} DNA Barcode ITS, "
-        f"{stats.skipped_missing_dna_barcode_its} missing DNA Barcode ITS, "
-        f"{stats.skipped_already_target} already target ID, "
-        f"{stats.skipped_source_no_match} source taxon changed, "
-        f"{stats.skipped_permanent} permanent skip, "
-        f"{stats.skipped_missing_invalid_data} missing/invalid data, "
-        f"{stats.skipped_refresh_failure} refresh failure."
-    )
+    """One-line scan summary; each stats subclass names its own skip reasons."""
+    return stats.one_line_summary()

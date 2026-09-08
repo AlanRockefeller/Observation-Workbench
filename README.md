@@ -92,6 +92,7 @@ The same menu also exposes:
 
 - Agree to provisional IDs, which opens a guided review flow with optional pauses
 - Bulk disagree to taxon from URL, which opens a separate supervised corrective-ID workflow
+- Apply autovalidated identifications, which posts MycoMap's automated sequence IDs where the consensus has not caught up
 
 ### Automatic Provisional Identifications
 
@@ -127,6 +128,40 @@ The workflow posts a coarser ancestor target as an explicit disagreement, so an 
 After planning, the preview dialog includes **Browse photos...** for fast visual triage. The browser shows large photos for the planned observations, lets you skip candidates for the current run, permanently skip candidates for future bulk disagree runs, or immediately post an alternate ID with its own comment. Alternate IDs are refreshed before posting, can optionally be posted as explicit disagreements, and remove that observation from the planned bulk disagreement run after a successful post. Dry runs disable alternate-ID posting.
 
 The workflow also skips observations where you already have a current ID at the selected target taxon, so running the same disagreement workflow again will not add duplicate genus disagreements. The DQA checkbox can also vote "ID is already as good as it can be." That vote is only attempted after the identification post succeeds and a refresh shows the community taxon now matches the selected target taxon, falling back to the current observation taxon only when no community taxon exists. If the observation stays at species level while the target is genus, the ID is counted separately and the DQA vote is skipped. If your existing "ID is already as good as it can be" vote is visible in the refreshed observation details, the workflow will not post it again. Dry runs never post identifications or DQA votes.
+
+### Apply Autovalidated Identifications
+
+Use **Action -> Apply autovalidated identifications...** after authenticating. MycoMap's
+sequence autovalidator writes the identification it inferred into an observation field and
+leaves a fixed comment from `@stevilkinevil`, but it never posts an identification, so the
+community consensus often lags behind the autovalidated name. This workflow finds those
+observations and lets you post the missing identifications.
+
+Discovery filters on the `ID Update Needed` observation field, which the autovalidator sets
+on every record it processes and which the observer flips to `Yes` to contest the automated
+call — the iNaturalist observations API cannot filter by commenter, and observations the
+observer contested are excluded. You can paste an optional observations URL to narrow the
+search by place, taxon, or observer; the autovalidation filters are always applied on top, so
+a URL can never widen the search. Newest observations are scanned first, up to the scan limit
+you set.
+
+The autovalidated name is read from `Provisional Species Name`, falling back to
+`Species Name Override` when only that is set, and is matched to an iNaturalist taxon **by
+exact name only** — autocomplete's near misses are never accepted, because a wrong match
+would post a wrong identification. A name with no matching taxon usually means the
+provisional name has not been created on iNaturalist yet; those observations can never be
+posted to, and the **Skip observations whose autovalidated name is not on iNaturalist yet**
+checkbox controls whether they are skipped quietly or listed afterwards so the missing names
+can be created.
+
+Each candidate carries its own target taxon. The identification is posted as an explicit
+disagreement only when the autovalidated name is a strict ancestor of the current consensus;
+refining to a descendant, or a same-rank correction, is posted as a plain ID. Preview,
+photo browsing, per-observation skipping, the permanent skip list, delays, and dry run all
+work exactly as in the bulk disagree workflow. Immediately before each post, the observation
+is refreshed and re-checked: it must still carry a DNA Barcode ITS sequence and the
+autovalidation comment, its autovalidated name must still be the one planned, and its
+consensus must still differ from it.
 
 ## Cache, Settings, and Debugging
 

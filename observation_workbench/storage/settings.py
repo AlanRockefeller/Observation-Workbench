@@ -15,6 +15,26 @@ from PySide6.QtCore import QSettings, QByteArray
 
 log = logging.getLogger(__name__)
 
+
+def _as_float(value: object, default: float) -> float:
+    """Parse a stored QSettings value defensively.
+
+    A hand-edited or corrupted INI entry must not raise out of a property and
+    break subsystem initialisation; an unusable value falls back to the default.
+    """
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value: object, default: int) -> int:
+    """Integer counterpart of :func:`_as_float` (tolerates "100.0" too)."""
+    try:
+        return int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
 # On-disk QSettings identity (registry key / ~/.config path).  The app was
 # previously called "iNat ID Study Viewer" and wrote under the LEGACY_* names
 # below; _migrate_legacy_settings() copies that store forward on first run so
@@ -424,6 +444,70 @@ class AppSettings:
         self._s.setValue("bulk_disagree/dry_run", v)
 
     # ------------------------------------------------------------------
+    # Autovalidated-identification setup defaults
+    # ------------------------------------------------------------------
+
+    @property
+    def autovalidated_ids_url(self) -> str:
+        return self._s.value("autovalidated_ids/url", "", type=str)
+
+    @autovalidated_ids_url.setter
+    def autovalidated_ids_url(self, v: str) -> None:
+        self._s.setValue("autovalidated_ids/url", v.strip())
+
+    @property
+    def autovalidated_ids_comment(self) -> Optional[str]:
+        """The saved comment, or None when the user has never saved one."""
+        v = self._s.value("autovalidated_ids/comment", None)
+        return None if v is None else str(v)
+
+    @autovalidated_ids_comment.setter
+    def autovalidated_ids_comment(self, v: str) -> None:
+        self._s.setValue("autovalidated_ids/comment", v)
+
+    @property
+    def autovalidated_ids_max_observations(self) -> int:
+        return int(self._s.value("autovalidated_ids/max_observations", 200))
+
+    @autovalidated_ids_max_observations.setter
+    def autovalidated_ids_max_observations(self, v: int) -> None:
+        self._s.setValue("autovalidated_ids/max_observations", int(v))
+
+    @property
+    def autovalidated_ids_skip_unresolved_names(self) -> bool:
+        return self._s.value(
+            "autovalidated_ids/skip_unresolved_names", True, type=bool
+        )
+
+    @autovalidated_ids_skip_unresolved_names.setter
+    def autovalidated_ids_skip_unresolved_names(self, v: bool) -> None:
+        self._s.setValue("autovalidated_ids/skip_unresolved_names", v)
+
+    @property
+    def autovalidated_ids_delay_min_seconds(self) -> int:
+        return int(self._s.value("autovalidated_ids/delay_min_seconds", 10))
+
+    @autovalidated_ids_delay_min_seconds.setter
+    def autovalidated_ids_delay_min_seconds(self, v: int) -> None:
+        self._s.setValue("autovalidated_ids/delay_min_seconds", int(v))
+
+    @property
+    def autovalidated_ids_delay_max_seconds(self) -> int:
+        return int(self._s.value("autovalidated_ids/delay_max_seconds", 30))
+
+    @autovalidated_ids_delay_max_seconds.setter
+    def autovalidated_ids_delay_max_seconds(self, v: int) -> None:
+        self._s.setValue("autovalidated_ids/delay_max_seconds", int(v))
+
+    @property
+    def autovalidated_ids_dry_run(self) -> bool:
+        return self._s.value("autovalidated_ids/dry_run", False, type=bool)
+
+    @autovalidated_ids_dry_run.setter
+    def autovalidated_ids_dry_run(self, v: bool) -> None:
+        self._s.setValue("autovalidated_ids/dry_run", v)
+
+    # ------------------------------------------------------------------
     # Propose-name (to observation numbers) setup defaults
     # ------------------------------------------------------------------
 
@@ -548,7 +632,10 @@ class AppSettings:
 
     @property
     def dna_linking_radius_m(self) -> float:
-        return max(1.0, min(10000.0, float(self._s.value("dna_linking/radius_m", 100.0))))
+        return max(
+            1.0,
+            min(10000.0, _as_float(self._s.value("dna_linking/radius_m", 100.0), 100.0)),
+        )
 
     @dna_linking_radius_m.setter
     def dna_linking_radius_m(self, value: float) -> None:
@@ -556,7 +643,13 @@ class AppSettings:
 
     @property
     def dna_linking_window_minutes(self) -> float:
-        return max(0.1, min(1440.0, float(self._s.value("dna_linking/window_minutes", 15.0))))
+        return max(
+            0.1,
+            min(
+                1440.0,
+                _as_float(self._s.value("dna_linking/window_minutes", 15.0), 15.0),
+            ),
+        )
 
     @dna_linking_window_minutes.setter
     def dna_linking_window_minutes(self, value: float) -> None:
@@ -564,11 +657,68 @@ class AppSettings:
 
     @property
     def dna_linking_chunk_size(self) -> int:
-        return max(1, min(2000, int(self._s.value("dna_linking/chunk_size", 100))))
+        return max(
+            1, min(2000, _as_int(self._s.value("dna_linking/chunk_size", 100), 100))
+        )
 
     @dna_linking_chunk_size.setter
     def dna_linking_chunk_size(self, value: int) -> None:
         self._s.setValue("dna_linking/chunk_size", max(1, min(2000, int(value))))
+
+    # ------------------------------------------------------------------
+    # DNA vote review (read-only scan for identifications worth revisiting)
+    # ------------------------------------------------------------------
+    @property
+    def dna_vote_review_login(self) -> str:
+        return self._s.value("dna_vote_review/login", "", type=str)
+
+    @dna_vote_review_login.setter
+    def dna_vote_review_login(self, value: str) -> None:
+        self._s.setValue("dna_vote_review/login", str(value).strip())
+        # A blank login is a real choice ("scan anyone"), so record that the
+        # field was set at all; otherwise it is indistinguishable from never
+        # having been configured and the logged-in user gets refilled.
+        self._s.setValue("dna_vote_review/login_configured", True)
+
+    @property
+    def dna_vote_review_login_configured(self) -> bool:
+        return self._s.value(
+            "dna_vote_review/login_configured", False, type=bool
+        )
+
+    @property
+    def dna_vote_review_url(self) -> str:
+        return self._s.value("dna_vote_review/url", "", type=str)
+
+    @dna_vote_review_url.setter
+    def dna_vote_review_url(self, value: str) -> None:
+        self._s.setValue("dna_vote_review/url", str(value).strip())
+
+    @property
+    def dna_vote_review_max_observations(self) -> int:
+        return max(
+            1,
+            min(
+                10000,
+                _as_int(self._s.value("dna_vote_review/max_observations", 600), 600),
+            ),
+        )
+
+    @dna_vote_review_max_observations.setter
+    def dna_vote_review_max_observations(self, value: int) -> None:
+        self._s.setValue(
+            "dna_vote_review/max_observations", max(1, min(10000, int(value)))
+        )
+
+    @property
+    def dna_vote_review_include_refinements(self) -> bool:
+        return self._s.value(
+            "dna_vote_review/include_refinements", True, type=bool
+        )
+
+    @dna_vote_review_include_refinements.setter
+    def dna_vote_review_include_refinements(self, value: bool) -> None:
+        self._s.setValue("dna_vote_review/include_refinements", bool(value))
 
     # Identify is intentionally separate from the study-viewer settings.
     @property

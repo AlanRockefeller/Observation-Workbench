@@ -66,11 +66,27 @@ CREATE TABLE IF NOT EXISTS bulk_disagree_skip (
     reason      TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS taxon_lineage_cache (
+    taxon_id    INTEGER PRIMARY KEY,
+    taxon_rank  TEXT NOT NULL DEFAULT '',
+    ancestry    TEXT NOT NULL DEFAULT '',
+    cached_at   REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_image_access ON image_access_log(last_access);
 """
 
 # How long query cache entries are considered fresh (seconds)
 QUERY_CACHE_TTL = 60 * 60  # 1 hour
+
+# A taxon's rank and its position in the tree are close to immutable -- iNaturalist
+# taxon changes do move things, but rarely, and this cache only feeds the preview's
+# highlighting, so a stale entry mis-colours a row rather than affecting any write.
+TAXON_LINEAGE_CACHE_TTL = 365 * 24 * 60 * 60  # 1 year
+
+# SQLite caps the parameters in one statement (999 on older builds), so batched
+# lookups are chunked well under that.
+_SQL_VARIABLE_CHUNK = 500
 
 IDENTIFY_ACTION_TYPES = frozenset(
     {"identification", "comment", "reviewed", "favorite", "quality_metric"}
@@ -783,6 +799,57 @@ class CacheDB:
         conn.commit()
 
     # ------------------------------------------------------------------
+    # Taxon lineage cache
+    # ------------------------------------------------------------------
+
+    def get_taxon_lineages(
+        self, taxon_ids: Iterable[int]
+    ) -> Dict[int, Tuple[str, str]]:
+        """Return ``{taxon_id: (rank, ancestry)}`` for the entries still fresh.
+
+        Missing and expired ids are simply absent from the result, so the caller
+        fetches exactly those and leaves the rest alone.
+        """
+        wanted = [int(taxon_id) for taxon_id in taxon_ids if taxon_id]
+        if not wanted:
+            return {}
+        conn = self._conn()
+        cutoff = time.time() - TAXON_LINEAGE_CACHE_TTL
+        found: Dict[int, Tuple[str, str]] = {}
+        for start in range(0, len(wanted), _SQL_VARIABLE_CHUNK):
+            chunk = wanted[start : start + _SQL_VARIABLE_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                "SELECT taxon_id, taxon_rank, ancestry FROM taxon_lineage_cache "
+                f"WHERE taxon_id IN ({placeholders}) AND cached_at >= ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for row in rows:
+                found[int(row["taxon_id"])] = (
+                    row["taxon_rank"] or "",
+                    row["ancestry"] or "",
+                )
+        return found
+
+    def set_taxon_lineages(self, entries: Iterable[Tuple[int, str, str]]) -> None:
+        """Store ``(taxon_id, rank, ancestry)`` rows, replacing any existing entry."""
+        now = time.time()
+        rows = [
+            (int(taxon_id), rank or "", ancestry or "", now)
+            for taxon_id, rank, ancestry in entries
+            if taxon_id
+        ]
+        if not rows:
+            return
+        conn = self._conn()
+        conn.executemany(
+            "INSERT OR REPLACE INTO taxon_lineage_cache"
+            "(taxon_id, taxon_rank, ancestry, cached_at) VALUES(?,?,?,?)",
+            rows,
+        )
+        conn.commit()
+
+    # ------------------------------------------------------------------
     # Image access log (for LRU eviction)
     # ------------------------------------------------------------------
 
@@ -1424,4 +1491,7 @@ class CacheDB:
         conn.execute("DELETE FROM query_cache")
         conn.execute("DELETE FROM taxon_summary_cache")
         conn.execute("DELETE FROM image_access_log")
+        # Also the way to force a re-read after an iNaturalist taxon change has
+        # moved something the lineage cache still remembers in its old place.
+        conn.execute("DELETE FROM taxon_lineage_cache")
         conn.commit()

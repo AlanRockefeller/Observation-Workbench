@@ -104,7 +104,7 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
             "Only iNaturalist /observations URLs can be loaded from this field."
         )
 
-    source_key = _canonical_source_key(params)
+    source_key = canonical_source_key(params)
     return ObservationURLQuery(
         display_url=display_url,
         source_key=source_key,
@@ -138,7 +138,7 @@ def with_taxon_filter(
     new_sources.append("Applied filter")
     return ObservationURLQuery(
         display_url=query.display_url,
-        source_key=_canonical_source_key(params),
+        source_key=canonical_source_key(params),
         params=params,
         source_kind=query.source_kind,
         parameter_sources=tuple(new_sources),
@@ -231,6 +231,7 @@ def _normalise_path(path: str) -> str:
     return path.rstrip("/") or "/"
 
 
-def _canonical_source_key(params: QueryParams) -> str:
+def canonical_source_key(params: QueryParams) -> str:
+    """Canonical cache/identity key for a parameter list, order preserved."""
     query = urlencode(params)
     return urlunparse(("https", "www.inaturalist.org", "/observations", "", query, ""))

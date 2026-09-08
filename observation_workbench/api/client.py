@@ -15,7 +15,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlsplit
 
 import httpx
@@ -193,7 +193,8 @@ class RateLimiter:
     ) -> None:
         self._base_interval = 1.0 / max(calls_per_second, 0.01)
         self._min_interval = self._base_interval
-        self._max_interval = self._base_interval * max(max_backoff, 1.0)
+        self._max_backoff_factor = max(max_backoff, 1.0)
+        self._max_interval = self._base_interval * self._max_backoff_factor
         self._last_call = 0.0
         self._lock = threading.Lock()
 
@@ -233,7 +234,12 @@ class RateLimiter:
         with self._lock:
             if interval > self._base_interval:
                 self._base_interval = interval
-                self._max_interval = max(self._max_interval, interval)
+                # Rescale the ceiling from the configured factor rather than
+                # keeping the old absolute one: clamping to ``max(old, base)``
+                # would shrink the available penalty headroom, and for a slow
+                # enough requested rate would leave ``penalize()`` unable to
+                # slow anything down at all.
+                self._max_interval = self._base_interval * self._max_backoff_factor
                 self._min_interval = max(self._min_interval, interval)
 
     @property
@@ -1535,6 +1541,20 @@ class INatClient:
     def get_taxon_by_id(self, taxon_id: int) -> Dict:
         """Fetch a single taxon by ID."""
         return self._get(f"/taxa/{taxon_id}")
+
+    def get_taxa_by_ids(self, taxon_ids: Sequence[int]) -> Dict:
+        """Fetch several taxa in one request, batched like the observation detail read.
+
+        Callers that need only a rank or a name for a pile of ancestor ids would
+        otherwise spend one rate-limited request per taxon.
+        """
+        ids = [int(t) for t in taxon_ids if t]
+        results: List[Dict] = []
+        for start in range(0, len(ids), MAX_OBSERVATION_DETAIL_IDS):
+            chunk = ids[start : start + MAX_OBSERVATION_DETAIL_IDS]
+            raw = self._get("/taxa/" + ",".join(str(t) for t in chunk))
+            results.extend(raw.get("results") or [])
+        return {"results": results, "total_results": len(results)}
 
     def download_image(self, url: str) -> bytes:
         """Download raw image bytes from iNat CDN (S3 / static.inaturalist.org).

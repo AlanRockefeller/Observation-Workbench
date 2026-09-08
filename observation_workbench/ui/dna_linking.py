@@ -386,9 +386,11 @@ class _ObservationCard(QGroupBox):
 
     def _load_photo(self, index: int) -> None:
         if self._reply is not None:
-            self._reply.abort()
-            self._reply.deleteLater()
-            self._reply = None
+            # abort() emits finished synchronously, which runs _photo_finished and
+            # clears self._reply, so take ownership of the reply before aborting.
+            reply, self._reply = self._reply, None
+            reply.abort()
+            reply.deleteLater()
         if index < 0 or index >= len(self._urls):
             self.photo.setText("No photo")
             self.photo.setPixmap(QPixmap())
@@ -724,10 +726,24 @@ class DNARecoveryDialog(QDialog):
                 self, "Confirm Retry Write",
                 "Send this DNA-link write again now? It will not be retried automatically after this attempt.",
             ) == QMessageBox.StandardButton.Yes:
+                # A retry allocates a fresh operation_id, so re-read the rows before
+                # looking this result up; a retried write re-enters _done with an id
+                # that was not in the list this dialog was last populated from.
+                self._refresh()
                 row = next(
-                    item for item in self.rows
-                    if int(item["operation_id"]) == result.operation_id
+                    (
+                        item for item in self.rows
+                        if int(item["operation_id"]) == result.operation_id
+                    ),
+                    None,
                 )
+                if row is None:
+                    QMessageBox.warning(
+                        self, "Retry unavailable",
+                        "This operation is no longer pending verification, so it "
+                        "cannot be retried from here.",
+                    )
+                    return
                 worker = _LinkWorker(
                     self.service, "retry", candidate_pk=int(row["candidate_pk"]),
                     source_id=0, destination_id=int(row["destination_id"]),
@@ -791,17 +807,17 @@ class DNALinkingController(QObject):
 
     def _ready(self, signals: QObject, session_id: int, field_id: int, count: int) -> None:
         self._finish_progress(signals)
-        review = DNALinkingReviewDialog(
-            self.db, self.service, session_id, field_id, self.pool, self.parent_widget
-        )
-        self._reviews.add(review)
-        review.finished.connect(lambda _result, target=review: self._reviews.discard(target))
         if count == 0 and not self.db.queued_candidates(session_id):
             QMessageBox.information(
                 self.parent_widget, "DNA discovery",
                 "The chunk completed, but it produced no queued candidate pairs."
             )
             return
+        review = DNALinkingReviewDialog(
+            self.db, self.service, session_id, field_id, self.pool, self.parent_widget
+        )
+        self._reviews.add(review)
+        review.finished.connect(lambda _result, target=review: self._reviews.discard(target))
         review.show()
 
     def _failed(self, signals: QObject, message: str) -> None:

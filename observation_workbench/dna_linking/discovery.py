@@ -162,6 +162,13 @@ class DNADiscovery:
         fallback = self.client.get_observations(v1_params, page=1, per_page=200)
         if _page_proves_field(fallback, field_id):
             return "v1"
+        if not _page_results(fallback):
+            # An empty page is not evidence that filtering is broken: the narrowing
+            # filter simply matched no DNA-barcoded observations.
+            raise DiscoveryDiagnostic(
+                "No observations carrying the DNA barcode field matched the supplied "
+                "filter, so there is nothing to scan. Widen the search URL and try again."
+            )
         raise DiscoveryDiagnostic(
             "iNaturalist did not prove that positive DNA-field filtering is honored "
             "by either observations endpoint. The scan was blocked; no global Fungi "
@@ -515,8 +522,12 @@ class DNADiscovery:
         return None, ""
 
 
+def _page_results(raw: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [item for item in raw.get("results") or [] if isinstance(item, Mapping)]
+
+
 def _page_proves_field(raw: Mapping[str, Any], field_id: int) -> bool:
-    results = [item for item in raw.get("results") or [] if isinstance(item, Mapping)]
+    results = _page_results(raw)
     return bool(results) and all(extract_observation_field_rows(item, field_id) for item in results)
 
 

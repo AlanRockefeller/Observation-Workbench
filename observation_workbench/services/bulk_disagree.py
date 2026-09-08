@@ -42,6 +42,9 @@ class BulkDisagreeCandidate:
     # value rather than a numeric taxon_id. The safety re-check then verifies the
     # observation still carries this provisional name instead of a taxon match.
     source_provisional_name: str = ""
+    # Display-only label for the preview's source column, for workflows whose
+    # source is neither a taxon id nor a Provisional Species Name field value.
+    source_display_name: str = ""
     current_observation_taxon_name: str = ""
     community_taxon_name: str = ""
     has_dna_barcode_its: bool = False
@@ -50,6 +53,12 @@ class BulkDisagreeCandidate:
     dqa_vote_planned: bool = False
     explicit_disagreement: bool = True
     other_identifier_logins: List[str] = field(default_factory=list)
+    # How far the current observation taxon sits from the taxon this candidate
+    # would add: "family" when the two are in different families, "genus" when
+    # they share a family but not a genus, "" when they agree or the comparison
+    # could not be made. Workflows that do not compute it leave it empty, and the
+    # preview then treats every row alike.
+    taxon_conflict: str = ""
 
 
 @dataclass
@@ -64,6 +73,20 @@ class BulkDisagreePlanStats:
     skipped_missing_invalid_data: int = 0
     skipped_refresh_failure: int = 0
     total_api_results: int = 0
+
+    def one_line_summary(self) -> str:
+        """Compact scan summary for the preview dialog's header line."""
+        return (
+            f"Scanned {self.total_url_results_scanned} observation(s); "
+            f"{self.candidate_count} candidate(s). "
+            f"Skipped: {self.skipped_dna_barcode_its} DNA Barcode ITS, "
+            f"{self.skipped_missing_dna_barcode_its} missing DNA Barcode ITS, "
+            f"{self.skipped_already_target} already target ID, "
+            f"{self.skipped_source_no_match} source taxon changed, "
+            f"{self.skipped_permanent} permanent skip, "
+            f"{self.skipped_missing_invalid_data} missing/invalid data, "
+            f"{self.skipped_refresh_failure} refresh failure."
+        )
 
 
 @dataclass
@@ -362,7 +385,7 @@ def plan_bulk_disagree_candidates(
                     [obs.obs_id for obs in refresh_queue],
                 )
             except Exception as exc:
-                if _is_auth_failure_error(exc):
+                if is_auth_failure_error(exc):
                     raise
                 stats.skipped_refresh_failure += len(refresh_queue)
                 log.error(
@@ -489,7 +512,7 @@ def plan_propose_name_candidates(
                     loader._client, api_token, refresh_queue
                 )
             except Exception as exc:
-                if _is_auth_failure_error(exc):
+                if is_auth_failure_error(exc):
                     raise
                 stats.skipped_refresh_failure += len(refresh_queue)
                 log.error(
@@ -930,7 +953,8 @@ def _is_ambiguous_write_error(exc: INatAPIError) -> bool:
     return "may have reached inaturalist" in text or "result is unknown" in text
 
 
-def _is_auth_failure_error(exc: Exception) -> bool:
+def is_auth_failure_error(exc: Exception) -> bool:
+    """True when an exception means the saved API token was rejected."""
     if isinstance(exc, INatAPIError) and exc.status_code == 401:
         return True
     text = str(exc).casefold()
