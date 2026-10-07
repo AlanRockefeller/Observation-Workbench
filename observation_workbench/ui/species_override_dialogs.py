@@ -4,29 +4,25 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QRect, QThreadPool, Qt, Slot
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFrame,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QTableWidget,
     QVBoxLayout,
-    QWidget,
 )
 
 from observation_workbench.api.client import INatClient
-from observation_workbench.models import StudyPhoto
+from observation_workbench.models import StudyObservation
+from observation_workbench.services.bulk_disagree import BulkDisagreeCandidate
 from observation_workbench.services.image_cache import ImageCache
 from observation_workbench.services.species_override import (
     SPECIES_NAME_OVERRIDE_FIELD_NAME,
@@ -34,9 +30,7 @@ from observation_workbench.services.species_override import (
     SpeciesOverridePlanRow,
 )
 from observation_workbench.ui.bulk_disagree_dialogs import (
-    _GalleryImageWorker,
-    _HoldToZoomLabel,
-    _photo_fetch_target,
+    BulkDisagreePhotoBrowserDialog,
 )
 from observation_workbench.ui.external_links import open_external_url_silently
 from observation_workbench.ui.table_sort import (
@@ -48,13 +42,9 @@ from observation_workbench.ui.table_sort import (
 
 _OBS_URL_ID_RE = re.compile(r"/observations/(\d+)")
 
-# Matches ImagePrefetcher._MAX_CONCURRENT_BACKGROUND_PREFETCH so this dialog's
-# photo downloads share the same modest, bounded concurrency budget.
-_MAX_CONCURRENT_PHOTO_LOADS = 3
 
-
-class SpeciesOverridePhotoBrowserDialog(QDialog):
-    """Visual review of the observations selected for an override update."""
+class SpeciesOverridePhotoBrowserDialog(BulkDisagreePhotoBrowserDialog):
+    """Adapt field-update rows to the shared observation photo browser."""
 
     def __init__(
         self,
@@ -63,259 +53,40 @@ class SpeciesOverridePhotoBrowserDialog(QDialog):
         client: INatClient,
         disk_cache: ImageCache,
         target_field_name: str = SPECIES_NAME_OVERRIDE_FIELD_NAME,
+        proposed_species_name: str = "",
         parent=None,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"Browse {target_field_name} Photos")
-        self.resize(1120, 780)
-        self._rows = list(rows)
-        self._client = client
-        self._disk_cache = disk_cache
-        self._pool = QThreadPool.globalInstance()
-        self._ignored_ids: set[int] = set()
-        self._cards: dict[int, QFrame] = {}
-        self._photo_labels: dict[tuple[int, int], QLabel] = {}
-        self._live_image_signals: set[object] = set()
-        self._undo_stack: list[int] = []
-        self._card_pending_photos: dict[int, list[StudyPhoto]] = {}
-        self._cards_started: set[int] = set()
-        self._photo_queue: list[tuple[int, StudyPhoto]] = []
-        self._queued_photo_keys: set[tuple[int, int]] = set()
-        self._in_flight_loads = 0
-
-        layout = QVBoxLayout(self)
-        intro = QLabel(
-            "Review every observation that is currently selected for the "
-            f"{target_field_name} update. Choose Keep after confirming the species, "
-            "or Ignore this update to remove an observation from the planned update."
+        candidates = [
+            BulkDisagreeCandidate(
+                observation=StudyObservation(
+                    obs_id=row.observation_id,
+                    observer_login=row.observer_login,
+                    provisional_species_name=row.provisional_name,
+                    photos=list(row.photos),
+                ),
+                source_taxon_id=0,
+                source_taxon_name="",
+                target_taxon_id=0,
+                target_taxon_name=proposed_species_name,
+                current_observation_taxon_name=row.consensus_name,
+                explicit_disagreement=False,
+            )
+            for row in rows
+        ]
+        super().__init__(
+            candidates,
+            client=client,
+            disk_cache=disk_cache,
+            api_token="",
+            login="",
+            require_source_taxon_match=False,
+            target_field_name=target_field_name,
+            window_title=f"Browse {target_field_name} Photos",
+            parent=parent,
         )
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-        self._count_label = QLabel("")
-        layout.addWidget(self._count_label)
-        self._undo_btn = QPushButton("Undo last ignore")
-        self._undo_btn.setEnabled(False)
-        self._undo_btn.clicked.connect(self._undo_last_ignore)
-        tools = QHBoxLayout()
-        tools.addWidget(self._undo_btn)
-        tools.addStretch(1)
-        layout.addLayout(tools)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        for row in self._rows:
-            card = self._make_card(row)
-            self._cards[row.observation_id] = card
-            content_layout.addWidget(card)
-        content_layout.addStretch(1)
-        scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
-        self._scroll = scroll
-        scroll.verticalScrollBar().valueChanged.connect(self._check_visible_cards)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
-        if close_btn:
-            close_btn.setText("Done")
-        buttons.rejected.connect(self.accept)
-        layout.addWidget(buttons)
-        self._update_count()
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._check_visible_cards()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._check_visible_cards()
 
     def included_observation_ids(self) -> list[int]:
-        return [
-            row.observation_id
-            for row in self._rows
-            if row.observation_id not in self._ignored_ids
-        ]
-
-    def _make_card(self, row: SpeciesOverridePlanRow) -> QFrame:
-        card = QFrame()
-        card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet("QFrame { background: #ffffff; } QLabel { color: #000000; }")
-        layout = QVBoxLayout(card)
-        title = QLabel(
-            f"<b>Observation {row.observation_id}</b> by {row.observer_login}"
-        )
-        layout.addWidget(title)
-        details = QLabel(
-            f"Current: {row.consensus_name or '(none)'} | "
-            f"Provisional: {row.provisional_name or '(none)'}"
-        )
-        details.setWordWrap(True)
-        layout.addWidget(details)
-        actions = QHBoxLayout()
-        keep_btn = QPushButton("Keep")
-        ignore_btn = QPushButton("Ignore this update")
-        open_btn = QPushButton("Open observation")
-        keep_btn.clicked.connect(lambda _checked=False, c=card: c.setVisible(False))
-        ignore_btn.clicked.connect(
-            lambda _checked=False, obs_id=row.observation_id: self._ignore(obs_id)
-        )
-        open_btn.clicked.connect(
-            lambda _checked=False, url=row.observation_url: open_external_url_silently(
-                url
-            )
-        )
-        for button in (keep_btn, ignore_btn, open_btn):
-            actions.addWidget(button)
-        actions.addStretch(1)
-        layout.addLayout(actions)
-
-        if not row.photos:
-            no_photo = QLabel("No photos on this observation.")
-            no_photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_photo.setMinimumHeight(120)
-            layout.addWidget(no_photo)
-        else:
-            grid = QGridLayout()
-            columns = 2 if len(row.photos) > 1 else 1
-            for index, photo in enumerate(row.photos):
-                label = _HoldToZoomLabel(
-                    f"Loading photo {index + 1} of {len(row.photos)}..."
-                )
-                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                label.setMinimumHeight(240)
-                label.setStyleSheet("QLabel { background: #111; color: #ddd; }")
-                grid.addWidget(label, index // columns, index % columns)
-                self._photo_labels[(row.observation_id, photo.photo_id)] = label
-            layout.addLayout(grid)
-            self._card_pending_photos[row.observation_id] = list(row.photos)
-        return card
-
-    def _check_visible_cards(self) -> None:
-        if not self._card_pending_photos:
-            return
-        viewport = self._scroll.viewport()
-        viewport_rect = viewport.rect()
-        for obs_id in list(self._card_pending_photos):
-            if obs_id in self._cards_started:
-                continue
-            card = self._cards.get(obs_id)
-            if card is None or not card.isVisible():
-                continue
-            top_left = card.mapTo(viewport, card.rect().topLeft())
-            card_rect = QRect(top_left, card.size())
-            if not card_rect.intersects(viewport_rect):
-                continue
-            self._cards_started.add(obs_id)
-            for photo in self._card_pending_photos.pop(obs_id):
-                self._enqueue_photo(obs_id, photo)
-        self._pump_photo_queue()
-
-    def _enqueue_photo(self, obs_id: int, photo) -> None:
-        key = (obs_id, photo.photo_id)
-        if key in self._queued_photo_keys:
-            return
-        self._queued_photo_keys.add(key)
-        self._photo_queue.append((obs_id, photo))
-
-    def _pump_photo_queue(self) -> None:
-        while self._photo_queue and self._in_flight_loads < _MAX_CONCURRENT_PHOTO_LOADS:
-            obs_id, photo = self._photo_queue.pop(0)
-            self._queued_photo_keys.discard((obs_id, photo.photo_id))
-            self._in_flight_loads += 1
-            self._load_photo(obs_id, photo)
-
-    def _photo_load_finished(self) -> None:
-        self._in_flight_loads = max(0, self._in_flight_loads - 1)
-        self._pump_photo_queue()
-
-    def _load_photo(self, obs_id: int, photo) -> None:
-        target = _photo_fetch_target(photo, "large")
-        if target is None:
-            self._photo_load_finished()
-            return
-        size, url = target
-        worker = _GalleryImageWorker(
-            obs_id=obs_id,
-            photo_id=photo.photo_id,
-            image_url=url,
-            client=self._client,
-            disk_cache=self._disk_cache,
-            size=size,
-        )
-        signals = worker.signals
-        self._live_image_signals.add(signals)
-        signals.loaded.connect(
-            lambda loaded_obs_id, photo_id, data, s=signals: (
-                self._live_image_signals.discard(s),
-                self._on_photo_loaded(loaded_obs_id, photo_id, data),
-            )
-        )
-        signals.failed.connect(
-            lambda loaded_obs_id, photo_id, message, s=signals: (
-                self._live_image_signals.discard(s),
-                self._on_photo_failed(loaded_obs_id, photo_id, message),
-            )
-        )
-        self._pool.start(worker)
-
-    @Slot(int, int, object)
-    def _on_photo_loaded(self, obs_id: int, photo_id: int, data: bytes) -> None:
-        self._photo_load_finished()
-        label = self._photo_labels.get((obs_id, photo_id))
-        if label is None:
-            return
-        pixmap = QPixmap()
-        pixmap.loadFromData(data)
-        if pixmap.isNull():
-            label.setText("Could not decode photo.")
-            return
-        if isinstance(label, _HoldToZoomLabel):
-            label.set_full_pixmap(pixmap)
-        scaled = pixmap.scaled(
-            520,
-            540,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        label.setPixmap(scaled)
-        label.setMinimumHeight(max(180, scaled.height()))
-
-    def _on_photo_failed(self, obs_id: int, photo_id: int, message: str) -> None:
-        self._photo_load_finished()
-        label = self._photo_labels.get((obs_id, photo_id))
-        if label is not None:
-            label.setText(f"Could not load photo: {message}")
-
-    def _ignore(self, obs_id: int) -> None:
-        if obs_id in self._ignored_ids:
-            return
-        self._ignored_ids.add(obs_id)
-        self._undo_stack.append(obs_id)
-        card = self._cards.get(obs_id)
-        if card is not None:
-            card.setVisible(False)
-        self._update_count()
-
-    def _undo_last_ignore(self) -> None:
-        while self._undo_stack:
-            obs_id = self._undo_stack.pop()
-            if obs_id not in self._ignored_ids:
-                continue
-            self._ignored_ids.remove(obs_id)
-            card = self._cards.get(obs_id)
-            if card is not None:
-                card.setVisible(True)
-            break
-        self._update_count()
-
-    def _update_count(self) -> None:
-        included = len(self._rows) - len(self._ignored_ids)
-        self._count_label.setText(
-            f"{included} observation(s) included; {len(self._ignored_ids)} ignored."
-        )
-        self._undo_btn.setEnabled(bool(self._undo_stack))
+        return [candidate.observation.obs_id for candidate in self.candidates()]
 
 
 class SpeciesOverrideSetupDialog(QDialog):
@@ -660,6 +431,7 @@ class SpeciesOverridePlanDialog(QDialog):
             client=self._client,
             disk_cache=self._disk_cache,
             target_field_name=self._plan.target_field_name,
+            proposed_species_name=self._plan.override_name,
             parent=self,
         )
         dlg.exec()

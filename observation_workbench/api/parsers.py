@@ -360,6 +360,7 @@ def parse_observation(
                 raw_obs,
                 "Species Name Override",
             ),
+            id_update_needed=_observation_field_value(raw_obs, "ID Update Needed"),
             dna_barcode_its=_observation_field_value(
                 raw_obs,
                 "DNA Barcode ITS",

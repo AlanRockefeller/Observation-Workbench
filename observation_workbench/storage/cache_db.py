@@ -34,6 +34,17 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 
+CREATE TABLE IF NOT EXISTS autovalidated_scan (
+    scope TEXT PRIMARY KEY,
+    last_id INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS autovalidated_pending (
+    scope TEXT NOT NULL,
+    obs_id INTEGER NOT NULL,
+    attempted_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, obs_id)
+);
+
 CREATE TABLE IF NOT EXISTS query_cache (
     cache_key   TEXT PRIMARY KEY,
     data        TEXT NOT NULL,
@@ -66,11 +77,27 @@ CREATE TABLE IF NOT EXISTS bulk_disagree_skip (
     reason      TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS taxon_lineage_cache (
+    taxon_id    INTEGER PRIMARY KEY,
+    taxon_rank  TEXT NOT NULL DEFAULT '',
+    ancestry    TEXT NOT NULL DEFAULT '',
+    cached_at   REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_image_access ON image_access_log(last_access);
 """
 
 # How long query cache entries are considered fresh (seconds)
 QUERY_CACHE_TTL = 60 * 60  # 1 hour
+
+# A taxon's rank and its position in the tree are close to immutable -- iNaturalist
+# taxon changes do move things, but rarely, and this cache only feeds the preview's
+# highlighting, so a stale entry mis-colours a row rather than affecting any write.
+TAXON_LINEAGE_CACHE_TTL = 365 * 24 * 60 * 60  # 1 year
+
+# SQLite caps the parameters in one statement (999 on older builds), so batched
+# lookups are chunked well under that.
+_SQL_VARIABLE_CHUNK = 500
 
 IDENTIFY_ACTION_TYPES = frozenset(
     {"identification", "comment", "reviewed", "favorite", "quality_metric"}
@@ -543,6 +570,63 @@ class CacheDB:
             self._local.conn = conn
         return self._local.conn
 
+    def autovalidated_cursor(self, scope: str) -> int:
+        row = (
+            self._conn()
+            .execute("SELECT last_id FROM autovalidated_scan WHERE scope=?", (scope,))
+            .fetchone()
+        )
+        return int(row[0]) if row else 0
+
+    def reset_autovalidated_cursor(self, scope: str) -> None:
+        self._conn().execute(
+            "INSERT OR REPLACE INTO autovalidated_scan(scope, last_id) VALUES (?, 0)",
+            (scope,),
+        )
+
+    def queue_autovalidated_page(self, scope: str, ids: list[int]) -> None:
+        """Save fetched IDs and progress atomically before processing their data."""
+        if not ids:
+            return
+        conn = self._conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.executemany(
+                "INSERT OR IGNORE INTO autovalidated_pending(scope, obs_id) VALUES (?, ?)",
+                [(scope, obs_id) for obs_id in ids],
+            )
+            conn.execute(
+                "INSERT INTO autovalidated_scan(scope, last_id) VALUES (?, ?) "
+                "ON CONFLICT(scope) DO UPDATE SET last_id=MAX(last_id, excluded.last_id)",
+                (scope, max(ids)),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def autovalidated_pending_ids(self, scope: str, limit: int) -> list[int]:
+        return [
+            int(row[0])
+            for row in self._conn().execute(
+                "SELECT obs_id FROM autovalidated_pending WHERE scope=? "
+                "ORDER BY attempted_at, obs_id LIMIT ?",
+                (scope, limit),
+            )
+        ]
+
+    def touch_autovalidated_pending(self, scope: str, ids: list[int]) -> None:
+        self._conn().executemany(
+            "UPDATE autovalidated_pending SET attempted_at=? WHERE scope=? AND obs_id=?",
+            [(time.time(), scope, obs_id) for obs_id in ids],
+        )
+
+    def finish_autovalidated_pending(self, scope: str, obs_id: int) -> None:
+        self._conn().execute(
+            "DELETE FROM autovalidated_pending WHERE scope=? AND obs_id=?",
+            (scope, obs_id),
+        )
+
     @staticmethod
     def _migrate_identify_actions(conn: sqlite3.Connection) -> None:
         """Add durable-journal columns to databases created by earlier gates.
@@ -779,6 +863,57 @@ class CacheDB:
         conn.execute(
             "INSERT OR REPLACE INTO taxon_summary_cache(cache_key, data, cached_at) VALUES(?,?,?)",
             (cache_key, json.dumps(data), time.time()),
+        )
+        conn.commit()
+
+    # ------------------------------------------------------------------
+    # Taxon lineage cache
+    # ------------------------------------------------------------------
+
+    def get_taxon_lineages(
+        self, taxon_ids: Iterable[int]
+    ) -> Dict[int, Tuple[str, str]]:
+        """Return ``{taxon_id: (rank, ancestry)}`` for the entries still fresh.
+
+        Missing and expired ids are simply absent from the result, so the caller
+        fetches exactly those and leaves the rest alone.
+        """
+        wanted = [int(taxon_id) for taxon_id in taxon_ids if taxon_id]
+        if not wanted:
+            return {}
+        conn = self._conn()
+        cutoff = time.time() - TAXON_LINEAGE_CACHE_TTL
+        found: Dict[int, Tuple[str, str]] = {}
+        for start in range(0, len(wanted), _SQL_VARIABLE_CHUNK):
+            chunk = wanted[start : start + _SQL_VARIABLE_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                "SELECT taxon_id, taxon_rank, ancestry FROM taxon_lineage_cache "
+                f"WHERE taxon_id IN ({placeholders}) AND cached_at >= ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for row in rows:
+                found[int(row["taxon_id"])] = (
+                    row["taxon_rank"] or "",
+                    row["ancestry"] or "",
+                )
+        return found
+
+    def set_taxon_lineages(self, entries: Iterable[Tuple[int, str, str]]) -> None:
+        """Store ``(taxon_id, rank, ancestry)`` rows, replacing any existing entry."""
+        now = time.time()
+        rows = [
+            (int(taxon_id), rank or "", ancestry or "", now)
+            for taxon_id, rank, ancestry in entries
+            if taxon_id
+        ]
+        if not rows:
+            return
+        conn = self._conn()
+        conn.executemany(
+            "INSERT OR REPLACE INTO taxon_lineage_cache"
+            "(taxon_id, taxon_rank, ancestry, cached_at) VALUES(?,?,?,?)",
+            rows,
         )
         conn.commit()
 
@@ -1424,4 +1559,7 @@ class CacheDB:
         conn.execute("DELETE FROM query_cache")
         conn.execute("DELETE FROM taxon_summary_cache")
         conn.execute("DELETE FROM image_access_log")
+        # Also the way to force a re-read after an iNaturalist taxon change has
+        # moved something the lineage cache still remembers in its old place.
+        conn.execute("DELETE FROM taxon_lineage_cache")
         conn.commit()

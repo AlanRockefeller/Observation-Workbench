@@ -733,14 +733,14 @@ class ITSSyncService:
                 )
             if action is ITSActionType.INAT_ITS_ADD:
                 on_send()
-                return self.inat_client.create_reconciliation_field_value_v2(
+                return self.inat_client.create_observation_field_value_v2(
                     auth.api_token,
                     live.inat_observation_uuid,
                     binding_id,
                     value,
                 )
             on_send()
-            return self.inat_client.update_reconciliation_field_value_v2(
+            return self.inat_client.update_observation_field_value_v2(
                 auth.api_token,
                 str(row["remote_row_uuid"]),
                 live.inat_observation_uuid,

@@ -10,7 +10,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import (
     QEvent,
     QObject,
+    QPointF,
+    QRect,
     QRunnable,
+    QSize,
     QStringListModel,
     QThreadPool,
     Qt,
@@ -18,7 +21,19 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFont,
+    QIcon,
+    QKeyEvent,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,6 +51,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTextEdit,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -48,7 +64,7 @@ from observation_workbench.api.observation_url import (
     extract_provisional_species_name_from_observation_query,
     parse_observations_url,
 )
-from observation_workbench.models import StudyTaxon
+from observation_workbench.models import StudyPhoto, StudyTaxon
 from observation_workbench.services.bulk_disagree import (
     DQA_DISABLED_MESSAGE,
     DQA_POSTING_ENABLED,
@@ -1522,9 +1538,11 @@ class ProposeNameSetupDialog(_TargetTaxonAutocomplete, QDialog):
         delay_max = max(delay_min, _int_default(defaults.get("delay_max_seconds"), 30))
         self._delay_min_spin.setValue(delay_min)
         self._delay_max_spin.setValue(delay_max)
-        # Dry run and tag-others always start unchecked, regardless of last use.
+        # Dry run always starts unchecked; remember the tagging preference.
         self._dry_run_cb.setChecked(False)
-        self._tag_others_cb.setChecked(False)
+        self._tag_others_cb.setChecked(
+            _bool_default(defaults.get("tag_other_identifiers"), False)
+        )
         target_id = _int_or_none(defaults.get("target_taxon_id"))
         target_name = str(defaults.get("target_taxon_name") or "").strip()
         if target_id and target_name:
@@ -1738,6 +1756,12 @@ class _HoldToZoomLabel(QLabel):
 
 
 class BulkDisagreePhotoBrowserDialog(QDialog):
+    """Shared photo selection browser for identification and field updates.
+
+    A target_field_name selects field-update mode: the browser only selects
+    observations, and identification posting and permanent skips are unavailable.
+    """
+
     def __init__(
         self,
         candidates: List[BulkDisagreeCandidate],
@@ -1758,12 +1782,19 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
             ]
         ] = None,
         window_title: str = "Browse Bulk Disagree Photos",
+        target_field_name: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(window_title)
         self.resize(1120, 780)
-        self._candidates = list(candidates)
+        self._candidates = sorted(
+            candidates,
+            key=lambda c: (
+                _TAXON_CONFLICT_SORT_ORDER.get(_taxon_conflict_of(c), 2),
+                (c.target_taxon_name or "").strip().casefold(),
+            ),
+        )
         self._candidate_by_obs_id = {c.observation.obs_id: c for c in self._candidates}
         self._client = client
         self._disk_cache = disk_cache
@@ -1772,6 +1803,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._require_source_taxon_match = require_source_taxon_match
         self._default_comment = default_comment
         self._dry_run = dry_run
+        self._target_field_name = target_field_name
         self._on_skip_forever = on_skip_forever
         self._on_unskip_forever = on_unskip_forever
         self._request_reauthentication = request_reauthentication
@@ -1795,6 +1827,13 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._reauthentication_in_progress = False
         self._live_image_signals: set[QObject] = set()
         self._live_post_signals: set[QObject] = set()
+        self._pending_photo_cards: Dict[int, BulkDisagreeCandidate] = {}
+        self._photo_queue: list[tuple[BulkDisagreeCandidate, StudyPhoto]] = []
+        self._in_flight_photo_loads = 0
+        self._next_card_index = 0
+        self._card_timer = QTimer(self)
+        self._card_timer.setSingleShot(True)
+        self._card_timer.timeout.connect(self._append_card_batch)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 12)
@@ -1807,7 +1846,15 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
             "Keyboard shortcuts act on the top visible observation: K = Keep, "
             "S = Skip this run, A = Alternate ID, O = Open observation."
         )
-        if dry_run:
+        if target_field_name:
+            intro.setText(
+                f"Review the observations selected for the {target_field_name} update. "
+                "Use Keep after confirming the proposed name, or Skip this run to "
+                "remove an observation from the update. Keyboard shortcuts act on "
+                "the top visible observation: K = Keep, S = Skip this run, "
+                "O = Open observation."
+            )
+        if dry_run and not target_field_name:
             intro.setText(
                 intro.text() + " Dry run is enabled, so alternate IDs cannot be posted."
             )
@@ -1844,10 +1891,12 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._content_layout = QVBoxLayout(content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(12)
-        for candidate in self._candidates:
-            self._add_card(candidate)
         self._content_layout.addStretch(1)
+        for candidate in self._candidates[:2]:
+            self._add_card(candidate)
+            self._next_card_index += 1
         self._scroll.setWidget(content)
+        self._scroll.verticalScrollBar().valueChanged.connect(self._load_visible_photos)
         layout.addWidget(self._scroll, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -1859,6 +1908,76 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         layout.addWidget(buttons)
         self._install_shortcuts()
         self._update_count_label()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._load_visible_photos()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_scroll"):
+            self._load_visible_photos()
+
+    def _load_visible_photos(self) -> None:
+        if not self.isVisible():
+            return
+        viewport = self._scroll.viewport()
+        visible_ids: list[int] = []
+        ahead_ids: list[int] = []
+        passed_viewport = False
+        for obs_id in self._card_order:
+            card = self._cards[obs_id]
+            if not card.isVisible():
+                continue
+            position = card.mapTo(viewport, card.rect().topLeft())
+            if QRect(position, card.size()).intersects(viewport.rect()):
+                visible_ids.append(obs_id)
+                passed_viewport = True
+            elif passed_viewport:
+                ahead_ids.append(obs_id)
+                if len(ahead_ids) == 5:
+                    break
+        scrollbar = self._scroll.verticalScrollBar()
+        if (
+            self._next_card_index < len(self._candidates)
+            and (
+                len(ahead_ids) < 5
+                or scrollbar.maximum() - scrollbar.value() < viewport.height()
+            )
+            and not self._card_timer.isActive()
+        ):
+            self._card_timer.start(0)
+        # Warm a small observation lookahead so Keep can reveal ready photos.
+        for obs_id in visible_ids + ahead_ids:
+            candidate = self._pending_photo_cards.pop(obs_id, None)
+            if candidate is None:
+                continue
+            self._photo_queue.extend((candidate, p) for p in candidate.observation.photos)
+        # Visible photos take priority over downloads queued for the lookahead.
+        visible = set(visible_ids)
+        self._photo_queue.sort(key=lambda item: item[0].observation.obs_id not in visible)
+        self._pump_photo_queue()
+
+    def _append_card_batch(self) -> None:
+        if not self.isVisible():
+            return
+        # Limit widget creation per event-loop turn; create further cards only
+        # when the user approaches the end or needs more lookahead observations.
+        end = min(self._next_card_index + 4, len(self._candidates))
+        while self._next_card_index < end:
+            self._add_card(self._candidates[self._next_card_index])
+            self._next_card_index += 1
+        QTimer.singleShot(0, self._load_visible_photos)
+
+    def _pump_photo_queue(self) -> None:
+        # Share the main prefetcher's modest three-download concurrency budget.
+        while self._photo_queue and self._in_flight_photo_loads < 3:
+            candidate, photo = self._photo_queue.pop(0)
+            self._load_photo(candidate, photo)
+
+    def _photo_load_finished(self) -> None:
+        self._in_flight_photo_loads = max(0, self._in_flight_photo_loads - 1)
+        self._pump_photo_queue()
 
     def candidates(self) -> List[BulkDisagreeCandidate]:
         return [
@@ -1898,7 +2017,23 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
 
         title = QLabel(f"<b>Observation {obs.obs_id}</b> by {obs.observer_login}")
         title.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        layout.addWidget(title)
+        header = QHBoxLayout()
+        header.addWidget(title, 1, Qt.AlignmentFlag.AlignTop)
+        proposed = QVBoxLayout()
+        caption = QLabel("Proposed name:")
+        caption.setAlignment(Qt.AlignmentFlag.AlignRight)
+        proposed.addWidget(caption)
+        species = QLabel(candidate.target_taxon_name or "(none)")
+        species.setTextFormat(Qt.TextFormat.PlainText)
+        species.setWordWrap(True)
+        species.setAlignment(Qt.AlignmentFlag.AlignRight)
+        font = species.font()
+        font.setPointSize(32)
+        font.setBold(True)
+        species.setFont(font)
+        proposed.addWidget(species)
+        header.addLayout(proposed, 2)
+        layout.addLayout(header)
 
         meta = QLabel(
             " | ".join(
@@ -1906,14 +2041,29 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
                     f"Current: {candidate.current_observation_taxon_name or '(none)'}",
                     f"Community: {candidate.community_taxon_name or '(none)'}",
                     f"Location: {obs.place_guess or '(none)'}",
-                    f"Planned target: {_format_taxon_with_rank(candidate.target_taxon_name, candidate.target_taxon_rank)}",
                     f"Explicit disagreement: {'yes' if candidate.explicit_disagreement else 'no'}",
                     f"DNA ITS: {'yes' if candidate.has_dna_barcode_its else 'no'}",
                 ]
             )
         )
         meta.setWordWrap(True)
+        if self._target_field_name:
+            meta.setText(
+                f"Current: {candidate.current_observation_taxon_name or '(none)'} | "
+                f"Provisional: {obs.provisional_species_name or '(none)'}"
+            )
         layout.addWidget(meta)
+
+        if candidate.comments_after_autovalidation:
+            discussion = QLabel(
+                "Review needed: someone commented after autovalidation; "
+                "they may be questioning the automated name."
+            )
+            discussion.setWordWrap(True)
+            discussion.setStyleSheet(
+                "QLabel { background: #fce3c8; color: #8a4b08; padding: 6px; }"
+            )
+            layout.addWidget(discussion)
 
         top_row, top_buttons = self._make_action_row(candidate)
         layout.addLayout(top_row)
@@ -1945,7 +2095,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
                 photo_label.set_original_fetcher(
                     lambda c=candidate, p=photo: self._load_original_photo(c, p)
                 )
-                self._load_photo(candidate, photo)
+            self._pending_photo_cards[obs.obs_id] = candidate
             layout.addLayout(photo_grid)
 
         status = QLabel("Kept in planned run.")
@@ -1956,7 +2106,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         bottom_row, bottom_buttons = self._make_action_row(candidate)
         layout.addLayout(bottom_row)
         self._card_buttons[obs.obs_id] = top_buttons + bottom_buttons
-        self._content_layout.addWidget(frame)
+        self._content_layout.insertWidget(self._content_layout.count() - 1, frame)
 
     def _make_action_row(
         self,
@@ -1967,6 +2117,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         skip_btn = QPushButton("Skip this run (S)")
         skip_forever_btn = QPushButton("Skip forever")
         alternate_btn = QPushButton("Post alternate ID... (A)")
+        skip_forever_btn.setVisible(not bool(self._target_field_name))
+        alternate_btn.setVisible(not bool(self._target_field_name))
         if self._dry_run:
             alternate_btn.setEnabled(False)
             alternate_btn.setToolTip(
@@ -2030,6 +2182,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
             ("A", self._post_alternate_current_candidate),
             ("O", self._open_current_observation),
         ):
+            if key == "A" and self._target_field_name:
+                continue
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(handler)
@@ -2095,6 +2249,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         )
         sigs = worker.signals
         self._live_image_signals.add(sigs)
+        self._in_flight_photo_loads += 1
         sigs.loaded.connect(
             lambda obs_id, photo_id, pixmap, s=sigs: (
                 self._live_image_signals.discard(s),
@@ -2111,6 +2266,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
 
     @Slot(int, int, object)
     def _on_photo_loaded(self, obs_id: int, photo_id: int, image_data: bytes) -> None:
+        self._photo_load_finished()
         label = self._photo_labels.get((obs_id, photo_id))
         if not label:
             return
@@ -2136,6 +2292,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         label.setMinimumHeight(max(180, scaled.height()))
 
     def _on_photo_failed(self, obs_id: int, photo_id: int, msg: str) -> None:
+        self._photo_load_finished()
         label = self._photo_labels.get((obs_id, photo_id))
         if label:
             label.setText(f"Could not load photo: {msg}")
@@ -2203,6 +2360,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._remove_candidate(candidate, "Skipped for this run.", undoable=True)
 
     def _skip_forever(self, candidate: BulkDisagreeCandidate) -> None:
+        if self._target_field_name:
+            return
         if self._on_skip_forever:
             self._on_skip_forever(candidate)
         self._remove_candidate(
@@ -2267,6 +2426,11 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._update_count_label()
 
     def _show_kept_observations(self) -> None:
+        if self._target_field_name:
+            for obs_id in list(self._kept_hidden_obs_ids):
+                self._restore_kept_card(obs_id, scroll_to=False)
+            self._update_count_label()
+            return
         kept_candidates = [
             self._candidate_by_obs_id[obs_id]
             for obs_id in self._card_order
@@ -2306,6 +2470,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         card = self._cards.get(obs_id)
         if card:
             card.setVisible(True)
+            QTimer.singleShot(0, self._load_visible_photos)
             if scroll_to:
                 QTimer.singleShot(
                     0, lambda c=card: self._scroll.ensureWidgetVisible(c, 0, 40)
@@ -2318,6 +2483,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         card = self._cards.get(obs_id)
         if card:
             card.setVisible(True)
+            QTimer.singleShot(0, self._load_visible_photos)
             QTimer.singleShot(
                 0, lambda c=card: self._scroll.ensureWidgetVisible(c, 0, 40)
             )
@@ -2348,6 +2514,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         if focus is not None and (focus is card or card.isAncestorOf(focus)):
             self._scroll.setFocus(Qt.FocusReason.OtherFocusReason)
         card.setVisible(False)
+        QTimer.singleShot(0, self._load_visible_photos)
         if anchor is None:
             scrollbar.setValue(old_value)
             return
@@ -2396,6 +2563,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         return None
 
     def _post_alternate(self, candidate: BulkDisagreeCandidate) -> None:
+        if self._target_field_name:
+            return
         if self._dry_run:
             QMessageBox.information(
                 self,
@@ -2435,6 +2604,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         candidate: BulkDisagreeCandidate,
         recent: _RecentAlternateTaxon,
     ) -> None:
+        if self._target_field_name:
+            return
         if self._dry_run:
             QMessageBox.information(
                 self,
@@ -2470,6 +2641,8 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         remember_recent: Optional[_RecentAlternateTaxon] = None,
         optimistic_hide: bool = False,
     ) -> None:
+        if self._target_field_name:
+            return
         obs_id = candidate.observation.obs_id
         if obs_id in self._pending_alternate_posts:
             return
@@ -3093,6 +3266,94 @@ class BulkDisagreeKeptReviewDialog(QDialog):
         )
 
 
+# Rows whose observation taxon disagrees with the taxon about to be posted are
+# lifted to the top of the preview and tinted, worst first. A sequence matched to
+# another family is the shape a mis-applied DNA barcode takes, so it outranks a
+# mere genus mismatch. Workflows that never set `taxon_conflict` sort and render
+# exactly as before.
+_TAXON_CONFLICT_SORT_ORDER = {"family": 0, "genus": 1}
+
+# Hidden last column carrying that ordering, so it survives a repopulate.
+_PRIORITY_COLUMN = 11
+_SKIP_COLUMN = 0
+_OBS_ID_COLUMN = 1
+_LINK_ICON_SIZE = 14
+_OBS_URL_ROLE = Qt.ItemDataRole.UserRole + 1
+_SKIP_OBS_ID_ROLE = Qt.ItemDataRole.UserRole + 2
+_LINK_ICON_TOOLTIP = (
+    "Click the link icon to open this observation in your browser; "
+    "double-click the cell to copy its URL."
+)
+_link_icon_cache: Dict[str, QIcon] = {}
+
+
+def _external_link_icon(color: QColor) -> QIcon:
+    """Small 'open in browser' glyph, tinted to stay legible on coloured rows."""
+    key = color.name()
+    cached = _link_icon_cache.get(key)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(_LINK_ICON_SIZE, _LINK_ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(color)
+        pen.setWidthF(1.3)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        painter.setPen(pen)
+        # Box with the top-right corner left open for the escaping arrow.
+        painter.drawPolyline(
+            [
+                QPointF(9.5, 7.0),
+                QPointF(9.5, 11.5),
+                QPointF(2.5, 11.5),
+                QPointF(2.5, 4.5),
+                QPointF(7.0, 4.5),
+            ]
+        )
+        painter.drawLine(QPointF(6.5, 7.5), QPointF(11.5, 2.5))
+        painter.drawPolyline(
+            [
+                QPointF(7.5, 2.5),
+                QPointF(11.5, 2.5),
+                QPointF(11.5, 6.5),
+            ]
+        )
+    finally:
+        painter.end()
+    icon = QIcon(pixmap)
+    _link_icon_cache[key] = icon
+    return icon
+
+# (background, foreground), following the pale-tint/strong-text pairing the
+# reconciliation table already uses.
+_TAXON_CONFLICT_COLORS = {
+    "family": ("#f7d7d7", "#a51d24"),
+    "genus": ("#fce3c8", "#8a4b08"),
+}
+
+_TAXON_CONFLICT_TOOLTIPS = {
+    "family": (
+        "The current observation taxon is in a different family from the "
+        "autovalidated name. Check whether the DNA barcode belongs to this "
+        "observation."
+    ),
+    "genus": (
+        "The current observation taxon does not confirm the genus of the "
+        "autovalidated name. Worth a look before posting."
+    ),
+}
+
+
+def _taxon_conflict_of(candidate: BulkDisagreeCandidate) -> str:
+    """Review priority: red conflicts outrank later discussion's orange flag."""
+    conflict = getattr(candidate, "taxon_conflict", "") or ""
+    if candidate.comments_after_autovalidation and conflict != "family":
+        return "genus"
+    return conflict
+
+
 class BulkDisagreePreviewDialog(QDialog):
     def __init__(
         self,
@@ -3116,6 +3377,7 @@ class BulkDisagreePreviewDialog(QDialog):
         dry_run: bool = False,
         window_title: str = "Preview Bulk Disagree to Taxon",
         photo_browser_title: str = "Browse Bulk Disagree Photos",
+        source_column_label: str = "Source taxon from URL",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -3155,23 +3417,52 @@ class BulkDisagreePreviewDialog(QDialog):
         stats_label.setWordWrap(True)
         layout.addWidget(stats_label)
 
-        self._table = QTableWidget(0, 10)
+        # Only the workflows that classify taxon conflicts colour any rows, so the
+        # legend appears only when there is something to explain.
+        if any(_taxon_conflict_of(c) for c in self._candidates):
+            legend = QLabel(
+                "Rows are sorted with the least corroborated first. "
+                "<span style='background-color:#f7d7d7; color:#a51d24;'>&nbsp;Red&nbsp;</span>"
+                ": the observation taxon is in a different family from the name being "
+                "posted. "
+                "<span style='background-color:#fce3c8; color:#8a4b08;'>&nbsp;Orange&nbsp;</span>"
+                ": it does not confirm the genus. "
+                "Orange also flags comments from other people after autovalidation, "
+                "which may question the automated name. "
+                "Both are worth checking for a DNA barcode attached to the wrong observation."
+            )
+            legend.setWordWrap(True)
+            layout.addWidget(legend)
+
+        self._table = QTableWidget(0, _PRIORITY_COLUMN + 1)
         self._table.setHorizontalHeaderLabels(
             [
+                "",
                 "Observation ID",
                 "URL",
                 "Observer",
                 "Current observation taxon",
                 "Community taxon",
-                "Source taxon from URL",
+                source_column_label,
                 "Target taxon to add",
                 "DNA Barcode ITS present?",
                 "Your current ID",
                 "DQA vote planned?",
+                # Hidden: re-enabling sorting after a repopulate re-applies the
+                # header's sort indicator, so the conflict-first order has to live
+                # in a sortable column rather than in row insertion order.
+                "Conflict priority",
             ]
         )
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         enable_click_sorting(self._table)
+        self._table.setColumnHidden(_PRIORITY_COLUMN, True)
+        self._table.setColumnHidden(_SKIP_COLUMN, on_skip_forever is None)
+        self._table.setIconSize(QSize(_LINK_ICON_SIZE, _LINK_ICON_SIZE))
+        self._table.viewport().installEventFilter(self)
+        self._table.itemDoubleClicked.connect(self._copy_observation_url)
+        self._table.itemClicked.connect(self._skip_from_preview)
+        self._initial_sort_applied = False
         layout.addWidget(self._table, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -3207,12 +3498,22 @@ class BulkDisagreePreviewDialog(QDialog):
         self._back_requested = True
         self.reject()
 
+    def _sort_candidates(self) -> None:
+        """Lift conflicting rows to the top, worst first, preserving scan order within."""
+        self._candidates.sort(
+            key=lambda candidate: _TAXON_CONFLICT_SORT_ORDER.get(
+                _taxon_conflict_of(candidate), 2
+            )
+        )
+
     def _populate_table(self) -> None:
+        self._sort_candidates()
         with sorting_suspended(self._table):
             self._table.setRowCount(len(self._candidates))
             for row, candidate in enumerate(self._candidates):
                 obs = candidate.observation
                 values = [
+                    "×",
                     str(obs.obs_id),
                     obs.url,
                     obs.observer_login,
@@ -3226,10 +3527,115 @@ class BulkDisagreePreviewDialog(QDialog):
                         f"{_dqa_table_text(candidate)}; "
                         f"explicit disagreement: {'yes' if candidate.explicit_disagreement else 'no'}"
                     ),
+                    # Conflict rank first, scan order second, as one sortable number.
+                    str(
+                        _TAXON_CONFLICT_SORT_ORDER.get(
+                            _taxon_conflict_of(candidate), 2
+                        )
+                        * 100000
+                        + row
+                    ),
                 ]
+                conflict = _taxon_conflict_of(candidate)
+                colors = _TAXON_CONFLICT_COLORS.get(conflict)
+                tooltip = _TAXON_CONFLICT_TOOLTIPS.get(candidate.taxon_conflict, "")
+                if candidate.comments_after_autovalidation:
+                    tooltip = "\n\n".join(
+                        text
+                        for text in (
+                            tooltip,
+                            "Someone commented after autovalidation; review the discussion for possible corrections.",
+                        )
+                        if text
+                    )
                 for col, value in enumerate(values):
-                    self._table.setItem(row, col, SortableTableWidgetItem(value))
+                    item = SortableTableWidgetItem(value)
+                    if colors:
+                        background, foreground = colors
+                        item.setBackground(QColor(background))
+                        item.setForeground(QColor(foreground))
+                        item.setToolTip(tooltip)
+                    if col == _SKIP_COLUMN:
+                        item.setForeground(QColor("#d32f2f"))
+                        font = item.font()
+                        font.setBold(True)
+                        font.setPointSize(18)
+                        item.setFont(font)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        item.setData(_SKIP_OBS_ID_ROLE, obs.obs_id)
+                        item.setToolTip("Skip this observation forever and remove it from this batch.")
+                    if col == _OBS_ID_COLUMN and obs.url:
+                        text_color = (
+                            QColor(colors[1])
+                            if colors
+                            else self._table.palette().color(QPalette.ColorRole.Text)
+                        )
+                        item.setIcon(_external_link_icon(text_color))
+                        item.setData(_OBS_URL_ROLE, obs.url)
+                        item.setToolTip(
+                            f"{tooltip}\n\n{_LINK_ICON_TOOLTIP}"
+                            if tooltip
+                            else _LINK_ICON_TOOLTIP
+                        )
+                    self._table.setItem(row, col, item)
+        if not self._initial_sort_applied and any(
+            _taxon_conflict_of(c) for c in self._candidates
+        ):
+            # Once only: a sort the user picks afterwards must survive the
+            # repopulate that follows the photo browser.
+            self._table.sortItems(_PRIORITY_COLUMN, Qt.SortOrder.AscendingOrder)
+            self._initial_sort_applied = True
         self._table.resizeColumnsToContents()
+
+    def _skip_from_preview(self, item) -> None:
+        if item.column() != _SKIP_COLUMN or self._on_skip_forever is None:
+            return
+        obs_id = item.data(_SKIP_OBS_ID_ROLE)
+        candidate = next(
+            (c for c in self._candidates if c.observation.obs_id == obs_id), None
+        )
+        if candidate is None:
+            return
+        if QMessageBox.question(
+            self,
+            "Skip observation permanently?",
+            f"Exclude observation {obs_id} from all future bulk runs?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._on_skip_forever(candidate)
+        self._candidates.remove(candidate)
+        self._table.removeRow(item.row())
+        self._update_start_enabled()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        """Open the observation when the Observation ID cell's link icon is clicked."""
+        if (
+            obj is self._table.viewport()
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            position = event.position().toPoint()
+            index = self._table.indexAt(position)
+            if index.isValid() and index.column() == _OBS_ID_COLUMN:
+                item = self._table.item(index.row(), index.column())
+                url = item.data(_OBS_URL_ROLE) if item else None
+                cell = self._table.visualRect(index)
+                icon_right = cell.left() + _LINK_ICON_SIZE + 8
+                if url and position.x() <= icon_right:
+                    open_external_url_silently(str(url))
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _copy_observation_url(self, item) -> None:
+        if item is None or item.column() != _OBS_ID_COLUMN:
+            return
+        url = item.data(_OBS_URL_ROLE)
+        if not url:
+            return
+        QApplication.clipboard().setText(str(url))
+        QToolTip.showText(QCursor.pos(), "Observation URL copied", self._table)
 
     def _browse_photos(self) -> None:
         if not self._client or not self._disk_cache:
@@ -3636,9 +4042,15 @@ def _dqa_table_text(candidate: BulkDisagreeCandidate) -> str:
 
 
 def _source_taxon_text(candidate: BulkDisagreeCandidate) -> str:
-    if not candidate.source_taxon_id:
-        return "(no source taxon)"
-    return f"{candidate.source_taxon_name} ({candidate.source_taxon_id})"
+    if candidate.source_taxon_id:
+        return f"{candidate.source_taxon_name} ({candidate.source_taxon_id})"
+    # Workflows with no numeric source identify their source by an observation
+    # field value instead: the name the candidate was built from.
+    return (
+        candidate.source_display_name
+        or candidate.source_provisional_name
+        or "(no source taxon)"
+    )
 
 
 def _detect_image_ext(data: bytes) -> str:
@@ -3691,14 +4103,5 @@ def _int_or_none(value) -> Optional[int]:
 
 
 def _format_plan_stats(stats: BulkDisagreePlanStats) -> str:
-    return (
-        f"Scanned {stats.total_url_results_scanned} observation(s); "
-        f"{stats.candidate_count} candidate(s). "
-        f"Skipped: {stats.skipped_dna_barcode_its} DNA Barcode ITS, "
-        f"{stats.skipped_missing_dna_barcode_its} missing DNA Barcode ITS, "
-        f"{stats.skipped_already_target} already target ID, "
-        f"{stats.skipped_source_no_match} source taxon changed, "
-        f"{stats.skipped_permanent} permanent skip, "
-        f"{stats.skipped_missing_invalid_data} missing/invalid data, "
-        f"{stats.skipped_refresh_failure} refresh failure."
-    )
+    """One-line scan summary; each stats subclass names its own skip reasons."""
+    return stats.one_line_summary()

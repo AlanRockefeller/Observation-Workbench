@@ -1,7 +1,9 @@
 """
 iNaturalist API v1 client.
 
-Rate limiting: 1 request/second (iNat recommends ~100/min).
+Rate limiting: one process-wide budget of ~1 request/second shared by every
+client instance (iNat recommends <=100/min), which lengthens adaptively while
+the server is returning 429/503 and decays back on clean responses.
 Retry: exponential backoff on 429/503.
 All methods are synchronous — designed to run inside QRunnable workers.
 """
@@ -13,7 +15,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlsplit
 
 import httpx
@@ -87,11 +89,25 @@ V2_OBSERVATION_VERIFICATION_FIELDS = (
     "quality_metrics:(id:!t,metric:!t,agree:!t,"
     "user:(id:!t,login:!t)))"
 )
+V2_DNA_LINKING_DISCOVERY_FIELDS = (
+    "(id:!t,uuid:!t,time_observed_at:!t,positional_accuracy:!t,geojson:!t,"
+    "obscured:!t,geoprivacy:!t,taxon_geoprivacy:!t,"
+    "user:(id:!t,login:!t),taxon:(id:!t,name:!t,rank:!t,ancestry:!t,"
+    "iconic_taxon_name:!t,ancestors:(id:!t,name:!t,rank:!t)),"
+    "ofvs:(id:!t,uuid:!t,value:!t,field_id:!t,"
+    "observation_field:(id:!t,name:!t,datatype:!t)),"
+    "observation_photos:(photo:(id:!t,url:!t)))"
+)
 
 # The Captive/Cultivated gate supports only the "wild" Data Quality
 # Assessment metric, voted on via the documented tri-state operation below.
 _SUPPORTED_QUALITY_METRICS = frozenset({"wild"})
 _SUPPORTED_QUALITY_METRIC_VOTES = frozenset({"agree", "disagree", "remove"})
+
+# These responses establish that an unsafe request was rejected. Server-side
+# failures are intentionally absent: a backend or proxy can return 5xx after
+# the mutation committed, so repeating that write could duplicate it.
+_UNSAFE_WRITE_DEFINITE_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 409, 422})
 
 
 class INatAPIError(RuntimeError):
@@ -157,20 +173,84 @@ class V2Response(dict):
 
 
 class RateLimiter:
-    """Simple token-bucket-ish rate limiter (thread-safe)."""
+    """Thread-safe request spacer with adaptive backoff (shared, not per client).
 
-    def __init__(self, calls_per_second: float = 1.0) -> None:
-        self._min_interval = 1.0 / max(calls_per_second, 0.01)
+    iNaturalist counts requests per user/IP, not per client object, so several
+    clients each pacing themselves at 1 req/s simply raced each other past the
+    server's ceiling. Callers therefore share one limiter by default (see
+    ``SHARED_RATE_LIMITER``).
+
+    A 429/503 lengthens the interval for *every* caller rather than only the
+    thread that happened to be rebuffed, and each clean response decays it back
+    toward the configured base.
+    """
+
+    _BACKOFF_FACTOR = 2.0
+    _DECAY = 0.95
+
+    def __init__(
+        self, calls_per_second: float = 1.0, max_backoff: float = 16.0
+    ) -> None:
+        self._base_interval = 1.0 / max(calls_per_second, 0.01)
+        self._min_interval = self._base_interval
+        self._max_backoff_factor = max(max_backoff, 1.0)
+        self._max_interval = self._base_interval * self._max_backoff_factor
         self._last_call = 0.0
         self._lock = threading.Lock()
 
     def wait(self) -> None:
         with self._lock:
             now = time.monotonic()
-            wait_s = self._min_interval - (now - self._last_call)
-            if wait_s > 0:
-                time.sleep(wait_s)
-            self._last_call = time.monotonic()
+            slot = max(now, self._last_call + self._min_interval)
+            self._last_call = slot
+        wait_s = slot - time.monotonic()
+        if wait_s > 0:
+            time.sleep(wait_s)
+
+    def penalize(self) -> None:
+        """Slow every caller down after the server pushed back."""
+        with self._lock:
+            previous = self._min_interval
+            self._min_interval = min(
+                self._min_interval * self._BACKOFF_FACTOR, self._max_interval
+            )
+            changed = self._min_interval > previous
+        if changed:
+            log.info(
+                "Throttling iNaturalist requests to one per %.1fs after pushback",
+                self._min_interval,
+            )
+
+    def record_success(self) -> None:
+        """Decay back toward the base rate after a clean response."""
+        with self._lock:
+            if self._min_interval > self._base_interval:
+                self._min_interval = max(
+                    self._base_interval, self._min_interval * self._DECAY
+                )
+
+    def require_at_most(self, calls_per_second: float) -> None:
+        """Tighten the base rate if a caller needs something slower."""
+        interval = 1.0 / max(calls_per_second, 0.01)
+        with self._lock:
+            if interval > self._base_interval:
+                self._base_interval = interval
+                # Rescale the ceiling from the configured factor rather than
+                # keeping the old absolute one: clamping to ``max(old, base)``
+                # would shrink the available penalty headroom, and for a slow
+                # enough requested rate would leave ``penalize()`` unable to
+                # slow anything down at all.
+                self._max_interval = self._base_interval * self._max_backoff_factor
+                self._min_interval = max(self._min_interval, interval)
+
+    @property
+    def current_interval(self) -> float:
+        with self._lock:
+            return self._min_interval
+
+
+# Process-wide budget: every INatClient shares this unless handed its own.
+SHARED_RATE_LIMITER = RateLimiter(1.0)
 
 
 class INatClient:
@@ -180,8 +260,15 @@ class INatClient:
         self,
         calls_per_second: float = 1.0,
         on_rate_limited: Optional[Callable[[int, float], None]] = None,
+        rate_limiter: Optional[RateLimiter] = None,
     ) -> None:
-        self._rate = RateLimiter(calls_per_second)
+        # Default to the process-wide limiter: the server's ceiling is shared,
+        # so private per-client budgets only add up to 429s.
+        if rate_limiter is not None:
+            self._rate = rate_limiter
+        else:
+            self._rate = SHARED_RATE_LIMITER
+            self._rate.require_at_most(calls_per_second)
         self.on_rate_limited = on_rate_limited
         self._call_count = 0
         self._call_count_lock = threading.Lock()
@@ -220,6 +307,7 @@ class INatClient:
                 self._increment_call_count()
                 resp = self._client.get(path, params=params)
                 if resp.status_code in (429, 503):
+                    self._rate.penalize()
                     wait_s = min(2**attempt * 2, 60)
                     log.warning(
                         "Rate limited (%s) on %s, waiting %ss",
@@ -231,6 +319,7 @@ class INatClient:
                         self.on_rate_limited(resp.status_code, wait_s)
                     time.sleep(wait_s)
                     continue
+                self._rate.record_success()
                 _raise_for_status(resp, path)
                 if resp.status_code == 204:
                     return {}
@@ -324,6 +413,8 @@ class INatClient:
                     json=json,
                     headers=headers,
                 )
+                if resp.status_code in (429, 503):
+                    self._rate.penalize()
                 if retry_safe and resp.status_code in (429, 503):
                     wait_s = min(2**attempt * 2, 60)
                     log.warning(
@@ -336,6 +427,8 @@ class INatClient:
                         self.on_rate_limited(resp.status_code, wait_s)
                     time.sleep(wait_s)
                     continue
+                if resp.status_code not in (429, 503):
+                    self._rate.record_success()
                 _raise_for_status(resp, path)
                 if not resp.content:
                     return {}
@@ -481,6 +574,10 @@ class INatClient:
                     files=files,
                     headers=headers,
                 )
+                if response.status_code in (429, 503):
+                    self._rate.penalize()
+                elif not response.is_error:
+                    self._rate.record_success()
                 if retry_safe and response.status_code in (429, 503):
                     wait_s = min(2**attempt * 2, 60)
                     log.warning(
@@ -495,14 +592,11 @@ class INatClient:
                     continue
 
                 if response.is_error:
-                    outcome_unknown = not retry_safe and response.status_code not in {
-                        400,
-                        401,
-                        403,
-                        404,
-                        409,
-                        422,
-                    }
+                    outcome_unknown = not retry_safe and (
+                        response.status_code >= 500
+                        or response.status_code
+                        not in _UNSAFE_WRITE_DEFINITE_REJECTION_STATUSES
+                    )
                     raise INatAPIError(
                         f"iNaturalist returned HTTP {response.status_code}",
                         endpoint=endpoint,
@@ -604,6 +698,25 @@ class INatClient:
         if api_token:
             return self._request_auth("GET", "/observations", api_token, params=params)
         return self._get("/observations", params)
+
+    def get_dna_linking_observations_v2(
+        self,
+        query_params: QueryParams,
+        *,
+        page: int = 1,
+    ) -> V2Response:
+        """Public, unauthenticated discovery read with an explicit field set.
+
+        The DNA workflow positively validates its field filter against every
+        returned page; this method deliberately makes no claim that a supplied
+        filter parameter is supported merely because the server accepted it.
+        """
+        params = _with_pagination(query_params, page=page, per_page=200)
+        if isinstance(params, dict):
+            params["fields"] = V2_DNA_LINKING_DISCOVERY_FIELDS
+        else:
+            params = [*params, ("fields", V2_DNA_LINKING_DISCOVERY_FIELDS)]
+        return self._request_v2("GET", "/observations", params=params)
 
     def get_observation_by_id(
         self,
@@ -880,14 +993,14 @@ class INatClient:
             )
         return self._request_v2("GET", "/observations", params=params)
 
-    def create_reconciliation_field_value_v2(
+    def create_observation_field_value_v2(
         self,
         api_token: str,
         observation_uuid: str,
         observation_field_id: int,
         value: str,
     ) -> V2Response:
-        """Create one explicitly confirmed reconciliation field value."""
+        """Create one explicitly confirmed observation field value."""
         return self._request_v2_auth(
             "POST",
             "/observation_field_values",
@@ -901,7 +1014,7 @@ class INatClient:
             },
         )
 
-    def update_reconciliation_field_value_v2(
+    def update_observation_field_value_v2(
         self,
         api_token: str,
         field_value_uuid: str,
@@ -909,7 +1022,7 @@ class INatClient:
         observation_field_id: int,
         value: str,
     ) -> V2Response:
-        """Repair one exact iNaturalist observation-field-value UUID."""
+        """Update one exact iNaturalist observation-field-value UUID."""
         return self._request_v2_auth(
             "PUT",
             f"/observation_field_values/{field_value_uuid}",
@@ -921,6 +1034,35 @@ class INatClient:
                     "value": value,
                 }
             },
+        )
+
+    # Compatibility aliases for older reconciliation callers and third-party
+    # integrations. New code should use the feature-neutral methods above.
+    def create_reconciliation_field_value_v2(
+        self,
+        api_token: str,
+        observation_uuid: str,
+        observation_field_id: int,
+        value: str,
+    ) -> V2Response:
+        return self.create_observation_field_value_v2(
+            api_token, observation_uuid, observation_field_id, value
+        )
+
+    def update_reconciliation_field_value_v2(
+        self,
+        api_token: str,
+        field_value_uuid: str,
+        observation_uuid: str,
+        observation_field_id: int,
+        value: str,
+    ) -> V2Response:
+        return self.update_observation_field_value_v2(
+            api_token,
+            field_value_uuid,
+            observation_uuid,
+            observation_field_id,
+            value,
         )
 
     def delete_reconciliation_field_value_v2(
@@ -1400,6 +1542,20 @@ class INatClient:
     def get_taxon_by_id(self, taxon_id: int) -> Dict:
         """Fetch a single taxon by ID."""
         return self._get(f"/taxa/{taxon_id}")
+
+    def get_taxa_by_ids(self, taxon_ids: Sequence[int]) -> Dict:
+        """Fetch several taxa in one request, batched like the observation detail read.
+
+        Callers that need only a rank or a name for a pile of ancestor ids would
+        otherwise spend one rate-limited request per taxon.
+        """
+        ids = [int(t) for t in taxon_ids if t]
+        results: List[Dict] = []
+        for start in range(0, len(ids), MAX_OBSERVATION_DETAIL_IDS):
+            chunk = ids[start : start + MAX_OBSERVATION_DETAIL_IDS]
+            raw = self._get("/taxa/" + ",".join(str(t) for t in chunk))
+            results.extend(raw.get("results") or [])
+        return {"results": results, "total_results": len(results)}
 
     def download_image(self, url: str) -> bytes:
         """Download raw image bytes from iNat CDN (S3 / static.inaturalist.org).

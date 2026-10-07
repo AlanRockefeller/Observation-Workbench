@@ -1468,14 +1468,14 @@ class LinkRepairService:
         auth = self.auth_provider()
         self._require_current_inat_auth(auth, live)
         if action is LinkActionType.INAT_OFV_ADD:
-            return self.inat_client.create_reconciliation_field_value_v2(
+            return self.inat_client.create_observation_field_value_v2(
                 auth.api_token,
                 str(row["inat_observation_uuid"]),
                 int(row["binding_id"]),
                 INAT_MO_URL.format(mo_id=int(row["mo_observation_id"])),
             )
         if action is LinkActionType.INAT_OFV_REPAIR:
-            return self.inat_client.update_reconciliation_field_value_v2(
+            return self.inat_client.update_observation_field_value_v2(
                 auth.api_token,
                 str(row["remote_row_uuid"]),
                 str(row["inat_observation_uuid"]),

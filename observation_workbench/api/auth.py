@@ -24,6 +24,7 @@ _JWT_RE = re.compile(
 class AuthState:
     api_token: str = ""
     login: str = ""
+    user_id: int = 0
 
     @property
     def is_authenticated(self) -> bool:
@@ -40,12 +41,16 @@ class AuthService:
         return AuthState(
             api_token=self._settings.inat_api_token,
             login=self._settings.inat_login,
+            user_id=self._settings.inat_user_id,
         )
 
-    def save(self, token: str, login: str) -> AuthState:
-        state = AuthState(api_token=normalise_token(token), login=login.strip())
+    def save(self, token: str, login: str, user_id: int = 0) -> AuthState:
+        state = AuthState(
+            api_token=normalise_token(token), login=login.strip(), user_id=int(user_id or 0)
+        )
         self._settings.inat_api_token = state.api_token
         self._settings.inat_login = state.login
+        self._settings.inat_user_id = state.user_id
         self._settings.sync()
         return state
 
