@@ -164,6 +164,7 @@ def main() -> None:
 
     # Qt log handler (for the in-app log panel)
     qt_handler = QtLogHandler()
+    app.aboutToQuit.connect(qt_handler.close)
     qt_handler.setLevel(log_level)
     logging.getLogger().addHandler(qt_handler)
 

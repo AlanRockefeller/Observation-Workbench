@@ -59,6 +59,7 @@ class BulkDisagreeCandidate:
     # could not be made. Workflows that do not compute it leave it empty, and the
     # preview then treats every row alike.
     taxon_conflict: str = ""
+    comments_after_autovalidation: bool = False
 
 
 @dataclass
@@ -590,6 +591,7 @@ def post_bulk_disagreement(
     dry_run: bool = False,
     dqa_posting_enabled: bool = DQA_POSTING_ENABLED,
     explicit_disagreement: Optional[bool] = None,
+    refreshed_skip_reason: Optional[Callable[[StudyObservation], str]] = None,
 ) -> BulkDisagreeResult:
     """Refresh, re-check safeguards, and post one corrective identification."""
     refreshed = refresh_observation(
@@ -603,6 +605,16 @@ def post_bulk_disagreement(
             "Could not refresh observation before posting; no identification was posted.",
             candidate=candidate,
         )
+
+    if refreshed_skip_reason:
+        reason = refreshed_skip_reason(refreshed)
+        if reason:
+            return BulkDisagreeResult(
+                "skipped",
+                reason,
+                candidate=candidate,
+                refreshed_observation=refreshed,
+            )
 
     if require_source_taxon_match and not candidate_source_still_matches(
         refreshed, candidate

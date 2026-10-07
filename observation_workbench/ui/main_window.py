@@ -486,6 +486,7 @@ class _AutovalidatedIdPlanWorker(QRunnable):
                     "skip_unresolved_names", True
                 ),
                 max_observations=self.options["max_observations"],
+                scan_mode=self.options.get("scan_mode", "continue"),
                 is_cancelled=lambda: self.get_gen() != self.generation,
                 progress=lambda seen, total: self.signals.progress.emit(seen, total),
             )
@@ -600,6 +601,25 @@ class _BulkDisagreePostWorker(QRunnable):
                 dqa_posting_enabled=DQA_POSTING_ENABLED,
                 explicit_disagreement=self.options.get("explicit_disagreement", True),
             )
+            scope = self.options.get("autovalidated_scan_scope")
+            pending_db = self.options.get("autovalidated_pending_db")
+            if (
+                scope
+                and pending_db is not None
+                and not self.options.get("dry_run", False)
+                and result.status.startswith("posted_id")
+            ):
+                try:
+                    pending_db.finish_autovalidated_pending(
+                        scope, self.candidate.observation.obs_id
+                    )
+                except Exception:
+                    # Preserve the confirmed posting result. A later queue read
+                    # will detect the existing ID and safely retire the item.
+                    log.warning(
+                        "Could not retire autovalidated pending observation %s",
+                        self.candidate.observation.obs_id,
+                    )
             self.signals.finished.emit(self.candidate, result)
         except Exception as exc:
             self.signals.error.emit(self.candidate, _format_api_error(exc))
@@ -5053,6 +5073,7 @@ class MainWindow(QMainWindow):
             "comment": self._settings.propose_name_comment,
             "delay_min_seconds": self._settings.propose_name_delay_min_seconds,
             "delay_max_seconds": self._settings.propose_name_delay_max_seconds,
+            "tag_other_identifiers": self._settings.propose_name_tag_other_identifiers,
             "dry_run": self._settings.propose_name_dry_run,
         }
 
@@ -5063,6 +5084,7 @@ class MainWindow(QMainWindow):
         self._settings.propose_name_comment = dlg.comment()
         self._settings.propose_name_delay_min_seconds = dlg.delay_min_seconds()
         self._settings.propose_name_delay_max_seconds = dlg.delay_max_seconds()
+        self._settings.propose_name_tag_other_identifiers = dlg.tag_other_identifiers()
         self._settings.propose_name_dry_run = dlg.dry_run()
 
     def _start_propose_name_plan(self, observation_ids: List[int]) -> None:
@@ -5166,6 +5188,7 @@ class MainWindow(QMainWindow):
             "skip_unresolved_names": self._settings.autovalidated_ids_skip_unresolved_names,
             "delay_min_seconds": self._settings.autovalidated_ids_delay_min_seconds,
             "delay_max_seconds": self._settings.autovalidated_ids_delay_max_seconds,
+            "tag_other_identifiers": self._settings.autovalidated_ids_tag_other_identifiers,
             "dry_run": self._settings.autovalidated_ids_dry_run,
         }
 
@@ -5178,6 +5201,7 @@ class MainWindow(QMainWindow):
         )
         self._settings.autovalidated_ids_delay_min_seconds = dlg.delay_min_seconds()
         self._settings.autovalidated_ids_delay_max_seconds = dlg.delay_max_seconds()
+        self._settings.autovalidated_ids_tag_other_identifiers = dlg.tag_other_identifiers()
         self._settings.autovalidated_ids_dry_run = dlg.dry_run()
         self._settings.sync()
 
@@ -5215,6 +5239,7 @@ class MainWindow(QMainWindow):
             "only_with_dna_barcode_its": True,
             "require_source_taxon_match": False,
             "max_observations": dlg.max_observations(),
+            "scan_mode": dlg.scan_mode(),
             "skip_unresolved_names": dlg.skip_unresolved_names(),
             "observation_query": dlg.observation_query(),
             "dqa_vote_requested": False,
@@ -5275,6 +5300,8 @@ class MainWindow(QMainWindow):
             BulkDisagreePreviewDialog,
         )
 
+        self._disagree_options["autovalidated_scan_scope"] = result.stats.scan_scope
+        self._disagree_options["autovalidated_pending_db"] = self._loader._db
         self._disagree_plan_stats = result.stats
         stats_text = format_autovalidated_stats(result.stats)
         unresolved = list(getattr(result.stats, "unresolved_names", []))
@@ -5855,15 +5882,20 @@ class MainWindow(QMainWindow):
             "A write may have reached iNaturalist, but the app could not verify the final state.\n\n"
             f"Observation: {candidate.observation.obs_id}\n"
             f"Target taxon: {candidate.target_taxon_name}\n\n"
-            "Open or refresh the observation manually before any retry."
+            "Retry will refresh the observation and recheck the safeguards before "
+            "posting. If your identification is already present, it will be skipped "
+            "without posting a duplicate."
         )
         box.setDetailedText(msg)
         cancel_btn = box.addButton("Cancel Workflow", QMessageBox.ButtonRole.RejectRole)
         skip_btn = box.addButton("Skip this ID", QMessageBox.ButtonRole.DestructiveRole)
+        retry_btn = box.addButton("Retry", QMessageBox.ButtonRole.AcceptRole)
         box.setDefaultButton(cancel_btn)
         box.exec()
         clicked = box.clickedButton()
-        if clicked is skip_btn:
+        if clicked is retry_btn:
+            self._disagree_post_current()
+        elif clicked is skip_btn:
             self._disagree_index += 1
             self._disagree_show_current()
         else:
@@ -6358,6 +6390,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._closing = True
+        # Planning workers watch generation tokens, not the execution cancel
+        # flags. Invalidate them before closing their shared network clients.
+        self._bulk_generation = getattr(self, "_bulk_generation", 0) + 1
+        self._disagree_generation = getattr(self, "_disagree_generation", 0) + 1
+        self._provisional_swap_generation += 1
+        self._species_override_generation += 1
         self.stop_arrow_navigation("window closing")
         self._identify_refresh_pending.clear()
         self._identify_refresh_in_flight.clear()

@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
 from observation_workbench.api.client import INatClient
@@ -124,10 +125,14 @@ _TAXON_FETCH_CHUNK = 30
 class AutovalidatedPlanStats(BulkDisagreePlanStats):
     """Bulk-disagree plan stats plus the skip reasons specific to this workflow."""
 
+    scan_scope: str = ""
+    pending_rechecked: int = 0
+    scan_exhausted: bool = False
     skipped_not_autovalidated: int = 0
     skipped_no_suggested_name: int = 0
     skipped_consensus_already_matches: int = 0
     skipped_unresolved_name: int = 0
+    skipped_identified_after_autovalidation: int = 0
     # (observation_id, suggested name) pairs for names with no iNaturalist taxon.
     # Populated only when the caller asked to report them instead of skipping
     # them quietly; these are the observations whose name still has to be created.
@@ -140,6 +145,7 @@ class AutovalidatedPlanStats(BulkDisagreePlanStats):
             f"Skipped: {self.skipped_consensus_already_matches} consensus already matches, "
             f"{self.skipped_unresolved_name} name not on iNaturalist, "
             f"{self.skipped_already_target} already your ID, "
+            f"{self.skipped_identified_after_autovalidation} your ID after autovalidation, "
             f"{self.skipped_not_autovalidated} not autovalidated, "
             f"{self.skipped_no_suggested_name} no autovalidated name, "
             f"{self.skipped_missing_dna_barcode_its} missing DNA Barcode ITS, "
@@ -253,12 +259,73 @@ def suggested_name_for(obs: StudyObservation) -> str:
 
 def is_autovalidated(obs: StudyObservation) -> bool:
     """True when the autovalidator account left either form of its comment."""
+    if (obs.id_update_needed or "").strip().casefold() == "yes":
+        return False
     return _has_marker_comment(obs) or bool(_name_comment_autovalidation(obs))
 
 
 def consensus_taxon(obs: StudyObservation) -> Optional[StudyTaxon]:
     """The taxon an identification would have to move: community, else observation."""
     return obs.community_taxon or obs.taxon
+
+
+def _timestamp(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _latest_autovalidation_time(obs: StudyObservation) -> Optional[datetime]:
+    wanted = normalize_taxon_name(_field_suggested_name(obs))
+    dates = []
+    for comment in obs.comments:
+        if comment.user_login.casefold() != AUTOVALIDATOR_LOGIN.casefold():
+            continue
+        body = comment.body or ""
+        bare_name = _bare_taxon_name(body)
+        if AUTOVALIDATION_COMMENT_MARKER not in body.casefold() and not (
+            bare_name and (not wanted or normalize_taxon_name(bare_name) == wanted)
+        ):
+            continue
+        date = _timestamp(comment.created_at)
+        if date is not None:
+            dates.append(date)
+    return max(dates) if dates else None
+
+
+def identified_after_autovalidation(obs: StudyObservation, login: str) -> bool:
+    """Respect the operator's ID after the latest qualifying automated comment."""
+    if not login.strip():
+        return False
+    latest = _latest_autovalidation_time(obs)
+    if latest is None:
+        return False
+    for ident in obs.all_identifications:
+        if ident.user_login.casefold() != login.strip().casefold():
+            continue
+        date = _timestamp(ident.created_at)
+        if date is not None and date > latest:
+            return True
+    return False
+
+
+def commented_after_autovalidation(obs: StudyObservation) -> bool:
+    """Later human discussion warrants review, without judging its contents."""
+    latest = _latest_autovalidation_time(obs)
+    if latest is None:
+        return False
+    for comment in obs.comments:
+        if (
+            comment.hidden
+            or comment.user_login.casefold() == AUTOVALIDATOR_LOGIN.casefold()
+        ):
+            continue
+        date = _timestamp(comment.created_at)
+        if date is not None and date > latest:
+            return True
+    return False
 
 
 def autovalidated_query(
@@ -312,18 +379,29 @@ class TaxonNameResolver:
     # Provisional names ("Amanita sp. 'PK05'") return autocomplete pages headed
     # by ordinary taxa of the same genus, so a short page can push the exact
     # match off the end and report an existing name as missing.
-    def __init__(self, client: INatClient, per_page: int = 30) -> None:
+    def __init__(
+        self,
+        client: INatClient,
+        per_page: int = 30,
+        *,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+    ) -> None:
         self._client = client
+        self._is_cancelled = is_cancelled
         self._per_page = per_page
         self._cache: Dict[str, Optional[StudyTaxon]] = {}
 
     def resolve(self, name: str) -> Optional[StudyTaxon]:
+        if self._is_cancelled and self._is_cancelled():
+            return None
         wanted = normalize_taxon_name(name)
         if not wanted:
             return None
         if wanted in self._cache:
             return self._cache[wanted]
         resolved = self._lookup(name, wanted)
+        if self._is_cancelled and self._is_cancelled():
+            return None
         self._cache[wanted] = resolved
         return resolved
 
@@ -341,6 +419,8 @@ class TaxonNameResolver:
                 name.strip(), per_page=self._per_page
             )
         except Exception as exc:
+            if self._is_cancelled and self._is_cancelled():
+                return None
             if is_auth_failure_error(exc):
                 raise
             log.warning("Taxon autocomplete failed for an autovalidated name: %s", exc)
@@ -598,6 +678,16 @@ def _annotate_taxon_conflicts(
         )
 
 
+def autovalidated_scan_scope(login: str, query: ObservationURLQuery) -> str:
+    """Account and effective filters identify independent scan progress."""
+    params = sorted(
+        (key.casefold(), value)
+        for key, value in query.params
+        if key.casefold() not in {"order", "order_by", "page", "per_page"}
+    )
+    return login.strip().casefold() + "|" + canonical_source_key(params)
+
+
 def plan_autovalidated_id_candidates(
     loader: StudyLoader,
     login: str,
@@ -607,50 +697,35 @@ def plan_autovalidated_id_candidates(
     report_unresolved_names: bool = False,
     max_observations: int = 200,
     per_page: int = 200,
+    scan_mode: str = "continue",
     is_cancelled: Optional[Callable[[], bool]] = None,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> BulkDisagreePlanResult:
-    """Find autovalidated observations whose consensus lags the autovalidated name.
+    """Continue stable ID pagination, keeping unfinished work durably queued.
 
-    Scanning is two-phase on purpose. The search payload already carries the
-    observation fields, comments, and observation taxon, so most records are
-    rejected without any extra request; only the ones that still look like
-    candidates are re-read authenticated, and every posting precondition is
-    decided from that fresh read.
+    Only IDs and scan metadata are persisted. Candidates are always reconstructed
+    from fresh reads and the posting workflow retains its own pre-post checks.
     """
+    if scan_mode not in {"continue", "retry", "rescan"}:
+        raise ValueError("Unknown autovalidated scan mode")
     query = autovalidated_query(observation_query)
-    filters = LoadFilters(
-        query.display_url,
-        observation_query=query,
-        apply_taxon_filter_to_observation_url=False,
-    )
-    resolver = TaxonNameResolver(loader._client)
+    scope = autovalidated_scan_scope(login, query)
+    db = loader._db
+    resolver = TaxonNameResolver(loader._client, is_cancelled=is_cancelled)
     candidates: List[BulkDisagreeCandidate] = []
-    stats = AutovalidatedPlanStats()
-    page = 1
+    stats = AutovalidatedPlanStats(scan_scope=scope)
     max_scan = max(1, int(max_observations))
+    page_size = max(1, min(200, int(per_page)))
 
-    while stats.total_url_results_scanned < max_scan:
-        if is_cancelled and is_cancelled():
-            break
-        observations, total = loader.load_page(
-            filters,
-            page=page,
-            per_page=per_page,
-            is_cancelled=is_cancelled,
-            use_cache=False,
-        )
-        stats.total_api_results = total
-        if not observations:
-            break
+    def cancelled() -> bool:
+        return bool(is_cancelled and is_cancelled())
 
-        remaining = max_scan - stats.total_url_results_scanned
-        page_observations = observations[:remaining]
-        stats.total_url_results_scanned += len(page_observations)
-        if progress:
-            progress(stats.total_url_results_scanned, total)
-
-        shortlist = _shortlist_page(page_observations, loader, stats)
+    def process(observations: list[StudyObservation], *, fresh: bool) -> None:
+        shortlist = _shortlist_page(observations, loader, stats)
+        shortlisted_ids = {obs.obs_id for obs, _ in shortlist}
+        for obs in observations:
+            if obs.obs_id not in shortlisted_ids:
+                db.finish_autovalidated_pending(scope, obs.obs_id)
         resolved = _resolve_shortlist(
             shortlist,
             resolver,
@@ -658,35 +733,133 @@ def plan_autovalidated_id_candidates(
             report_unresolved_names=report_unresolved_names,
             is_cancelled=is_cancelled,
         )
-        candidates.extend(
-            _candidates_from_refresh(
-                resolved,
-                loader=loader,
+        if not fresh:
+            candidates.extend(
+                _candidates_from_refresh(
+                    resolved,
+                    loader=loader,
+                    login=login,
+                    api_token=api_token,
+                    report_unresolved_names=report_unresolved_names,
+                    stats=stats,
+                    page=1,
+                    is_cancelled=is_cancelled,
+                    scan_scope=scope,
+                )
+            )
+            return
+        for obs, _ in shortlist:
+            if cancelled():
+                break
+            if obs.obs_id not in resolved:
+                continue
+            before = stats.skipped_unresolved_name
+            candidate = _candidate_from_refreshed(
+                obs,
+                resolved[obs.obs_id],
                 login=login,
-                api_token=api_token,
                 report_unresolved_names=report_unresolved_names,
                 stats=stats,
-                page=page,
-                is_cancelled=is_cancelled,
             )
+            if candidate is not None:
+                candidates.append(candidate)
+            elif before == stats.skipped_unresolved_name:
+                db.finish_autovalidated_pending(scope, obs.obs_id)
+
+    # Retry a bounded, rotating selection so deferred/unresolved items cannot
+    # prevent later pending observations from being reached.
+    pending = db.autovalidated_pending_ids(scope, max_scan)
+    for offset in range(0, len(pending), page_size):
+        if cancelled():
+            break
+        ids = pending[offset : offset + page_size]
+        db.touch_autovalidated_pending(scope, ids)
+        try:
+            refreshed = refresh_observations(loader._client, api_token, ids)
+        except Exception as exc:
+            if is_auth_failure_error(exc):
+                raise
+            # Keep IDs queued; failures must never prevent the next batch.
+            stats.skipped_refresh_failure += len(ids)
+            continue
+        stats.pending_rechecked += len(ids)
+        stats.skipped_refresh_failure += len(
+            set(ids) - {obs.obs_id for obs in refreshed}
         )
+        process(refreshed, fresh=True)
+        if progress:
+            progress(stats.pending_rechecked, len(pending))
 
-        if total <= 0 or page * per_page >= total:
+    if scan_mode == "rescan" and not cancelled():
+        db.reset_autovalidated_cursor(scope)
+    cursor = db.autovalidated_cursor(scope)
+    base_params = [
+        (key, value)
+        for key, value in query.params
+        if key.casefold() not in {"order", "order_by", "id_above"}
+    ]
+    original_above = max(
+        (int(value) for key, value in query.params if key.casefold() == "id_above"),
+        default=0,
+    )
+    while scan_mode != "retry" and stats.total_url_results_scanned < max_scan:
+        if cancelled():
             break
-        if stats.total_url_results_scanned >= max_scan:
+        params = base_params + [
+            ("order_by", "id"),
+            ("order", "asc"),
+            ("id_above", str(max(cursor, original_above))),
+        ]
+        batch_query = ObservationURLQuery(
+            display_url=query.display_url,
+            source_key=canonical_source_key(params),
+            params=params,
+        )
+        filters = LoadFilters(
+            query.display_url,
+            observation_query=batch_query,
+            apply_taxon_filter_to_observation_url=False,
+        )
+        size = min(page_size, max_scan - stats.total_url_results_scanned)
+        observations, total = loader.load_page(
+            filters,
+            page=1,
+            per_page=size,
+            is_cancelled=is_cancelled,
+            use_cache=False,
+        )
+        stats.total_api_results = total
+        if cancelled():
             break
-        page += 1
+        if not observations:
+            stats.scan_exhausted = True
+            break
+        ids = [obs.obs_id for obs in observations]
+        if min(ids) <= max(cursor, original_above):
+            raise ValueError(
+                "Observation search did not respect the saved scan position"
+            )
+        db.queue_autovalidated_page(scope, ids)
+        cursor = max(ids)
+        stats.total_url_results_scanned += len(observations)
+        process(observations, fresh=False)
+        if progress:
+            progress(stats.total_url_results_scanned, total)
+        if len(observations) < size or total <= len(observations):
+            stats.scan_exhausted = True
+            break
 
-    if not (is_cancelled and is_cancelled()):
+    # Rescans can encounter an observation already reconstructed from the queue.
+    candidates = list({item.observation.obs_id: item for item in candidates}.values())
+    if not cancelled():
         try:
             _annotate_taxon_conflicts(
-                candidates, loader._client, resolver, is_cancelled, loader._db
+                candidates, loader._client, resolver, is_cancelled, db
             )
         except Exception as exc:
             if is_auth_failure_error(exc):
                 raise
             log.warning("Could not classify autovalidated taxon conflicts: %s", exc)
-
     stats.candidate_count = len(candidates)
     return BulkDisagreePlanResult(candidates=candidates, stats=stats)
 
@@ -739,6 +912,8 @@ def _resolve_shortlist(
         if is_cancelled and is_cancelled():
             break
         taxon = resolver.resolve(suggested)
+        if is_cancelled and is_cancelled():
+            break
         if taxon is None:
             _record_unresolved(
                 stats,
@@ -761,6 +936,7 @@ def _candidates_from_refresh(
     stats: AutovalidatedPlanStats,
     page: int,
     is_cancelled: Optional[Callable[[], bool]],
+    scan_scope: str = "",
 ) -> List[BulkDisagreeCandidate]:
     """Re-read the resolved observations and build the candidates worth posting."""
     pending_ids = list(resolved)
@@ -793,6 +969,7 @@ def _candidates_from_refresh(
             if not refresh_failed_all:
                 stats.skipped_refresh_failure += 1
             continue
+        before_unresolved = stats.skipped_unresolved_name
         candidate = _candidate_from_refreshed(
             fresh,
             resolved[obs_id],
@@ -802,6 +979,8 @@ def _candidates_from_refresh(
         )
         if candidate is not None:
             candidates.append(candidate)
+        elif scan_scope and before_unresolved == stats.skipped_unresolved_name:
+            loader._db.finish_autovalidated_pending(scan_scope, obs_id)
     return candidates
 
 
@@ -819,6 +998,9 @@ def _candidate_from_refreshed(
         return None
     if not is_autovalidated(fresh):
         stats.skipped_not_autovalidated += 1
+        return None
+    if identified_after_autovalidation(fresh, login):
+        stats.skipped_identified_after_autovalidation += 1
         return None
     suggested = suggested_name_for(fresh)
     if not suggested:
@@ -849,7 +1031,8 @@ def _candidate_from_refreshed(
     # Disagree only when the autovalidated name is coarser than the current
     # consensus; refining to a descendant, or moving sideways, is a plain ID.
     explicit_disagreement = bool(
-        current is not None and taxon_is_strict_ancestor(current, suggested_taxon.taxon_id)
+        current is not None
+        and taxon_is_strict_ancestor(current, suggested_taxon.taxon_id)
     )
     user_ident = current_user_identification(fresh, login)
     candidate = BulkDisagreeCandidate(
@@ -877,6 +1060,7 @@ def _candidate_from_refreshed(
         dqa_vote_planned=False,
         explicit_disagreement=explicit_disagreement,
     )
+    candidate.comments_after_autovalidation = commented_after_autovalidation(fresh)
     # Filled in unconditionally; the setup dialog's tag option decides at post
     # time whether these logins are @-mentioned in the comment body.
     candidate.other_identifier_logins = collect_other_identifier_logins(
@@ -934,7 +1118,15 @@ def post_autovalidated_identification(
     if not is_autovalidated(verified):
         return BulkDisagreeResult(
             "changed",
-            "Observation no longer carries the autovalidation comment after refresh.",
+            "Observation no longer qualifies for autovalidation or its observer requested an ID update.",
+            candidate=candidate,
+            refreshed_observation=verified,
+        )
+
+    if identified_after_autovalidation(verified, login):
+        return BulkDisagreeResult(
+            "skipped",
+            "You identified this observation after autovalidation; no identification was added.",
             candidate=candidate,
             refreshed_observation=verified,
         )
@@ -980,4 +1172,9 @@ def post_autovalidated_identification(
         dry_run=dry_run,
         dqa_posting_enabled=False,
         explicit_disagreement=explicit_disagreement,
+        refreshed_skip_reason=lambda obs: (
+            "You identified this observation after autovalidation; no identification was added."
+            if identified_after_autovalidation(obs, login)
+            else ""
+        ),
     )

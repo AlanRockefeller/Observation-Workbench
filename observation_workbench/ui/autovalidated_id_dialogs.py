@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -102,16 +103,38 @@ class AutovalidatedIdSetupDialog(QDialog):
         self._url_status.setWordWrap(True)
         layout.addWidget(self._url_status)
 
+        self._scan_mode = QComboBox()
+        self._scan_mode.addItem(
+            "Continue next batch (and restore pending reviews)", "continue"
+        )
+        self._scan_mode.addItem(
+            "Retry pending reviews and unresolved names only", "retry"
+        )
+        self._scan_mode.addItem(
+            "Check for new or changed observations (restart scan)", "rescan"
+        )
+        layout.addWidget(self._scan_mode)
+        resume_help = QLabel(
+            "Progress is saved separately for your account and search filters. "
+            "Continue scans the next batch in observation-ID order, oldest first, "
+            "and restores a bounded batch of unfinished reviews. Retry reads only "
+            "pending observations. Check for new or changed observations restarts "
+            "the scan; continue subsequent batches to revisit the full search. "
+            "Closing a preview or using dry run keeps reviews pending."
+        )
+        resume_help.setWordWrap(True)
+        layout.addWidget(resume_help)
+
         scan_row = QHBoxLayout()
-        scan_row.addWidget(QLabel("Scan at most:"))
+        scan_row.addWidget(QLabel("Batch size:"))
         self._max_spin = QSpinBox()
         self._max_spin.setRange(1, MAX_SCAN_LIMIT)
         self._max_spin.setSingleStep(100)
         self._max_spin.setValue(200)
         self._max_spin.setSuffix(" observations")
         self._max_spin.setToolTip(
-            "Newest autovalidated observations are scanned first. Roughly a quarter "
-            "of them turn out to need an identification."
+            "Maximum new observations to scan, plus up to this many pending "
+            "observations to retry. Keep the same size for each successive batch."
         )
         scan_row.addWidget(self._max_spin)
         scan_row.addStretch(1)
@@ -129,9 +152,7 @@ class AutovalidatedIdSetupDialog(QDialog):
         )
         layout.addWidget(self._skip_unresolved_cb)
 
-        layout.addWidget(
-            QLabel("Comment to post with each identification (optional):")
-        )
+        layout.addWidget(QLabel("Comment to post with each identification (optional):"))
         self._comment_edit = QTextEdit()
         self._comment_edit.setAcceptRichText(False)
         self._comment_edit.setPlaceholderText(
@@ -197,6 +218,9 @@ class AutovalidatedIdSetupDialog(QDialog):
     def narrowing_url(self) -> str:
         return self._url_edit.text().strip()
 
+    def scan_mode(self) -> str:
+        return str(self._scan_mode.currentData())
+
     def max_observations(self) -> int:
         return self._max_spin.value()
 
@@ -223,7 +247,12 @@ class AutovalidatedIdSetupDialog(QDialog):
     def _apply_defaults(self, defaults: dict) -> None:
         self._url_edit.setText(str(defaults.get("url") or "").strip())
         self._max_spin.setValue(
-            max(1, min(MAX_SCAN_LIMIT, _int_default(defaults.get("max_observations"), 200)))
+            max(
+                1,
+                min(
+                    MAX_SCAN_LIMIT, _int_default(defaults.get("max_observations"), 200)
+                ),
+            )
         )
         self._skip_unresolved_cb.setChecked(
             _bool_default(defaults.get("skip_unresolved_names"), True)
@@ -233,9 +262,11 @@ class AutovalidatedIdSetupDialog(QDialog):
         delay_max = max(delay_min, _int_default(defaults.get("delay_max_seconds"), 30))
         self._delay_min_spin.setValue(delay_min)
         self._delay_max_spin.setValue(delay_max)
-        # Dry run and tag-others always start unchecked, regardless of last use.
+        # Dry run always starts unchecked; remember the tagging preference.
         self._dry_run_cb.setChecked(False)
-        self._tag_others_cb.setChecked(False)
+        self._tag_others_cb.setChecked(
+            _bool_default(defaults.get("tag_other_identifiers"), False)
+        )
 
     # -- validation --------------------------------------------------------
 
@@ -245,7 +276,7 @@ class AutovalidatedIdSetupDialog(QDialog):
         self._url_error = ""
         if not text:
             self._url_status.setText(
-                "No URL: every autovalidated observation is in scope, newest first."
+                "No URL: every autovalidated observation is in scope, oldest ID first."
             )
         else:
             try:
@@ -319,9 +350,7 @@ class UnresolvedAutovalidatedNamesDialog(QDialog):
         layout.addWidget(intro)
 
         table = QTableWidget(0, 3)
-        table.setHorizontalHeaderLabels(
-            ["Observation ID", "URL", "Autovalidated name"]
-        )
+        table.setHorizontalHeaderLabels(["Observation ID", "URL", "Autovalidated name"])
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         enable_click_sorting(table)
         with sorting_suspended(table):
@@ -355,9 +384,15 @@ class UnresolvedAutovalidatedNamesDialog(QDialog):
 def format_autovalidated_stats(stats: AutovalidatedPlanStats) -> str:
     """Multi-line scan summary for the message box shown after planning."""
     return (
-        f"Scanned observations: {stats.total_url_results_scanned}"
-        f" of {stats.total_api_results} matching the autovalidation filters\n"
-        f"Candidates: {stats.candidate_count}\n"
+        f"New observations scanned: {stats.total_url_results_scanned}\n"
+        f"Pending observations rechecked: {stats.pending_rechecked}\n"
+        + (
+            "Reached the end of this search. Use Check for new or changed observations "
+            "to restart it.\n"
+            if stats.scan_exhausted
+            else ""
+        )
+        + f"Candidates: {stats.candidate_count}\n"
         f"Skipped because the consensus already matches: "
         f"{stats.skipped_consensus_already_matches}\n"
         f"Skipped because the name is not on iNaturalist: "

@@ -500,6 +500,14 @@ class AppSettings:
         self._s.setValue("autovalidated_ids/delay_max_seconds", int(v))
 
     @property
+    def autovalidated_ids_tag_other_identifiers(self) -> bool:
+        return self._s.value("autovalidated_ids/tag_other_identifiers", False, type=bool)
+
+    @autovalidated_ids_tag_other_identifiers.setter
+    def autovalidated_ids_tag_other_identifiers(self, v: bool) -> None:
+        self._s.setValue("autovalidated_ids/tag_other_identifiers", v)
+
+    @property
     def autovalidated_ids_dry_run(self) -> bool:
         return self._s.value("autovalidated_ids/dry_run", False, type=bool)
 
@@ -559,6 +567,14 @@ class AppSettings:
     @propose_name_delay_max_seconds.setter
     def propose_name_delay_max_seconds(self, v: int) -> None:
         self._s.setValue("propose_name/delay_max_seconds", int(v))
+
+    @property
+    def propose_name_tag_other_identifiers(self) -> bool:
+        return self._s.value("propose_name/tag_other_identifiers", False, type=bool)
+
+    @propose_name_tag_other_identifiers.setter
+    def propose_name_tag_other_identifiers(self, v: bool) -> None:
+        self._s.setValue("propose_name/tag_other_identifiers", v)
 
     @property
     def propose_name_dry_run(self) -> bool:

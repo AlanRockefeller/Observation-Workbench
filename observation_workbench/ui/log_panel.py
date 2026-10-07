@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from shiboken6 import isValid
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -48,10 +49,17 @@ class QtLogHandler(logging.Handler):
         self.setFormatter(fmt)
 
     def emit(self, record: logging.LogRecord) -> None:
+        if self._closed or not isValid(self.signals):
+            return
         try:
             msg = self.format(record)
             # Signal emission is thread-safe; Qt delivers via queued connection
             self.signals.message.emit(msg, record.levelno)
+        except RuntimeError:
+            # Qt may destroy the signal object between the validity check and
+            # emission as the application exits. Console/file handlers remain.
+            if not self._closed and isValid(self.signals):
+                self.handleError(record)
         except Exception:
             self.handleError(record)
 

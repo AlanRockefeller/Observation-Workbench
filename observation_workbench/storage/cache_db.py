@@ -34,6 +34,17 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 
+CREATE TABLE IF NOT EXISTS autovalidated_scan (
+    scope TEXT PRIMARY KEY,
+    last_id INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS autovalidated_pending (
+    scope TEXT NOT NULL,
+    obs_id INTEGER NOT NULL,
+    attempted_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, obs_id)
+);
+
 CREATE TABLE IF NOT EXISTS query_cache (
     cache_key   TEXT PRIMARY KEY,
     data        TEXT NOT NULL,
@@ -558,6 +569,63 @@ class CacheDB:
             conn.commit()
             self._local.conn = conn
         return self._local.conn
+
+    def autovalidated_cursor(self, scope: str) -> int:
+        row = (
+            self._conn()
+            .execute("SELECT last_id FROM autovalidated_scan WHERE scope=?", (scope,))
+            .fetchone()
+        )
+        return int(row[0]) if row else 0
+
+    def reset_autovalidated_cursor(self, scope: str) -> None:
+        self._conn().execute(
+            "INSERT OR REPLACE INTO autovalidated_scan(scope, last_id) VALUES (?, 0)",
+            (scope,),
+        )
+
+    def queue_autovalidated_page(self, scope: str, ids: list[int]) -> None:
+        """Save fetched IDs and progress atomically before processing their data."""
+        if not ids:
+            return
+        conn = self._conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.executemany(
+                "INSERT OR IGNORE INTO autovalidated_pending(scope, obs_id) VALUES (?, ?)",
+                [(scope, obs_id) for obs_id in ids],
+            )
+            conn.execute(
+                "INSERT INTO autovalidated_scan(scope, last_id) VALUES (?, ?) "
+                "ON CONFLICT(scope) DO UPDATE SET last_id=MAX(last_id, excluded.last_id)",
+                (scope, max(ids)),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def autovalidated_pending_ids(self, scope: str, limit: int) -> list[int]:
+        return [
+            int(row[0])
+            for row in self._conn().execute(
+                "SELECT obs_id FROM autovalidated_pending WHERE scope=? "
+                "ORDER BY attempted_at, obs_id LIMIT ?",
+                (scope, limit),
+            )
+        ]
+
+    def touch_autovalidated_pending(self, scope: str, ids: list[int]) -> None:
+        self._conn().executemany(
+            "UPDATE autovalidated_pending SET attempted_at=? WHERE scope=? AND obs_id=?",
+            [(time.time(), scope, obs_id) for obs_id in ids],
+        )
+
+    def finish_autovalidated_pending(self, scope: str, obs_id: int) -> None:
+        self._conn().execute(
+            "DELETE FROM autovalidated_pending WHERE scope=? AND obs_id=?",
+            (scope, obs_id),
+        )
 
     @staticmethod
     def _migrate_identify_actions(conn: sqlite3.Connection) -> None:

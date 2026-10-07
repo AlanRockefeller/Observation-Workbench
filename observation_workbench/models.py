@@ -182,6 +182,7 @@ class StudyObservation:
     description: str = ""
     captive: Optional[bool] = None
     reviewed_by: List[int] = field(default_factory=list)
+    id_update_needed: str = ""
 
     @property
     def url(self) -> str:
