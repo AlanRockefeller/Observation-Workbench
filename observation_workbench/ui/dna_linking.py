@@ -525,16 +525,24 @@ class DNALinkingReviewDialog(QDialog):
         signals = worker.signals
         self._signals.add(signals)
         signals.inspected.connect(
-            lambda inspection, s=signals: self._inspection_ready(s, inspection)
+            lambda inspection, s=signals: self._inspection_ready(
+                s, inspection, candidate_pk, source_id, destination_id
+            )
         )
         signals.failed.connect(lambda message, s=signals: self._failed(s, message))
         self.pool.start(worker)
 
-    def _inspection_ready(self, signals: QObject, inspection: LinkInspection) -> None:
+    def _inspection_ready(
+        self,
+        signals: QObject,
+        inspection: LinkInspection,
+        candidate_pk: int,
+        source_id: int,
+        destination_id: int,
+    ) -> None:
         self._signals.discard(signals)
         if self._closed:
             return
-        candidate_pk, _source_id, _destination_id = self._current_ids()
         self.db.append_review(candidate_pk, "same")
         if inspection.outcome == "blocked":
             self._set_busy(False)
@@ -544,7 +552,6 @@ class DNALinkingReviewDialog(QDialog):
         replace = False
         if inspection.outcome == "conflict":
             replace = _choose_conflicting_value(self, inspection)
-        candidate_pk, source_id, destination_id = self._current_ids()
         cancel = threading.Event()
         self._write_cancels.add(cancel)
         worker = _LinkWorker(
@@ -582,6 +589,7 @@ class DNALinkingReviewDialog(QDialog):
         self.same.setEnabled(not busy and bool(self.rows))
         self.not_same.setEnabled(not busy and bool(self.rows))
         self.skip.setEnabled(not busy and bool(self.rows))
+        self.history.setEnabled(not busy)
         if busy:
             self.position.setText("Reading fresh destination state…")
 

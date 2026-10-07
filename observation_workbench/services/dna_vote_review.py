@@ -328,8 +328,18 @@ def _classify_for_user(
         return subject, kind, opposing, finer, agreeing, reason, max(1, min(100, score))
 
     if finer and include_refinements:
-        # Everyone who is more specific agrees with each other before this is
-        # worth surfacing as "just move your vote down".
+        # A broad subject can contain competing descendant branches; those
+        # votes do not establish a shared refinement.
+        if any(
+            relation(left, right) == "disjoint"
+            for index, left in enumerate(finer)
+            for right in finer[index + 1 :]
+        ):
+            reason = (
+                f"Others proposed conflicting refinements of your {subject.display}; "
+                "there is no agreed narrower identification."
+            )
+            return subject, KIND_CONTESTED, [], finer, agreeing, reason, 65
         deepest = min(finer, key=_rank_key)
         supporters = [view for view in finer if view.taxon_id == deepest.taxon_id]
         reason = (
@@ -488,9 +498,11 @@ class DNAVoteReview:
         # v1 honours `field:<name>` with an empty value as "has any value".
         params.append((f"field:{DNA_FIELD_NAME}", ""))
         if config.login:
-            params.append(
-                ("ident_user_id", config.login_user_id or config.login)
-            )
+            if not config.login_user_id:
+                raise ValueError(
+                    f"Could not resolve an account id for {config.login!r}."
+                )
+            params.append(("ident_user_id", str(config.login_user_id)))
         params.extend([("order_by", "id"), ("order", "desc")])
         return params
 

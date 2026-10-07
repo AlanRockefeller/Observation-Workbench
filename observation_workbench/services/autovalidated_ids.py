@@ -365,6 +365,10 @@ def autovalidated_query(
     )
 
 
+class TaxonLookupFailed(Exception):
+    """Autocomplete failed, so the name's existence is unknown."""
+
+
 class TaxonNameResolver:
     """Resolve an autovalidated name to an iNaturalist taxon, exact matches only.
 
@@ -424,7 +428,7 @@ class TaxonNameResolver:
             if is_auth_failure_error(exc):
                 raise
             log.warning("Taxon autocomplete failed for an autovalidated name: %s", exc)
-            return None
+            raise TaxonLookupFailed("Taxon autocomplete could not be read") from exc
         for raw_taxon in raw.get("results") or []:
             if not isinstance(raw_taxon, dict):
                 continue
@@ -911,7 +915,11 @@ def _resolve_shortlist(
     for obs, suggested in shortlist:
         if is_cancelled and is_cancelled():
             break
-        taxon = resolver.resolve(suggested)
+        try:
+            taxon = resolver.resolve(suggested)
+        except TaxonLookupFailed:
+            stats.skipped_refresh_failure += 1
+            continue
         if is_cancelled and is_cancelled():
             break
         if taxon is None:
@@ -1172,6 +1180,10 @@ def post_autovalidated_identification(
         dry_run=dry_run,
         dqa_posting_enabled=False,
         explicit_disagreement=explicit_disagreement,
+        refreshed_disagreement=lambda obs: bool(
+            (current := consensus_taxon(obs)) is not None
+            and taxon_is_strict_ancestor(current, candidate.target_taxon_id)
+        ),
         refreshed_skip_reason=lambda obs: (
             "You identified this observation after autovalidation; no identification was added."
             if identified_after_autovalidation(obs, login)

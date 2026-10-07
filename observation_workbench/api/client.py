@@ -201,10 +201,11 @@ class RateLimiter:
     def wait(self) -> None:
         with self._lock:
             now = time.monotonic()
-            wait_s = self._min_interval - (now - self._last_call)
-            if wait_s > 0:
-                time.sleep(wait_s)
-            self._last_call = time.monotonic()
+            slot = max(now, self._last_call + self._min_interval)
+            self._last_call = slot
+        wait_s = slot - time.monotonic()
+        if wait_s > 0:
+            time.sleep(wait_s)
 
     def penalize(self) -> None:
         """Slow every caller down after the server pushed back."""

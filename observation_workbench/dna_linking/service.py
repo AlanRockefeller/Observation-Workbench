@@ -142,6 +142,8 @@ class DNALinkingService:
         field_id: int, inspection: LinkInspection, replace: bool = False,
         is_cancelled: Callable[[], bool] = lambda: False,
     ) -> WriteResult:
+        if inspection.destination.observation_id != destination_id:
+            raise RuntimeError("Destination does not match the inspected observation.")
         if inspection.outcome == "already_linked":
             self.db.append_review(candidate_pk, "already_linked")
             return WriteResult(0, "confirmed", "The destination already links to this source.")
@@ -264,7 +266,10 @@ class DNALinkingService:
             event = "replaced" if operation["operation_type"] == "replace" else "created"
             self.db.append_review(int(operation["candidate_pk"]), event)
             return WriteResult(operation_id, "confirmed", "Exact canonical link verified on iNaturalist.")
-        expected_absent = not state.rows
+        expected_absent = (
+            state.fingerprint == str(operation["before_fingerprint"])
+            or (not state.rows and operation["operation_type"] == "create")
+        )
         self.db.transition_write(
             operation_id, "uncertain",
             "Expected value absent, divergent, duplicated, or unreadable",
@@ -297,19 +302,28 @@ class DNALinkingService:
         expected = str(old["expected_value"])
         if any(row.value == expected for row in state.rows):
             return self.verify_operation(operation_id, field_id)
-        if state.rows:
+        replacing = old["operation_type"] == "replace"
+        if state.fingerprint != str(old["before_fingerprint"]) and (
+            state.rows or replacing
+        ):
             raise RuntimeError(
-                "Verification did not prove a safely empty destination; retry remains blocked."
+                "The destination changed since the original preflight; retry remains blocked."
             )
-        # Resolve the old destination block explicitly, then create a new
-        # journalled operation through the normal fresh-state boundary.
+        if replacing and (len(state.rows) != 1 or not state.rows[0].row_id):
+            raise RuntimeError("The original field row is unavailable for replacement.")
+        # Resolve the old destination block explicitly, then journal the same
+        # operation type through the normal fresh-state boundary.
         self.db.transition_write(operation_id, "cancelled", "Explicit retry superseded absent outcome")
-        inspection = LinkInspection(state, "create")
+        inspection = LinkInspection(
+            state, "conflict" if replacing else "create",
+            captured_user_id=user_id, captured_login=login,
+            captured_generation=_generation,
+        )
         return self.apply_link(
             candidate_pk=int(old["candidate_pk"]),
             source_id=_source_id_from_expected(expected),
             destination_id=int(old["destination_id"]), field_id=field_id,
-            inspection=inspection,
+            inspection=inspection, replace=replacing,
         )
 
     def _read_destination(

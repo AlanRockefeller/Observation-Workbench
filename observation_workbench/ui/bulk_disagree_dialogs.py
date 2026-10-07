@@ -3596,6 +3596,14 @@ class BulkDisagreePreviewDialog(QDialog):
         )
         if candidate is None:
             return
+        if QMessageBox.question(
+            self,
+            "Skip observation permanently?",
+            f"Exclude observation {obs_id} from all future bulk runs?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
         self._on_skip_forever(candidate)
         self._candidates.remove(candidate)
         self._table.removeRow(item.row())

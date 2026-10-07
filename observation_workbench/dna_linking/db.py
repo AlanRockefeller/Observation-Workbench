@@ -85,8 +85,14 @@ class DNALinkingDB:
                 )
             if version == 0:
                 with self.transaction() as tx:
-                    _migration_v1(tx)
-                    tx.execute("PRAGMA user_version=1")
+                    version = int(tx.execute("PRAGMA user_version").fetchone()[0])
+                    if version > SCHEMA_VERSION:
+                        raise RuntimeError(
+                            f"DNA linking database version {version} is newer than supported"
+                        )
+                    if version == 0:
+                        _migration_v1(tx)
+                        tx.execute("PRAGMA user_version=1")
             # Prepared work is safe to cancel after restart. Once the request
             # boundary was crossed, it is never safe to infer that a persisted
             # submitting/submitted row was not applied.
@@ -313,8 +319,7 @@ def _snapshot_json(snapshot: object) -> str:
 
 
 def _migration_v1(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
+    schema = """
         CREATE TABLE scan_sessions(
           session_id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, login TEXT NOT NULL,
           fingerprint TEXT NOT NULL, source_query TEXT NOT NULL, radius_m REAL NOT NULL,
@@ -360,4 +365,6 @@ def _migration_v1(conn: sqlite3.Connection) -> None:
           session_id,score DESC,distance_m,time_difference_seconds,source_id,candidate_id
         );
         """
-    )
+    for statement in schema.split(";"):
+        if statement.strip():
+            conn.execute(statement)

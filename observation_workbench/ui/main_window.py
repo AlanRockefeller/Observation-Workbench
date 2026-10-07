@@ -5882,9 +5882,10 @@ class MainWindow(QMainWindow):
             "A write may have reached iNaturalist, but the app could not verify the final state.\n\n"
             f"Observation: {candidate.observation.obs_id}\n"
             f"Target taxon: {candidate.target_taxon_name}\n\n"
-            "Retry will refresh the observation and recheck the safeguards before "
-            "posting. If your identification is already present, it will be skipped "
-            "without posting a duplicate."
+            "Manually review this observation on iNaturalist before choosing Retry. "
+            "Confirm whether the identification or other changes were applied. "
+            "Retry starts another posting attempt; an uncertain write must not be "
+            "retried without manual review."
         )
         box.setDetailedText(msg)
         cancel_btn = box.addButton("Cancel Workflow", QMessageBox.ButtonRole.RejectRole)

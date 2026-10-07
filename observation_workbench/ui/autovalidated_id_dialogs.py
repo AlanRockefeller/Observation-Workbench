@@ -398,6 +398,8 @@ def format_autovalidated_stats(stats: AutovalidatedPlanStats) -> str:
         f"Skipped because the name is not on iNaturalist: "
         f"{stats.skipped_unresolved_name}\n"
         f"Skipped because you already have that ID: {stats.skipped_already_target}\n"
+        f"Skipped because you identified after autovalidation: "
+        f"{stats.skipped_identified_after_autovalidation}\n"
         f"Skipped because no autovalidation comment was found: "
         f"{stats.skipped_not_autovalidated}\n"
         f"Skipped because no autovalidated name was recorded: "

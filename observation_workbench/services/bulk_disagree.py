@@ -592,8 +592,13 @@ def post_bulk_disagreement(
     dqa_posting_enabled: bool = DQA_POSTING_ENABLED,
     explicit_disagreement: Optional[bool] = None,
     refreshed_skip_reason: Optional[Callable[[StudyObservation], str]] = None,
+    refreshed_disagreement: Callable[[StudyObservation], bool] | None = None,
 ) -> BulkDisagreeResult:
-    """Refresh, re-check safeguards, and post one corrective identification."""
+    """Refresh, re-check safeguards, and post one corrective identification.
+
+    Workflows can derive disagreement from this final refreshed observation via
+    ``refreshed_disagreement`` instead of retaining the planned flag.
+    """
     refreshed = refresh_observation(
         client,
         api_token,
@@ -681,6 +686,8 @@ def post_bulk_disagreement(
             if explicit_disagreement is None
             else bool(explicit_disagreement)
         )
+        if refreshed_disagreement is not None:
+            disagreement_flag = refreshed_disagreement(refreshed)
         response = client.create_identification(
             api_token=api_token,
             observation_id=candidate.observation.obs_id,
