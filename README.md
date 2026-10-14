@@ -262,6 +262,12 @@ autovalidation comment, its autovalidated name must still be the one planned, an
 consensus must still differ from it. An observer changing `ID Update Needed` to `Yes` also
 excludes a pending observation when it is restored or refreshed before posting.
 
+During execution, observations with later human discussion or a later, still-current
+identification at a different taxon are moved to the end of the queue and paused for human
+review. Both guards are enabled by default. The progress dialog can copy or open the current
+observation, or open and skip every remaining observation that needs review; skipped items
+remain pending so a later scan can re-check their live state.
+
 ### Propose a Name to Observation Numbers
 
 Use **Action -> Propose a name to observation numbers...** after authenticating when you

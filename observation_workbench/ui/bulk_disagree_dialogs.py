@@ -3701,6 +3701,7 @@ class BulkDisagreeProgressDialog(QDialog):
     skip_delay_requested = Signal()
     pause_requested = Signal()
     resume_requested = Signal()
+    open_all_review_requested = Signal()
     delay_changed = Signal(int, int)
     nav_key_pressed = Signal(object, object)
 
@@ -3717,6 +3718,7 @@ class BulkDisagreeProgressDialog(QDialog):
         delay_min_seconds: int = 10,
         delay_max_seconds: int = 30,
         dry_run: bool = False,
+        human_review_guard: bool = False,
         window_title: str = "Bulk Disagree to Taxon from URL",
         parent=None,
     ) -> None:
@@ -3726,6 +3728,8 @@ class BulkDisagreeProgressDialog(QDialog):
         self.setModal(False)
         self._finished = False
         self._paused = False
+        self._human_review_guard = human_review_guard
+        self._observation_url = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 12)
@@ -3738,6 +3742,22 @@ class BulkDisagreeProgressDialog(QDialog):
             dry_label.setWordWrap(True)
             dry_label.setStyleSheet("QLabel { color: #157f1f; font-weight: 700; }")
             layout.addWidget(dry_label)
+
+        self._review_options_label = QLabel("Move to end for human review when:")
+        self._review_options_label.setVisible(human_review_guard)
+        layout.addWidget(self._review_options_label)
+        self._pause_later_id_cb = QCheckBox(
+            "A different current identification was added after autovalidation"
+        )
+        self._pause_later_id_cb.setChecked(True)
+        self._pause_later_id_cb.setVisible(human_review_guard)
+        layout.addWidget(self._pause_later_id_cb)
+        self._pause_comments_cb = QCheckBox(
+            "Comments have been added since autovalidation"
+        )
+        self._pause_comments_cb.setChecked(True)
+        self._pause_comments_cb.setVisible(human_review_guard)
+        layout.addWidget(self._pause_comments_cb)
 
         delay_row = QHBoxLayout()
         self._delay_label = QLabel("Delay:")
@@ -3773,6 +3793,46 @@ class BulkDisagreeProgressDialog(QDialog):
         self._details.setReadOnly(True)
         self._details.setAcceptRichText(False)
         layout.addWidget(self._details, 1)
+
+        self._review_banner = QLabel("")
+        self._review_banner.setWordWrap(True)
+        self._review_banner.setVisible(False)
+        self._review_banner.setStyleSheet(
+            "QLabel {"
+            "  color: #8dff9a;"
+            "  background-color: #143a1d;"
+            "  border: 2px solid #2f9e44;"
+            "  border-radius: 4px;"
+            "  padding: 10px 12px;"
+            "  font-size: 15px;"
+            "  font-weight: 700;"
+            "}"
+        )
+        layout.addWidget(self._review_banner)
+
+        self._review_actions = QHBoxLayout()
+        self._copy_review_url_btn = QPushButton("Copy observation URL")
+        self._copy_review_url_btn.setToolTip(
+            "Copy the observation URL to the clipboard for human review."
+        )
+        self._copy_review_url_btn.clicked.connect(self._copy_review_url)
+        self._open_review_obs_btn = QPushButton("Open observation in browser")
+        self._open_review_obs_btn.setToolTip(
+            "Open this observation in your browser for human review."
+        )
+        self._open_review_obs_btn.clicked.connect(self._open_review_observation)
+        self._open_all_review_btn = QPushButton("Open all needing review in browser")
+        self._open_all_review_btn.setToolTip(
+            "Open every remaining observation that needs human review in your "
+            "browser, and skip all of them here."
+        )
+        self._open_all_review_btn.clicked.connect(self.open_all_review_requested)
+        self._review_actions.addWidget(self._copy_review_url_btn)
+        self._review_actions.addWidget(self._open_review_obs_btn)
+        self._review_actions.addWidget(self._open_all_review_btn)
+        self._review_actions.addStretch(1)
+        layout.addLayout(self._review_actions)
+        self._set_review_actions_visible(False)
 
         comment_label = QLabel(
             "Comment to post with this identification (edit as needed):"
@@ -3825,6 +3885,9 @@ class BulkDisagreeProgressDialog(QDialog):
         comment: str = "",
     ) -> None:
         obs = candidate.observation
+        self._observation_url = obs.url
+        self._review_banner.setVisible(False)
+        self._set_review_actions_visible(False)
         self._title.setText(f"Item {index + 1} of {total}: observation {obs.obs_id}")
         self._target_label.setText(
             _format_taxon_with_rank(
@@ -3893,6 +3956,28 @@ class BulkDisagreeProgressDialog(QDialog):
         self._skip_delay_btn.setEnabled(True)
         self._pause_btn.setEnabled(True)
         self._comment_edit.setEnabled(True)
+        self._review_banner.setVisible(False)
+        self._set_review_actions_visible(False)
+
+    def pause_on_later_conflicting_identification(self) -> bool:
+        return self._human_review_guard and self._pause_later_id_cb.isChecked()
+
+    def pause_on_comments_since_autovalidation(self) -> bool:
+        return self._human_review_guard and self._pause_comments_cb.isChecked()
+
+    def set_paused_for_review(self, reason: str) -> None:
+        """Enter an indefinite human-review pause and show the reason."""
+        self._paused = True
+        self._pause_btn.setText("Resume")
+        self.set_waiting()
+        self._review_banner.setText(f"HUMAN REVIEW REQUIRED\n{reason}")
+        self._review_banner.setVisible(True)
+        self._set_review_actions_visible(True)
+        self.set_status(f"Paused for human review: {reason}")
+        self._countdown.setText(
+            "Human review required — click Resume to start countdown, or Skip "
+            "to pass this observation."
+        )
 
     def set_summary(
         self,
@@ -3950,6 +4035,8 @@ class BulkDisagreeProgressDialog(QDialog):
         self._skip_btn.setVisible(False)
         self._skip_forever_btn.setVisible(False)
         self._skip_delay_btn.setVisible(False)
+        self._review_banner.setVisible(False)
+        self._set_review_actions_visible(False)
         self._delay_label.setVisible(False)
         self._delay_min_spin.setVisible(False)
         self._delay_max_spin.setVisible(False)
@@ -3971,6 +4058,19 @@ class BulkDisagreeProgressDialog(QDialog):
         """
         self._paused = paused
         self._pause_btn.setText("Resume" if paused else "Pause")
+
+    def _set_review_actions_visible(self, visible: bool) -> None:
+        self._copy_review_url_btn.setVisible(visible)
+        self._open_review_obs_btn.setVisible(visible)
+        self._open_all_review_btn.setVisible(visible)
+
+    def _copy_review_url(self) -> None:
+        if self._observation_url:
+            QApplication.clipboard().setText(self._observation_url)
+
+    def _open_review_observation(self) -> None:
+        if self._observation_url:
+            open_external_url_silently(self._observation_url)
 
     def _on_delay_min_changed(self, value: int) -> None:
         if value > self._delay_max_spin.value():

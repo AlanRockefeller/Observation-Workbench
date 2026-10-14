@@ -81,6 +81,7 @@ from observation_workbench.services.bulk_identification import (
     plan_provisional_candidates,
 )
 from observation_workbench.services.autovalidated_ids import (
+    needs_autovalidated_human_review,
     plan_autovalidated_id_candidates,
     post_autovalidated_identification,
 )
@@ -1319,6 +1320,7 @@ class MainWindow(QMainWindow):
         self._disagree_delay_timer: Optional[QTimer] = None
         self._disagree_dialog = None
         self._disagree_resume_after_auth = False
+        self._disagree_deferred_review_keys: set[tuple[int, int]] = set()
         self._disagree_cancelled = False
         self._disagree_paused = False
         self._disagree_posting = False
@@ -5248,6 +5250,7 @@ class MainWindow(QMainWindow):
             "tag_other_identifiers": dlg.tag_other_identifiers(),
             "delay_min_seconds": dlg.delay_min_seconds(),
             "delay_max_seconds": dlg.delay_max_seconds(),
+            "human_review_guard": True,
             "post_fn": post_autovalidated_identification,
         }
         self._disagree_progress_title = "Apply Autovalidated Identifications"
@@ -5562,6 +5565,7 @@ class MainWindow(QMainWindow):
         self._disagree_failed = 0
         self._disagree_ambiguous_write = 0
         self._disagree_resume_after_auth = False
+        self._disagree_deferred_review_keys = set()
         self._disagree_cancelled = False
         self._disagree_paused = False
         self._disagree_posting = False
@@ -5569,6 +5573,9 @@ class MainWindow(QMainWindow):
             delay_min_seconds=self._disagree_options.get("delay_min_seconds", 10),
             delay_max_seconds=self._disagree_options.get("delay_max_seconds", 30),
             dry_run=self._disagree_options.get("dry_run", False),
+            human_review_guard=self._disagree_options.get(
+                "human_review_guard", False
+            ),
             window_title=getattr(
                 self, "_disagree_progress_title", "Bulk Disagree to Taxon from URL"
             ),
@@ -5584,19 +5591,48 @@ class MainWindow(QMainWindow):
         )
         self._disagree_dialog.pause_requested.connect(self._disagree_pause)
         self._disagree_dialog.resume_requested.connect(self._disagree_resume)
+        self._disagree_dialog.open_all_review_requested.connect(
+            self._disagree_open_all_review
+        )
         self._disagree_dialog.delay_changed.connect(self._disagree_delay_range_changed)
         self._disagree_dialog.nav_key_pressed.connect(self.handle_nav_key)
         self._show_dialog_in_front(self._disagree_dialog)
         self._disagree_show_current()
 
     def _disagree_show_current(self) -> None:
-        if self._disagree_cancelled:
-            self._disagree_finish(cancelled=True)
-            return
-        if self._disagree_index >= len(self._disagree_candidates):
-            self._disagree_finish(cancelled=False)
-            return
-        candidate = self._disagree_candidates[self._disagree_index]
+        while True:
+            if self._disagree_cancelled:
+                self._disagree_finish(cancelled=True)
+                return
+            if self._disagree_index >= len(self._disagree_candidates):
+                self._disagree_finish(cancelled=False)
+                return
+            candidate = self._disagree_candidates[self._disagree_index]
+            review_reason = self._disagree_review_reason(candidate)
+            candidate_key = self._disagree_candidate_key(candidate)
+            if not (
+                review_reason
+                and candidate_key not in self._disagree_deferred_review_keys
+                and self._disagree_index < len(self._disagree_candidates) - 1
+            ):
+                break
+
+            self._disagree_deferred_review_keys.add(candidate_key)
+            self._disagree_candidates.append(
+                self._disagree_candidates.pop(self._disagree_index)
+            )
+            if self._disagree_dialog:
+                self._disagree_dialog.set_status(
+                    "Moved item needing human review to the end of the queue."
+                )
+            log.debug(
+                "Autovalidated identification deferred for human review "
+                "obs=%s taxon=%s reason=%s",
+                candidate.observation.obs_id,
+                candidate.target_taxon_name,
+                review_reason,
+            )
+
         self._pending_target_obs_id = candidate.observation.obs_id
         self._pending_target_taxon = candidate.target_taxon_name
         self._show_workflow_observation(candidate.observation)
@@ -5610,9 +5646,39 @@ class MainWindow(QMainWindow):
             self._disagree_dialog.set_status(
                 "Review the observation above, then wait for auto-post or act."
             )
-        self._disagree_start_delay()
+        self._disagree_start_delay(force_pause_reason=review_reason)
 
-    def _disagree_start_delay(self) -> None:
+    def _disagree_candidate_key(
+        self, candidate: BulkDisagreeCandidate
+    ) -> tuple[int, int]:
+        return candidate.observation.obs_id, candidate.target_taxon_id
+
+    def _disagree_review_reason(self, candidate: BulkDisagreeCandidate) -> str:
+        if not self._disagree_options.get("human_review_guard"):
+            return ""
+        if not self._disagree_dialog:
+            return ""
+        later_id, later_comment = needs_autovalidated_human_review(
+            candidate.observation,
+            candidate.target_taxon_id,
+            self._auth_state.login,
+        )
+        reasons = []
+        if (
+            later_id
+            and self._disagree_dialog.pause_on_later_conflicting_identification()
+        ):
+            reasons.append(
+                "a different current identification was added after autovalidation"
+            )
+        if (
+            later_comment
+            and self._disagree_dialog.pause_on_comments_since_autovalidation()
+        ):
+            reasons.append("comments were added after autovalidation")
+        return " and ".join(reasons)
+
+    def _disagree_start_delay(self, *, force_pause_reason: str = "") -> None:
         min_delay, max_delay = self._disagree_delay_range()
         self._disagree_delay_remaining = (
             random.randint(min_delay, max_delay) if max_delay > 0 else 0
@@ -5623,6 +5689,11 @@ class MainWindow(QMainWindow):
         if self._disagree_dialog:
             self._disagree_dialog.set_waiting()
             self._disagree_dialog.set_countdown(self._disagree_delay_remaining)
+        if force_pause_reason:
+            self._disagree_paused = True
+            if self._disagree_dialog:
+                self._disagree_dialog.set_paused_for_review(force_pause_reason)
+            return
         if self._disagree_paused:
             # A pause requested during the previous post persists to this item,
             # so we hold here until the user resumes — even when the delay is 0.
@@ -5747,6 +5818,42 @@ class MainWindow(QMainWindow):
         if self._disagree_dialog:
             self._disagree_dialog.set_status("Paused — click Resume to continue.")
             self._disagree_dialog.set_countdown(self._disagree_delay_remaining)
+
+    def _disagree_open_all_review(self) -> None:
+        """Open and skip all remaining autovalidated items needing review."""
+        if not self._disagree_dialog or not self._disagree_paused:
+            return
+        review_indices = [
+            index
+            for index in range(
+                self._disagree_index, len(self._disagree_candidates)
+            )
+            if self._disagree_review_reason(self._disagree_candidates[index])
+        ]
+        if not review_indices:
+            return
+        for index in review_indices:
+            open_external_url_silently(
+                self._disagree_candidates[index].observation.url
+            )
+        if self._disagree_delay_timer:
+            self._disagree_delay_timer.stop()
+        self._disagree_paused = False
+        count = len(review_indices)
+        for index in reversed(review_indices):
+            del self._disagree_candidates[index]
+        self._disagree_skipped += count
+        log.info(
+            "Autovalidated identification workflow opened %d observation(s) "
+            "needing human review in the browser and skipped them",
+            count,
+        )
+        if self._disagree_dialog:
+            self._disagree_dialog.set_status(
+                f"Opened {count} observation(s) needing human review in your "
+                "browser and skipped them here."
+            )
+        self._disagree_show_current()
 
     def _disagree_resume(self) -> None:
         self._disagree_paused = False

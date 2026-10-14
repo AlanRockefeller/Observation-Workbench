@@ -328,6 +328,41 @@ def commented_after_autovalidation(obs: StudyObservation) -> bool:
     return False
 
 
+def needs_autovalidated_human_review(
+    obs: StudyObservation,
+    target_taxon_id: int,
+    login: str,
+) -> tuple[bool, bool]:
+    """Return later conflicting-ID and later-comment review signals.
+
+    Only current identifications from other people count. A later identification
+    that supports the autovalidated target is not evidence of a disagreement,
+    and withdrawn identifications no longer need to hold the workflow.
+    """
+    latest = _latest_autovalidation_time(obs)
+    if latest is None:
+        return False, False
+
+    login_key = login.strip().casefold()
+    target_id = int(target_taxon_id)
+    conflicting_identification = False
+    for ident in obs.all_identifications:
+        if not ident.current or not ident.taxon:
+            continue
+        if login_key and ident.user_login.casefold() == login_key:
+            continue
+        date = _timestamp(ident.created_at)
+        if (
+            date is not None
+            and date > latest
+            and ident.taxon.taxon_id != target_id
+        ):
+            conflicting_identification = True
+            break
+
+    return conflicting_identification, commented_after_autovalidation(obs)
+
+
 def autovalidated_query(
     observation_query: Optional[ObservationURLQuery] = None,
 ) -> ObservationURLQuery:
