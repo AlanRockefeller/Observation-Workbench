@@ -205,6 +205,35 @@ When either check is enabled and the condition is met, the run pauses and waits 
 
 iNaturalist doesn't allow automated identifications, so each observation, its comments, previous ID's and photos are displayed in the main window while the run works through them. Watch that window as it goes, or use the Browse feature from the plan dialog to vet the observations before you turn it loose.
 
+#### Optional AI consistency screening
+
+The provisional-agreement preview and **Apply Autovalidated Identifications** preview can
+ask a locally installed Codex CLI for an advisory consistency screen. Install Codex, make
+sure `codex` is on `PATH`, and run `codex login` once in a terminal; the app reuses those
+credentials and does not ask for an API key. The four preview actions can run Luna or Sol,
+compare Luna with Sol on the same evidence, or compare text-only results with results that
+also include public observation photos. Runs may cover every candidate, currently risky
+candidates, selected rows, or a stable sample. Candidates are sent in small batches.
+
+Text evidence includes the proposed name, raw ITS value and basic sequence metrics,
+observation fields, identifications, comments, date, and public place description. Account
+names in structured fields are replaced with consistent roles, while free text is sent as
+written and may contain usernames; exact coordinates are omitted. Full evidence adds one
+labeled contact sheet containing up to six public photos. The confirmation dialog lists
+what will be sent before each run. Codex runs ephemerally in a temporary directory with a
+read-only sandbox and its shell, browser, app, plugin, and multi-agent tools disabled.
+
+AI output never chooses a replacement name or authorizes a write. It only marks a candidate
+for human review. Marked, insufficient, and unavailable results sort to the top of the
+preview and force the supervised execution flow to pause on that observation. Comparison
+results remain inactive until you choose one side or the conservative union; their redacted
+summary can optionally be exported as CSV. After a run, a findings dialog shows the verdict,
+confidence, suspicious signals, and full explanation for every analyzed observation; use
+**Review AI findings…** to open it again. The photo browser repeats those details on each
+observation card. A flag requires a concrete contradiction or anomaly in the supplied
+evidence—routine uncertainty or lack of external reference data is not itself a reason to
+flag an observation.
+
 ### Bulk Disagree to Taxon from URL
 
 Use **Action -> Bulk disagree to taxon from URL...** after authenticating. Paste an iNaturalist observations URL. If it contains exactly one numeric `taxon_id`, that URL taxon becomes the source/current taxon safety check. A URL with no `taxon_id` (for example one filtered by an observation field such as `field:Provisional Species Name=...`) is also accepted; in that case there is no source-taxon safety check and the target identification is posted to every matching observation. A URL with more than one `taxon_id`, or a non-numeric one, is rejected as ambiguous. Then select the target taxon from autocomplete, enter the identification comment, preview candidates, and supervise one observation at a time.
@@ -261,6 +290,12 @@ is refreshed and re-checked: it must still carry a DNA Barcode ITS sequence and 
 autovalidation comment, its autovalidated name must still be the one planned, and its
 consensus must still differ from it. An observer changing `ID Update Needed` to `Yes` also
 excludes a pending observation when it is restored or refreshed before posting.
+
+During execution, observations with later human discussion or a later, still-current
+identification at a different taxon are moved to the end of the queue and paused for human
+review. Both guards are enabled by default. The progress dialog can copy or open the current
+observation, or open and skip every remaining observation that needs review; skipped items
+remain pending so a later scan can re-check their live state.
 
 ### Propose a Name to Observation Numbers
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtGui import QColor, QFont, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -29,12 +29,19 @@ from observation_workbench.api.observation_url import (
     ObservationURLQuery,
     parse_observations_url,
 )
+from observation_workbench.services.ai_observation_review import (
+    AIReviewFinding,
+    ObservationReviewInput,
+    finding_priority,
+)
 from observation_workbench.services.bulk_disagree import BulkDisagreeCandidate
 from observation_workbench.services.bulk_identification import (
     BulkAgreeCandidate,
     BulkAgreePlanStats,
 )
 from observation_workbench.services.image_cache import ImageCache
+from observation_workbench.services.identification_actions import needs_human_review
+from observation_workbench.ui.ai_observation_review import AIReviewPanel
 from observation_workbench.ui.bulk_disagree_dialogs import (
     BulkDisagreePhotoBrowserDialog,
     _bool_default,
@@ -71,6 +78,7 @@ def _browser_candidate(candidate: BulkAgreeCandidate) -> BulkDisagreeCandidate:
         user_current_taxon=candidate.user_current_taxon,
         dqa_vote_planned=False,
         explicit_disagreement=False,
+        ai_review=candidate.ai_review,
     )
 
 
@@ -401,7 +409,7 @@ class BulkAgreePreviewDialog(QDialog):
             stats_label.setWordWrap(True)
             layout.addWidget(stats_label)
 
-        self._table = QTableWidget(0, 8)
+        self._table = QTableWidget(0, 10)
         self._table.setHorizontalHeaderLabels(
             [
                 "Observation ID",
@@ -412,11 +420,27 @@ class BulkAgreePreviewDialog(QDialog):
                 "ID date",
                 "Your current ID",
                 "DNA Barcode ITS present?",
+                "AI review",
+                "AI priority",
             ]
         )
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         enable_click_sorting(self._table)
+        self._table.setColumnHidden(9, True)
+        self._initial_sort_applied = False
         layout.addWidget(self._table, 1)
+
+        self._ai_panel = None
+        if client is not None and disk_cache is not None:
+            self._ai_panel = AIReviewPanel(
+                client=client,
+                disk_cache=disk_cache,
+                inputs_provider=self._ai_review_inputs,
+                selected_ids_provider=self._selected_observation_ids,
+                apply_findings=self._apply_ai_findings,
+                parent=self,
+            )
+            layout.addWidget(self._ai_panel)
 
         self._agree_label = QLabel(
             "Type <b>AGREE</b> in the box below to enable the Start button:"
@@ -459,6 +483,7 @@ class BulkAgreePreviewDialog(QDialog):
         self.reject()
 
     def _populate_table(self) -> None:
+        self._candidates.sort(key=lambda candidate: finding_priority(candidate.ai_review))
         with sorting_suspended(self._table):
             self._table.setRowCount(len(self._candidates))
             for row, candidate in enumerate(self._candidates):
@@ -472,10 +497,64 @@ class BulkAgreePreviewDialog(QDialog):
                     candidate.target.source_created_at[:19],
                     candidate.user_current_taxon or "",
                     "Yes" if (obs.dna_barcode_its or "").strip() else "No",
+                    candidate.ai_review.short_text() if candidate.ai_review else "Not analyzed",
+                    str(finding_priority(candidate.ai_review) * 100000 + row),
                 ]
                 for col, value in enumerate(values):
-                    self._table.setItem(row, col, SortableTableWidgetItem(value))
+                    item = SortableTableWidgetItem(value)
+                    if col == 8 and candidate.ai_review is not None:
+                        item.setToolTip(candidate.ai_review.details_text())
+                        if candidate.ai_review.requires_human_review:
+                            item.setBackground(QColor("#5a2430"))
+                            item.setForeground(QColor("#ffd5dc"))
+                    self._table.setItem(row, col, item)
+        if not self._initial_sort_applied:
+            self._table.sortItems(9, Qt.SortOrder.AscendingOrder)
+            self._initial_sort_applied = True
         self._table.resizeColumnsToContents()
+
+    def _ai_review_inputs(self) -> List[ObservationReviewInput]:
+        inputs = []
+        for candidate in self._candidates:
+            recent_not_provisional, comments_since = needs_human_review(
+                candidate.observation,
+                candidate.target,
+                self._login,
+            )
+            reasons = []
+            if recent_not_provisional:
+                reasons.append("Most recent current identification is not provisional")
+            if comments_since:
+                reasons.append("Comments were added after the provisional ID")
+            inputs.append(
+                ObservationReviewInput(
+                    observation=candidate.observation,
+                    target_taxon_id=candidate.target.taxon_id,
+                    target_taxon_name=candidate.target.taxon_name,
+                    workflow="provisional agreement",
+                    source_name="provisional identification",
+                    source_identifier_date=candidate.target.source_created_at,
+                    deterministic_reasons=tuple(reasons),
+                    previous_finding=candidate.ai_review,
+                )
+            )
+        return inputs
+
+    def _selected_observation_ids(self) -> set[int]:
+        ids: set[int] = set()
+        for item in self._table.selectedItems():
+            obs_item = self._table.item(item.row(), 0)
+            if obs_item and obs_item.text().isdigit():
+                ids.add(int(obs_item.text()))
+        return ids
+
+    def _apply_ai_findings(self, findings: dict[int, AIReviewFinding]) -> None:
+        for candidate in self._candidates:
+            finding = findings.get(candidate.observation.obs_id)
+            if finding is not None:
+                candidate.ai_review = finding
+        self._populate_table()
+        self._update_start_enabled()
 
     def _browse_photos(self) -> None:
         if not self._client or not self._disk_cache:
@@ -562,6 +641,13 @@ class BulkAgreePreviewDialog(QDialog):
             self._agree_edit.text().strip() == "AGREE" if needs_confirmation else True
         )
         self._start_btn.setEnabled(count > 0 and confirmed)
+        if self._ai_panel is not None:
+            self._ai_panel.refresh_enabled()
+
+    def done(self, result: int) -> None:
+        if self._ai_panel is not None:
+            self._ai_panel.cancel()
+        super().done(result)
 
 
 class BulkAgreeProgressDialog(QDialog):
@@ -826,6 +912,11 @@ class BulkAgreeProgressDialog(QDialog):
                     f"Observer: {obs.observer_login}",
                     f"Source identifier: {candidate.target.source_login}",
                     f"Source ID date: {candidate.target.source_created_at}",
+                    (
+                        f"AI review:\n{candidate.ai_review.details_text()}"
+                        if candidate.ai_review
+                        else "AI review: not analyzed"
+                    ),
                     "",
                     "Status: ready",
                 ]

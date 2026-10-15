@@ -10,6 +10,7 @@ from observation_workbench.api.client import INatAPIError, INatClient
 from observation_workbench.api.observation_url import ObservationURLQuery
 from observation_workbench.api.parsers import parse_taxon
 from observation_workbench.models import StudyObservation, StudyTaxon
+from observation_workbench.services.ai_observation_review import AIReviewFinding
 from observation_workbench.services.identification_actions import (
     current_user_identification,
     load_users_not_to_tag,
@@ -60,6 +61,7 @@ class BulkDisagreeCandidate:
     # preview then treats every row alike.
     taxon_conflict: str = ""
     comments_after_autovalidation: bool = False
+    ai_review: Optional[AIReviewFinding] = None
 
 
 @dataclass

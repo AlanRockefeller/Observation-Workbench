@@ -328,6 +328,41 @@ def commented_after_autovalidation(obs: StudyObservation) -> bool:
     return False
 
 
+def needs_autovalidated_human_review(
+    obs: StudyObservation,
+    target_taxon_id: int,
+    login: str,
+) -> tuple[bool, bool]:
+    """Return later conflicting-ID and later-comment review signals.
+
+    Only current identifications from other people count. A later identification
+    that supports the autovalidated target is not evidence of a disagreement,
+    and withdrawn identifications no longer need to hold the workflow.
+    """
+    latest = _latest_autovalidation_time(obs)
+    if latest is None:
+        return False, False
+
+    login_key = login.strip().casefold()
+    target_id = int(target_taxon_id)
+    conflicting_identification = False
+    for ident in obs.all_identifications:
+        if not ident.current or not ident.taxon:
+            continue
+        if login_key and ident.user_login.casefold() == login_key:
+            continue
+        date = _timestamp(ident.created_at)
+        if (
+            date is not None
+            and date > latest
+            and ident.taxon.taxon_id != target_id
+        ):
+            conflicting_identification = True
+            break
+
+    return conflicting_identification, commented_after_autovalidation(obs)
+
+
 def autovalidated_query(
     observation_query: Optional[ObservationURLQuery] = None,
 ) -> ObservationURLQuery:
@@ -1102,6 +1137,9 @@ def post_autovalidated_identification(
     dry_run: bool = False,
     dqa_posting_enabled: bool = False,
     explicit_disagreement: Optional[bool] = None,
+    guard_later_conflicting_identification: bool = True,
+    guard_comments_since_autovalidation: bool = True,
+    human_review_acknowledged: bool = False,
 ) -> BulkDisagreeResult:
     """Re-verify the autovalidation, then post through the shared identification path.
 
@@ -1138,6 +1176,27 @@ def post_autovalidated_identification(
             candidate=candidate,
             refreshed_observation=verified,
         )
+
+    if not human_review_acknowledged:
+        later_id, later_comment = needs_autovalidated_human_review(
+            verified,
+            candidate.target_taxon_id,
+            login,
+        )
+        review_reasons = []
+        if later_id and guard_later_conflicting_identification:
+            review_reasons.append(
+                "a different current identification was added after autovalidation"
+            )
+        if later_comment and guard_comments_since_autovalidation:
+            review_reasons.append("comments were added after autovalidation")
+        if review_reasons:
+            return BulkDisagreeResult(
+                "review_required",
+                "Human review required because " + " and ".join(review_reasons) + ".",
+                candidate=candidate,
+                refreshed_observation=verified,
+            )
 
     suggested = suggested_name_for(verified)
     if normalize_taxon_name(suggested) != normalize_taxon_name(

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from observation_workbench.models import StudyIdentification, StudyObservation
+from observation_workbench.services.ai_observation_review import AIReviewFinding
 from observation_workbench.services.identification_actions import (
     AgreeTarget,
     already_current_taxon,
@@ -25,6 +26,7 @@ class BulkAgreeCandidate:
     target: AgreeTarget
     user_current_taxon: str = ""
     user_has_different_id: bool = False
+    ai_review: Optional[AIReviewFinding] = None
 
 
 @dataclass
