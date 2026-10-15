@@ -65,6 +65,11 @@ from observation_workbench.api.observation_url import (
     parse_observations_url,
 )
 from observation_workbench.models import StudyPhoto, StudyTaxon
+from observation_workbench.services.ai_observation_review import (
+    AIReviewFinding,
+    ObservationReviewInput,
+    finding_priority,
+)
 from observation_workbench.services.bulk_disagree import (
     DQA_DISABLED_MESSAGE,
     DQA_POSTING_ENABLED,
@@ -76,6 +81,7 @@ from observation_workbench.services.bulk_disagree import (
     taxon_is_strict_ancestor,
 )
 from observation_workbench.services.image_cache import ImageCache
+from observation_workbench.ui.ai_observation_review import AIReviewPanel
 from observation_workbench.ui.external_links import open_external_url_silently
 from observation_workbench.ui.table_sort import (
     SortableTableWidgetItem,
@@ -1791,6 +1797,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._candidates = sorted(
             candidates,
             key=lambda c: (
+                finding_priority(c.ai_review),
                 _TAXON_CONFLICT_SORT_ORDER.get(_taxon_conflict_of(c), 2),
                 (c.target_taxon_name or "").strip().casefold(),
             ),
@@ -2064,6 +2071,38 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
                 "QLabel { background: #fce3c8; color: #8a4b08; padding: 6px; }"
             )
             layout.addWidget(discussion)
+
+        if candidate.ai_review is not None:
+            finding = candidate.ai_review
+            verdict = finding.verdict.replace("_", " ").title()
+            signals = ", ".join(finding.reason_labels()) or "No reason codes returned"
+            explanation_label = (
+                "Why Codex flagged it"
+                if finding.requires_human_review
+                else "AI explanation"
+            )
+            ai_review = QLabel(
+                f"AI review — {verdict} ({finding.confidence} confidence)\n"
+                f"Suspicious signals: {signals}\n"
+                f"{explanation_label}: "
+                f"{finding.explanation or 'No explanation returned.'}\n"
+                f"Model: {finding.model or '(unknown)'} | "
+                f"Evidence: {finding.evidence_mode or '(unknown)'}\n"
+                "Advisory only; this finding has not been independently verified."
+            )
+            ai_review.setTextFormat(Qt.TextFormat.PlainText)
+            ai_review.setWordWrap(True)
+            if finding.requires_human_review:
+                ai_review.setStyleSheet(
+                    "QLabel { background: #fde7eb; color: #7f1730; "
+                    "border: 1px solid #b73552; padding: 8px; font-weight: 600; }"
+                )
+            else:
+                ai_review.setStyleSheet(
+                    "QLabel { background: #e8f2ec; color: #235b38; "
+                    "border: 1px solid #5c8b6d; padding: 8px; }"
+                )
+            layout.addWidget(ai_review)
 
         top_row, top_buttons = self._make_action_row(candidate)
         layout.addLayout(top_row)
@@ -3274,7 +3313,8 @@ class BulkDisagreeKeptReviewDialog(QDialog):
 _TAXON_CONFLICT_SORT_ORDER = {"family": 0, "genus": 1}
 
 # Hidden last column carrying that ordering, so it survives a repopulate.
-_PRIORITY_COLUMN = 11
+_AI_REVIEW_COLUMN = 11
+_PRIORITY_COLUMN = 12
 _SKIP_COLUMN = 0
 _OBS_ID_COLUMN = 1
 _LINK_ICON_SIZE = 14
@@ -3375,6 +3415,7 @@ class BulkDisagreePreviewDialog(QDialog):
             ]
         ] = None,
         dry_run: bool = False,
+        enable_ai_review: bool = False,
         window_title: str = "Preview Bulk Disagree to Taxon",
         photo_browser_title: str = "Browse Bulk Disagree Photos",
         source_column_label: str = "Source taxon from URL",
@@ -3448,6 +3489,7 @@ class BulkDisagreePreviewDialog(QDialog):
                 "DNA Barcode ITS present?",
                 "Your current ID",
                 "DQA vote planned?",
+                "AI review",
                 # Hidden: re-enabling sorting after a repopulate re-applies the
                 # header's sort indicator, so the conflict-first order has to live
                 # in a sortable column rather than in row insertion order.
@@ -3464,6 +3506,18 @@ class BulkDisagreePreviewDialog(QDialog):
         self._table.itemClicked.connect(self._skip_from_preview)
         self._initial_sort_applied = False
         layout.addWidget(self._table, 1)
+
+        self._ai_panel = None
+        if enable_ai_review and client is not None and disk_cache is not None:
+            self._ai_panel = AIReviewPanel(
+                client=client,
+                disk_cache=disk_cache,
+                inputs_provider=self._ai_review_inputs,
+                selected_ids_provider=self._selected_observation_ids,
+                apply_findings=self._apply_ai_findings,
+                parent=self,
+            )
+            layout.addWidget(self._ai_panel)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self._back_btn = QPushButton("Back")
@@ -3501,8 +3555,9 @@ class BulkDisagreePreviewDialog(QDialog):
     def _sort_candidates(self) -> None:
         """Lift conflicting rows to the top, worst first, preserving scan order within."""
         self._candidates.sort(
-            key=lambda candidate: _TAXON_CONFLICT_SORT_ORDER.get(
-                _taxon_conflict_of(candidate), 2
+            key=lambda candidate: (
+                finding_priority(candidate.ai_review),
+                _TAXON_CONFLICT_SORT_ORDER.get(_taxon_conflict_of(candidate), 2),
             )
         )
 
@@ -3527,9 +3582,15 @@ class BulkDisagreePreviewDialog(QDialog):
                         f"{_dqa_table_text(candidate)}; "
                         f"explicit disagreement: {'yes' if candidate.explicit_disagreement else 'no'}"
                     ),
-                    # Conflict rank first, scan order second, as one sortable number.
+                    (
+                        candidate.ai_review.short_text()
+                        if candidate.ai_review
+                        else "Not analyzed"
+                    ),
+                    # AI review first, then conflict rank and original scan order.
                     str(
-                        _TAXON_CONFLICT_SORT_ORDER.get(
+                        finding_priority(candidate.ai_review) * 10000000
+                        + _TAXON_CONFLICT_SORT_ORDER.get(
                             _taxon_conflict_of(candidate), 2
                         )
                         * 100000
@@ -3555,6 +3616,11 @@ class BulkDisagreePreviewDialog(QDialog):
                         item.setBackground(QColor(background))
                         item.setForeground(QColor(foreground))
                         item.setToolTip(tooltip)
+                    if col == _AI_REVIEW_COLUMN and candidate.ai_review is not None:
+                        item.setToolTip(candidate.ai_review.details_text())
+                        if candidate.ai_review.requires_human_review:
+                            item.setBackground(QColor("#5a2430"))
+                            item.setForeground(QColor("#ffd5dc"))
                     if col == _SKIP_COLUMN:
                         item.setForeground(QColor("#d32f2f"))
                         font = item.font()
@@ -3578,14 +3644,55 @@ class BulkDisagreePreviewDialog(QDialog):
                             else _LINK_ICON_TOOLTIP
                         )
                     self._table.setItem(row, col, item)
-        if not self._initial_sort_applied and any(
-            _taxon_conflict_of(c) for c in self._candidates
-        ):
-            # Once only: a sort the user picks afterwards must survive the
-            # repopulate that follows the photo browser.
+        if not self._initial_sort_applied:
+            # Once only: a sort the user picks afterwards must survive later
+            # repopulates from AI analysis or the photo browser.
             self._table.sortItems(_PRIORITY_COLUMN, Qt.SortOrder.AscendingOrder)
             self._initial_sort_applied = True
         self._table.resizeColumnsToContents()
+
+    def _ai_review_inputs(self) -> List[ObservationReviewInput]:
+        inputs = []
+        for candidate in self._candidates:
+            reasons = []
+            if candidate.taxon_conflict:
+                reasons.append(
+                    f"Current observation taxon conflict: {candidate.taxon_conflict}"
+                )
+            if candidate.comments_after_autovalidation:
+                reasons.append("Comments were added after autovalidation")
+            inputs.append(
+                ObservationReviewInput(
+                    observation=candidate.observation,
+                    target_taxon_id=candidate.target_taxon_id,
+                    target_taxon_name=candidate.target_taxon_name,
+                    workflow=(
+                        "autovalidated identification"
+                        if candidate.source_display_name
+                        else "bulk identification"
+                    ),
+                    source_name=_source_taxon_text(candidate),
+                    deterministic_reasons=tuple(reasons),
+                    previous_finding=candidate.ai_review,
+                )
+            )
+        return inputs
+
+    def _selected_observation_ids(self) -> set[int]:
+        ids: set[int] = set()
+        for item in self._table.selectedItems():
+            obs_item = self._table.item(item.row(), _OBS_ID_COLUMN)
+            if obs_item and obs_item.text().isdigit():
+                ids.add(int(obs_item.text()))
+        return ids
+
+    def _apply_ai_findings(self, findings: dict[int, AIReviewFinding]) -> None:
+        for candidate in self._candidates:
+            finding = findings.get(candidate.observation.obs_id)
+            if finding is not None:
+                candidate.ai_review = finding
+        self._populate_table()
+        self._update_start_enabled()
 
     def _skip_from_preview(self, item) -> None:
         if item.column() != _SKIP_COLUMN or self._on_skip_forever is None:
@@ -3692,6 +3799,13 @@ class BulkDisagreePreviewDialog(QDialog):
                 bool(self._client and self._disk_cache and count)
             )
         self._start_btn.setEnabled(count > 0)
+        if self._ai_panel is not None:
+            self._ai_panel.refresh_enabled()
+
+    def done(self, result: int) -> None:
+        if self._ai_panel is not None:
+            self._ai_panel.cancel()
+        super().done(result)
 
 
 class BulkDisagreeProgressDialog(QDialog):
@@ -3911,6 +4025,11 @@ class BulkDisagreeProgressDialog(QDialog):
                     f"Explicit disagreement flag: {'Yes' if candidate.explicit_disagreement else 'No'}",
                     dna_line,
                     f"DQA vote: {_dqa_table_text(candidate)}",
+                    (
+                        f"AI review:\n{candidate.ai_review.details_text()}"
+                        if candidate.ai_review
+                        else "AI review: not analyzed"
+                    ),
                     "",
                     "Status: ready",
                 ]

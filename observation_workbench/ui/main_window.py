@@ -3925,6 +3925,8 @@ class MainWindow(QMainWindow):
             reasons.append("most recent identification is not provisional")
         if has_comments and self._bulk_dialog.pause_on_comments_since():
             reasons.append("comments exist since the provisional name was proposed")
+        if candidate.ai_review and candidate.ai_review.requires_human_review:
+            reasons.append(f"AI review: {candidate.ai_review.short_text()}")
         return " and ".join(reasons)
 
     def _show_workflow_observation(self, obs: StudyObservation) -> None:
@@ -5340,6 +5342,7 @@ class MainWindow(QMainWindow):
             on_unskip_forever=self._remove_bulk_disagree_skip_for_candidate,
             request_reauthentication=self._reauthenticate_photo_browser,
             dry_run=self._disagree_options.get("dry_run", False),
+            enable_ai_review=True,
             window_title="Preview Autovalidated Identifications",
             photo_browser_title="Browse Autovalidated Observation Photos",
             source_column_label="Autovalidated name",
@@ -5676,6 +5679,8 @@ class MainWindow(QMainWindow):
             and self._disagree_dialog.pause_on_comments_since_autovalidation()
         ):
             reasons.append("comments were added after autovalidation")
+        if candidate.ai_review and candidate.ai_review.requires_human_review:
+            reasons.append(f"AI review: {candidate.ai_review.short_text()}")
         return " and ".join(reasons)
 
     def _disagree_start_delay(self, *, force_pause_reason: str = "") -> None:
