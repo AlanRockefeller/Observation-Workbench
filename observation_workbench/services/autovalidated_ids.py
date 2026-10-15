@@ -1137,6 +1137,9 @@ def post_autovalidated_identification(
     dry_run: bool = False,
     dqa_posting_enabled: bool = False,
     explicit_disagreement: Optional[bool] = None,
+    guard_later_conflicting_identification: bool = True,
+    guard_comments_since_autovalidation: bool = True,
+    human_review_acknowledged: bool = False,
 ) -> BulkDisagreeResult:
     """Re-verify the autovalidation, then post through the shared identification path.
 
@@ -1173,6 +1176,27 @@ def post_autovalidated_identification(
             candidate=candidate,
             refreshed_observation=verified,
         )
+
+    if not human_review_acknowledged:
+        later_id, later_comment = needs_autovalidated_human_review(
+            verified,
+            candidate.target_taxon_id,
+            login,
+        )
+        review_reasons = []
+        if later_id and guard_later_conflicting_identification:
+            review_reasons.append(
+                "a different current identification was added after autovalidation"
+            )
+        if later_comment and guard_comments_since_autovalidation:
+            review_reasons.append("comments were added after autovalidation")
+        if review_reasons:
+            return BulkDisagreeResult(
+                "review_required",
+                "Human review required because " + " and ".join(review_reasons) + ".",
+                candidate=candidate,
+                refreshed_observation=verified,
+            )
 
     suggested = suggested_name_for(verified)
     if normalize_taxon_name(suggested) != normalize_taxon_name(

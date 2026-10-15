@@ -613,18 +613,21 @@ class CodexObservationReviewer:
     ) -> None:
         stdout_path = temp_dir / "codex.stdout"
         stderr_path = temp_dir / "codex.stderr"
+        prompt_path = temp_dir / "prompt.txt"
         try:
-            with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+            prompt_path.write_text(prompt, encoding="utf-8")
+            with (
+                prompt_path.open("rb") as stdin_file,
+                stdout_path.open("wb") as stdout_file,
+                stderr_path.open("wb") as stderr_file,
+            ):
                 proc = subprocess.Popen(
                     list(command),
-                    stdin=subprocess.PIPE,
+                    stdin=stdin_file,
                     stdout=stdout_file,
                     stderr=stderr_file,
                     cwd=temp_dir,
                 )
-                assert proc.stdin is not None
-                proc.stdin.write(prompt.encode("utf-8"))
-                proc.stdin.close()
                 deadline = time.monotonic() + _CLI_TIMEOUT_SECONDS
                 while proc.poll() is None:
                     if is_cancelled():
@@ -1116,6 +1119,6 @@ def export_comparison_csv(
 
 def _csv_cell(value: str) -> str:
     text = str(value or "")
-    if text.startswith(("=", "+", "-", "@")):
+    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
         return "'" + text
     return text
