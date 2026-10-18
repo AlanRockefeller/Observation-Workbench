@@ -2446,7 +2446,7 @@ class MainWindow(QMainWindow):
         source_text = filters_dict.get("username", "").strip()
         if not source_text:
             self._status_label.setText(
-                "Please enter an identifier username or observations URL."
+                "Please enter an identifier username, observations URL, or project URL."
             )
             return
         try:
@@ -2513,7 +2513,7 @@ class MainWindow(QMainWindow):
         ctx = " · ".join(p for p in [place, taxon] if p)
         if is_url_query:
             log.debug(
-                "Loading observations URL: %s taxon_id=%s",
+                "Loading iNaturalist query URL: %s taxon_id=%s",
                 observation_query.display_url,
                 filters_dict.get("taxon_id"),
             )
@@ -2687,7 +2687,7 @@ class MainWindow(QMainWindow):
 
         if total == 0 or loaded_count == 0:
             if getattr(self._current_filters, "observation_query", None):
-                msg = "No results found. Check the observations URL or try a different query."
+                msg = "No results found. Check the iNaturalist URL or try a different query."
             else:
                 msg = "No results found. Check username, filters, or try a different query."
             self._status_label.setText(msg)

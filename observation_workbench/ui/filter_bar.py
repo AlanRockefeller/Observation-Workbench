@@ -225,11 +225,11 @@ class FilterBar(QWidget):
         row1.addWidget(QLabel("Identifier / URL:"))
         self._username_edit = QLineEdit()
         self._username_edit.setPlaceholderText(
-            "e.g. deniszabin or an iNaturalist observations URL"
+            "e.g. deniszabin or an iNaturalist observations/project URL"
         )
         self._username_edit.setMinimumWidth(80)
         self._username_edit.setToolTip(
-            "iNaturalist username, or an iNaturalist observations URL to study its returned observations"
+            "iNaturalist username, observations URL, or project URL to study its returned observations"
         )
         self._username_edit.textEdited.connect(self._on_username_text_changed)
         history_completer = QCompleter(self._username_history_model, self)

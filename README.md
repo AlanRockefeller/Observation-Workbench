@@ -8,7 +8,7 @@ Use `./start.sh` from the repo root to launch it. That is the recommended entry 
 
 ## What It Does
 
-- Study a specific identifier's work, or load an iNaturalist observations URL directly
+- Study a specific identifier's work, or load an iNaturalist observations or project URL directly
 - Browse results with keyboard navigation, image prefetching, and disk caching
 - Open the current observation or image in the browser
 - Inspect a live taxon summary panel for the current query
@@ -59,7 +59,7 @@ observation-workbench
 ## Working With It
 
 - Enter an identifier username, such as `deniszabin`, in the Identifier / URL field.
-- Or paste an iNaturalist `/observations` URL. The app uses that query as the base search.
+- Or paste an iNaturalist `/observations` URL or `/projects/<id-or-slug>` URL. The app uses that query as the base search, including the aggregated observations of umbrella projects.
 - For username studies, the Place and Taxon fields autocomplete from the iNat API.
 - Press `Load` or `R` to fetch results.
 - Double-click a taxon in the Taxon Summary panel to filter by it.
@@ -68,7 +68,7 @@ observation-workbench
 
 | Field            | Description                                                                                  |
 | ---------------- | -------------------------------------------------------------------------------------------- |
-| Identifier / URL | iNaturalist username of the person whose IDs to study, or an iNaturalist `/observations` URL |
+| Identifier / URL | iNaturalist username of the person whose IDs to study, or an iNaturalist `/observations` or `/projects/<id-or-slug>` URL |
 | Place            | Filter to a geographic place (autocomplete)                                                  |
 | Taxon            | Filter to a taxon and all descendants (autocomplete)                                         |
 | Leading IDs only | Only show identifications that are currently leading the community ID                        |
@@ -77,10 +77,13 @@ observation-workbench
 | Exact rank       | Show only identifications at the chosen rank                                                 |
 | From / To        | Optional date range filter                                                                   |
 
-When you use an observations URL, the URL query becomes the base query. Taxon can still narrow it further. Username-only controls like Leading IDs only and rank filtering are ignored in URL mode.
+When you use an observations URL, its query becomes the base query. A project URL becomes a `project_id` query, which includes the child projects of an umbrella project. Taxon can still narrow either URL further. Username-only controls like Leading IDs only and rank filtering are ignored in URL mode.
 
 Example:
 `https://www.inaturalist.org/observations?place_id=14&taxon_id=63421&field:DNA%20Barcode%20ITS=`
+
+Umbrella project example:
+`https://www.inaturalist.org/projects/elwha-river-fungal-biodiversity-survey-umbrella-project-bdc`
 
 ## Keyboard Shortcuts (Main Window)
 

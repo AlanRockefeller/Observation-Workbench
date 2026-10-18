@@ -1,4 +1,4 @@
-"""Utilities for turning iNaturalist observation URLs into API queries."""
+"""Utilities for turning iNaturalist URLs into observation API queries."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ PROVISIONAL_SPECIES_FIELD_NAME = "Provisional Species Name"
 
 
 class ObservationURLParseError(ValueError):
-    """Raised when text is a URL, but not a supported iNaturalist observations URL."""
+    """Raised when text is a URL, but not a supported iNaturalist query source."""
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,9 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
     """Return an observation API query for a supported iNaturalist URL.
 
     Non-URL input returns None so existing username behavior can continue.
-    iNaturalist URLs are intentionally restricted to observation index/detail
-    URLs because those map cleanly to /v1/observations.
+    Observation index/detail URLs map directly to /v1/observations. Project
+    pages map to the same endpoint through its ``project_id`` slug/ID filter;
+    this also lets umbrella projects return their aggregated observations.
     """
     value = text.strip()
     if not value:
@@ -71,7 +72,7 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
     host = (parsed.hostname or "").lower()
     if host not in _INAT_HOSTS:
         raise ObservationURLParseError(
-            "Only iNaturalist observation URLs are supported."
+            "Only iNaturalist observation and project URLs are supported."
         )
 
     path = _normalise_path(parsed.path)
@@ -82,6 +83,7 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
     ]
 
     detail_match = re.fullmatch(r"/observations/(\d+)", path)
+    project_match = re.fullmatch(r"/projects/([^/]+)", path)
     is_identify = path == "/observations/identify"
     # Bound once, before the branches, so every path provably has a provenance
     # entry per parameter and adding a branch cannot leave it unassigned.
@@ -99,9 +101,16 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
     elif detail_match:
         params.insert(0, ("id", detail_match.group(1)))
         sources.insert(0, "URL")
+    elif project_match:
+        # Query parameters on a project page control that page (for example,
+        # its selected tab); they are not observation-search parameters. The
+        # path's project ID or slug is the complete API translation.
+        params = [("project_id", project_match.group(1))]
+        sources = ["Project URL"]
     else:
         raise ObservationURLParseError(
-            "Only iNaturalist /observations URLs can be loaded from this field."
+            "Only iNaturalist /observations or /projects/<id-or-slug> URLs can "
+            "be loaded from this field."
         )
 
     source_key = canonical_source_key(params)
@@ -112,7 +121,11 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
         source_kind=(
             "identify"
             if is_identify
-            else ("single" if detail_match else "observations")
+            else (
+                "single"
+                if detail_match
+                else ("project" if project_match else "observations")
+            )
         ),
         parameter_sources=tuple(sources),
     )
