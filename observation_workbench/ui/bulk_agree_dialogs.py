@@ -1,4 +1,4 @@
-"""Dialogs for supervised provisional-name agreement workflow."""
+"""Dialogs for the supervised DNA-backed agreement workflow."""
 
 from __future__ import annotations
 
@@ -40,12 +40,13 @@ from observation_workbench.services.bulk_identification import (
     BulkAgreePlanStats,
 )
 from observation_workbench.services.image_cache import ImageCache
-from observation_workbench.services.identification_actions import needs_human_review
 from observation_workbench.ui.ai_observation_review import AIReviewPanel
 from observation_workbench.ui.bulk_disagree_dialogs import (
+    REVIEW_OPEN_BATCH_SIZE,
     BulkDisagreePhotoBrowserDialog,
     _bool_default,
     _int_default,
+    review_open_button_text,
 )
 from observation_workbench.ui.external_links import open_external_url_silently
 from observation_workbench.ui.table_sort import (
@@ -61,7 +62,7 @@ def _browser_candidate(candidate: BulkAgreeCandidate) -> BulkDisagreeCandidate:
     The browser and its alternate-ID posting path are written against
     :class:`BulkDisagreeCandidate`. Agreement has no source taxon to check, so
     the source fields stay empty and the safety re-check is disabled by the
-    caller; the provisional identification being agreed with is the target.
+    caller; the DNA-backed identification being agreed with is the target.
     """
     obs = candidate.observation
     return BulkDisagreeCandidate(
@@ -99,7 +100,7 @@ class BulkAgreeSetupDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Agree to Provisional IDs")
+        self.setWindowTitle("Agree to DNA-Backed IDs")
         self.resize(760, 460)
         self._observation_query: Optional[ObservationURLQuery] = None
         self._current_query_available = bool(current_query_description)
@@ -109,10 +110,19 @@ class BulkAgreeSetupDialog(QDialog):
         layout.setSpacing(8)
 
         intro = QLabel(
-            "Paste an iNaturalist observations URL. Every result is scanned for a "
-            "current provisional identification made by somebody else that you have "
-            "not agreed with yet. Nothing is written until you review the preview and "
-            "start the run."
+            "Paste an iNaturalist observations URL. Every result with a DNA Barcode "
+            "ITS field is scanned for a current species-level identification by "
+            "somebody else, provisional or published, that you have not agreed with "
+            "yet. It is checked against the Species Name Override (then Provisional "
+            "Species Name, then the autovalidation comment, then Barcode Inferred "
+            "Species or Name); a mismatch, a later "
+            "different ID, or later comments send it to human review. When the "
+            "name is an undisputed provisional name already on iNaturalist and "
+            "nobody else holds it (any other species ID having been overruled by "
+            "a later disagreement), that name is proposed instead. Observations "
+            "where your ID already is the DNA-backed name, or that you identified "
+            "or commented on in the last hour, are skipped. Nothing is written "
+            "until you review the preview and start the run."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -142,22 +152,13 @@ class BulkAgreeSetupDialog(QDialog):
 
         self._url_radio.toggled.connect(self._on_source_mode_changed)
 
-        self._require_dna_cb = QCheckBox(
-            "Only agree when the observation has a DNA Barcode ITS observation field"
-        )
-        self._require_dna_cb.setChecked(True)
-        self._require_dna_cb.setToolTip(
-            "Observations without a DNA Barcode ITS field are skipped during planning."
-        )
-        layout.addWidget(self._require_dna_cb)
-
         self._only_if_needed_cb = QCheckBox(
             "Only agree when needed (skip observations already Research Grade for the proposed taxon)"
         )
         self._only_if_needed_cb.setChecked(True)
         self._only_if_needed_cb.setToolTip(
             "Skip an observation when it is already Research Grade and its current "
-            "community taxon matches the provisional name being proposed."
+            "community taxon matches the name being agreed with."
         )
         layout.addWidget(self._only_if_needed_cb)
 
@@ -172,17 +173,29 @@ class BulkAgreeSetupDialog(QDialog):
         self._delay_min_spin = QSpinBox()
         self._delay_min_spin.setRange(0, 3600)
         self._delay_min_spin.setSuffix("s min")
-        self._delay_min_spin.setValue(10)
+        self._delay_min_spin.setValue(0)
         self._delay_max_spin = QSpinBox()
         self._delay_max_spin.setRange(0, 3600)
         self._delay_max_spin.setSuffix("s max")
-        self._delay_max_spin.setValue(30)
+        self._delay_max_spin.setValue(0)
         self._delay_min_spin.valueChanged.connect(self._on_delay_min_changed)
         self._delay_max_spin.valueChanged.connect(self._on_delay_max_changed)
         options_row.addWidget(self._delay_min_spin)
         options_row.addWidget(self._delay_max_spin)
         options_row.addStretch(1)
         layout.addLayout(options_row)
+
+        self._tag_others_cb = QCheckBox(
+            "Tag users who proposed a different identification"
+        )
+        self._tag_others_cb.setChecked(False)
+        self._tag_others_cb.setToolTip(
+            "Pre-fill each comment with @-mentions of users whose current ID differs "
+            "from the DNA-backed name, so they can update it. Omitted once the "
+            "observation is Research Grade or already has a species-level ID for "
+            "that name, and never tags users listed in users_not_to_tag.txt."
+        )
+        layout.addWidget(self._tag_others_cb)
 
         self._dry_run_cb = QCheckBox("Preview only / dry run")
         self._dry_run_cb.setChecked(False)
@@ -226,9 +239,6 @@ class BulkAgreeSetupDialog(QDialog):
     def source_url(self) -> str:
         return self._url_edit.text().strip()
 
-    def require_dna_barcode_its(self) -> bool:
-        return self._require_dna_cb.isChecked()
-
     def only_if_needed(self) -> bool:
         return self._only_if_needed_cb.isChecked()
 
@@ -244,22 +254,25 @@ class BulkAgreeSetupDialog(QDialog):
     def dry_run(self) -> bool:
         return self._dry_run_cb.isChecked()
 
+    def tag_other_identifiers(self) -> bool:
+        return self._tag_others_cb.isChecked()
+
     # -- internals ------------------------------------------------------
 
     def _apply_defaults(self, defaults: dict, prefill_url: str) -> None:
         url = prefill_url.strip() or str(defaults.get("url") or "").strip()
-        self._require_dna_cb.setChecked(
-            _bool_default(defaults.get("require_dna_barcode_its"), True)
-        )
         self._only_if_needed_cb.setChecked(
             _bool_default(defaults.get("only_if_needed"), True)
         )
         self._max_spin.setValue(_int_default(defaults.get("max_observations"), 100))
-        delay_min = max(0, _int_default(defaults.get("delay_min_seconds"), 10))
-        delay_max = max(delay_min, _int_default(defaults.get("delay_max_seconds"), 30))
+        delay_min = max(0, _int_default(defaults.get("delay_min_seconds"), 0))
+        delay_max = max(delay_min, _int_default(defaults.get("delay_max_seconds"), 0))
         self._delay_min_spin.setValue(delay_min)
         self._delay_max_spin.setValue(delay_max)
         self._dry_run_cb.setChecked(_bool_default(defaults.get("dry_run"), False))
+        self._tag_others_cb.setChecked(
+            _bool_default(defaults.get("tag_other_identifiers"), False)
+        )
 
         if (
             str(defaults.get("source_mode") or "url") == "current"
@@ -340,12 +353,20 @@ class BulkAgreeSetupDialog(QDialog):
 def format_agree_plan_stats(stats: BulkAgreePlanStats) -> str:
     return (
         f"Scanned results: {stats.total_results_scanned}\n"
-        f"Candidates: {stats.candidate_count}\n"
-        f"Skipped, no current provisional ID by somebody else: {stats.skipped_no_provisional_id}\n"
+        f"Candidates: {stats.candidate_count} "
+        f"({stats.review_count} need human review, "
+        f"{stats.provisional_proposals} propose a provisional name)\n"
+        f"Skipped, no current ID by somebody else: {stats.skipped_no_identification}\n"
         f"Skipped, no DNA Barcode ITS field: {stats.skipped_no_dna_barcode_its}\n"
         f"Skipped, you already agreed: {stats.skipped_already_agreed}\n"
         f"Skipped, already Research Grade for proposed taxon: {stats.skipped_already_research_grade}\n"
         f"Skipped, you previously withdrew that ID: {stats.skipped_previously_withdrew}\n"
+        f"Skipped, your ID already is the DNA-backed name: "
+        f"{stats.skipped_you_hold_dna_name}\n"
+        f"Skipped, you identified or commented in the last hour: "
+        f"{stats.skipped_recent_activity}\n"
+        f"Skipped, undisputed provisional name not yet on iNaturalist: "
+        f"{stats.skipped_provisional_not_on_inat}\n"
         f"Skipped due to permanent skip list: {stats.skipped_permanent}"
     )
 
@@ -364,6 +385,7 @@ class BulkAgreePreviewDialog(QDialog):
         login: str = "",
         on_skip_forever: Optional[Callable[[BulkAgreeCandidate], None]] = None,
         on_unskip_forever: Optional[Callable[[BulkAgreeCandidate], None]] = None,
+        on_observation_link_used: Optional[Callable[[int], None]] = None,
         request_reauthentication: Optional[
             Callable[
                 [Callable[[str, str], None], Callable[[str], None]],
@@ -374,7 +396,7 @@ class BulkAgreePreviewDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Preview Provisional Agreements")
+        self.setWindowTitle("Preview DNA-Backed Agreements")
         self.resize(1100, 580)
         self._candidates = list(candidates)
         self._stats = stats
@@ -385,6 +407,7 @@ class BulkAgreePreviewDialog(QDialog):
         self._login = login
         self._on_skip_forever = on_skip_forever
         self._on_unskip_forever = on_unskip_forever
+        self._on_observation_link_used = on_observation_link_used
         self._request_reauthentication = request_reauthentication
         self._dry_run = dry_run
 
@@ -394,8 +417,10 @@ class BulkAgreePreviewDialog(QDialog):
 
         warning = QLabel(
             "This will write identifications to iNaturalist. Only proceed if you can "
-            "independently verify each proposed ID. Each observation will be refreshed "
-            "again immediately before posting, and you can skip or cancel during execution."
+            "independently verify each proposed ID. Items needing human review pause "
+            "for you; the rest post automatically. An observation is re-read before "
+            "posting only if it was checked more than a day ago or you opened or "
+            "copied it. You can skip or cancel during execution."
         )
         if dry_run:
             warning.setText(
@@ -409,24 +434,25 @@ class BulkAgreePreviewDialog(QDialog):
             stats_label.setWordWrap(True)
             layout.addWidget(stats_label)
 
-        self._table = QTableWidget(0, 10)
+        self._table = QTableWidget(0, 11)
         self._table.setHorizontalHeaderLabels(
             [
                 "Observation ID",
                 "URL",
                 "Observer",
                 "Target taxon",
+                "DNA-backed name",
                 "Source identifier",
                 "ID date",
                 "Your current ID",
-                "DNA Barcode ITS present?",
+                "Human review",
                 "AI review",
                 "AI priority",
             ]
         )
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         enable_click_sorting(self._table)
-        self._table.setColumnHidden(9, True)
+        self._table.setColumnHidden(10, True)
         self._initial_sort_applied = False
         layout.addWidget(self._table, 1)
 
@@ -453,7 +479,7 @@ class BulkAgreePreviewDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self._back_btn = QPushButton("Back")
-        self._back_btn.setToolTip("Return to the provisional agreement setup dialog.")
+        self._back_btn.setToolTip("Return to the DNA-backed agreement setup dialog.")
         self._browse_btn = QPushButton("Browse photos...")
         self._browse_btn.clicked.connect(self._browse_photos)
         self._start_btn = QPushButton("Start")
@@ -488,53 +514,59 @@ class BulkAgreePreviewDialog(QDialog):
             self._table.setRowCount(len(self._candidates))
             for row, candidate in enumerate(self._candidates):
                 obs = candidate.observation
+                review_text = "; ".join(r.text for r in candidate.review_reasons)
                 values = [
                     str(obs.obs_id),
                     obs.url,
                     obs.observer_login,
                     candidate.target.taxon_name,
-                    candidate.target.source_login,
+                    (
+                        f"{candidate.expected_name} ({candidate.expected_source})"
+                        if candidate.expected_name
+                        else ""
+                    ),
+                    (
+                        "(proposing new ID)"
+                        if candidate.proposes_name
+                        else candidate.target.source_login
+                    ),
                     candidate.target.source_created_at[:19],
                     candidate.user_current_taxon or "",
-                    "Yes" if (obs.dna_barcode_its or "").strip() else "No",
+                    review_text,
                     candidate.ai_review.short_text() if candidate.ai_review else "Not analyzed",
                     str(finding_priority(candidate.ai_review) * 100000 + row),
                 ]
                 for col, value in enumerate(values):
                     item = SortableTableWidgetItem(value)
-                    if col == 8 and candidate.ai_review is not None:
+                    if col == 8 and review_text:
+                        item.setToolTip(review_text)
+                        item.setBackground(QColor("#5a4a24"))
+                        item.setForeground(QColor("#ffeccc"))
+                    if col == 9 and candidate.ai_review is not None:
                         item.setToolTip(candidate.ai_review.details_text())
                         if candidate.ai_review.requires_human_review:
                             item.setBackground(QColor("#5a2430"))
                             item.setForeground(QColor("#ffd5dc"))
                     self._table.setItem(row, col, item)
         if not self._initial_sort_applied:
-            self._table.sortItems(9, Qt.SortOrder.AscendingOrder)
+            self._table.sortItems(10, Qt.SortOrder.AscendingOrder)
             self._initial_sort_applied = True
         self._table.resizeColumnsToContents()
 
     def _ai_review_inputs(self) -> List[ObservationReviewInput]:
         inputs = []
         for candidate in self._candidates:
-            recent_not_provisional, comments_since = needs_human_review(
-                candidate.observation,
-                candidate.target,
-                self._login,
-            )
-            reasons = []
-            if recent_not_provisional:
-                reasons.append("Most recent current identification is not provisional")
-            if comments_since:
-                reasons.append("Comments were added after the provisional ID")
             inputs.append(
                 ObservationReviewInput(
                     observation=candidate.observation,
                     target_taxon_id=candidate.target.taxon_id,
                     target_taxon_name=candidate.target.taxon_name,
-                    workflow="provisional agreement",
-                    source_name="provisional identification",
+                    workflow="DNA-backed agreement",
+                    source_name="DNA-backed identification",
                     source_identifier_date=candidate.target.source_created_at,
-                    deterministic_reasons=tuple(reasons),
+                    deterministic_reasons=tuple(
+                        r.text for r in candidate.review_reasons
+                    ),
                     previous_finding=candidate.ai_review,
                 )
             )
@@ -578,12 +610,13 @@ class BulkAgreePreviewDialog(QDialog):
             on_unskip_forever=self._skip_forever_adapter(
                 by_obs_id, self._on_unskip_forever
             ),
+            on_observation_link_used=self._on_observation_link_used,
             request_reauthentication=(
                 self._request_photo_browser_reauthentication
                 if self._request_reauthentication is not None
                 else None
             ),
-            window_title="Browse Provisional Agreement Photos",
+            window_title="Browse DNA-Backed Agreement Photos",
             parent=self,
         )
         dlg.exec()
@@ -660,6 +693,9 @@ class BulkAgreeProgressDialog(QDialog):
     delay_changed = Signal(int, int)  # min_seconds, max_seconds
     nav_key_pressed = Signal(object, object)
     open_all_review_requested = Signal()
+    # The operator opened or copied the current observation, so may have
+    # identified it by hand; it is re-read before posting.
+    observation_link_used = Signal()
 
     _NAV_PASSTHROUGH_KEYS = {
         Qt.Key.Key_Up,
@@ -672,12 +708,12 @@ class BulkAgreeProgressDialog(QDialog):
         self,
         parent=None,
         *,
-        delay_min_seconds: int = 10,
-        delay_max_seconds: int = 30,
+        delay_min_seconds: int = 0,
+        delay_max_seconds: int = 0,
         dry_run: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Agree to Provisional IDs")
+        self.setWindowTitle("Agree to DNA-Backed IDs")
         self.resize(640, 460)
         self.setModal(False)
         self._finished = False
@@ -690,22 +726,27 @@ class BulkAgreeProgressDialog(QDialog):
 
         if dry_run:
             dry_run_label = QLabel(
-                "DRY RUN — every candidate is refreshed and checked, but no "
-                "identification is posted."
+                "DRY RUN — every candidate is checked, but no identification is "
+                "posted."
             )
             dry_run_label.setWordWrap(True)
             dry_run_label.setStyleSheet("QLabel { color: #b36b00; font-weight: 700; }")
             layout.addWidget(dry_run_label)
 
-        pause_label = QLabel("Move to end for human review when:")
+        pause_label = QLabel(
+            "Move to end for human review when (a name that differs from the "
+            "DNA-backed name, no species-level ID, your own different ID, or a "
+            "family-level clash always pauses):"
+        )
+        pause_label.setWordWrap(True)
         layout.addWidget(pause_label)
         self._pause_recent_cb = QCheckBox(
-            "Most recent identification is not provisional"
+            "A different ID was added after the autovalidation comment or the target ID"
         )
         self._pause_recent_cb.setChecked(True)
         layout.addWidget(self._pause_recent_cb)
         self._pause_comments_cb = QCheckBox(
-            "Comments have been added since the provisional name was proposed"
+            "Comments were added after the autovalidation comment or the target ID"
         )
         self._pause_comments_cb.setChecked(True)
         layout.addWidget(self._pause_comments_cb)
@@ -776,8 +817,9 @@ class BulkAgreeProgressDialog(QDialog):
         self._open_review_obs_btn.clicked.connect(self._open_review_observation)
         self._open_all_review_btn = QPushButton("Open all needing review in browser")
         self._open_all_review_btn.setToolTip(
-            "Open every remaining observation that needs human review in your "
-            "browser, and skip all of them here (you'll handle them yourself)."
+            "Open the remaining observations that need human review in your "
+            f"browser, {REVIEW_OPEN_BATCH_SIZE} at a time, and skip them here "
+            "(you'll handle them yourself)."
         )
         self._open_all_review_btn.clicked.connect(self.open_all_review_requested)
         self._review_actions.addWidget(self._copy_review_url_btn)
@@ -910,8 +952,23 @@ class BulkAgreeProgressDialog(QDialog):
                 [
                     f"Observation: {obs.url}",
                     f"Observer: {obs.observer_login}",
-                    f"Source identifier: {candidate.target.source_login}",
-                    f"Source ID date: {candidate.target.source_created_at}",
+                    *(
+                        [
+                            "Source identifier: none yet; proposing the "
+                            "undisputed DNA-backed provisional name"
+                        ]
+                        if candidate.proposes_name
+                        else [
+                            f"Source identifier: {candidate.target.source_login}",
+                            f"Source ID date: {candidate.target.source_created_at}",
+                        ]
+                    ),
+                    (
+                        f"DNA-backed name: {candidate.expected_name} "
+                        f"({candidate.expected_source})"
+                        if candidate.expected_name
+                        else "DNA-backed name: none recorded"
+                    ),
                     (
                         f"AI review:\n{candidate.ai_review.details_text()}"
                         if candidate.ai_review
@@ -962,19 +1019,24 @@ class BulkAgreeProgressDialog(QDialog):
         self._review_banner.setVisible(False)
         self._set_review_actions_visible(False)
 
-    def pause_on_recent_not_provisional(self) -> bool:
+    def pause_on_later_identification(self) -> bool:
         return self._pause_recent_cb.isChecked()
 
     def pause_on_comments_since(self) -> bool:
         return self._pause_comments_cb.isChecked()
 
-    def set_paused_for_review(self, reason: str) -> None:
-        """Enter an indefinite human-review pause and show the reason."""
+    def set_paused_for_review(self, reason: str, review_backlog: int = 0) -> None:
+        """Enter an indefinite human-review pause and show the reason.
+
+        ``review_backlog`` is how many queued items still need review; it sizes
+        the batched open-in-browser button.
+        """
         self._paused = True
         self._pause_btn.setText("Resume")
         self.set_waiting()
         self._review_banner.setText(f"HUMAN REVIEW REQUIRED\n{reason}")
         self._review_banner.setVisible(True)
+        self._open_all_review_btn.setText(review_open_button_text(review_backlog))
         self._set_review_actions_visible(True)
         self.set_status(f"Paused for human review: {reason}")
         self._countdown.setText(
@@ -1005,7 +1067,7 @@ class BulkAgreeProgressDialog(QDialog):
             lines.append(f"Skipped (no DNA Barcode ITS): {skipped_no_dna}")
         if skipped_previously_withdrew:
             lines.append(
-                f"Skipped (previously withdrew provisional ID): {skipped_previously_withdrew}"
+                f"Skipped (previously withdrew this ID): {skipped_previously_withdrew}"
             )
         self._details.setPlainText("\n".join(lines))
         self._countdown.setText("")
@@ -1036,8 +1098,10 @@ class BulkAgreeProgressDialog(QDialog):
 
     def _copy_review_url(self) -> None:
         if self._observation_url:
+            self.observation_link_used.emit()
             QApplication.clipboard().setText(self._observation_url)
 
     def _open_review_observation(self) -> None:
         if self._observation_url:
+            self.observation_link_used.emit()
             open_external_url_silently(self._observation_url)

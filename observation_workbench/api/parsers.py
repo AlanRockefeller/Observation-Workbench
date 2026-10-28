@@ -360,6 +360,10 @@ def parse_observation(
                 raw_obs,
                 "Species Name Override",
             ),
+            barcode_inferred_name=_observation_field_value(
+                raw_obs,
+                "Barcode Inferred Species or Name",
+            ),
             id_update_needed=_observation_field_value(raw_obs, "ID Update Needed"),
             dna_barcode_its=_observation_field_value(
                 raw_obs,

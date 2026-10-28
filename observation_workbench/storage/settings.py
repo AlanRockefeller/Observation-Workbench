@@ -285,14 +285,6 @@ class AppSettings:
         )
 
     @property
-    def bulk_agree_require_dna_barcode_its(self) -> bool:
-        return self._s.value("bulk_agree/require_dna_barcode_its", True, type=bool)
-
-    @bulk_agree_require_dna_barcode_its.setter
-    def bulk_agree_require_dna_barcode_its(self, v: bool) -> None:
-        self._s.setValue("bulk_agree/require_dna_barcode_its", v)
-
-    @property
     def bulk_agree_only_if_needed(self) -> bool:
         return self._s.value("bulk_agree/only_if_needed", True, type=bool)
 
@@ -308,21 +300,23 @@ class AppSettings:
     def bulk_agree_max_observations(self, v: int) -> None:
         self._s.setValue("bulk_agree/max_observations", int(v))
 
+    # New keys for the DNA-backed workflow, so the old 10-30 s provisional
+    # defaults saved by earlier runs give way to the new no-delay default.
     @property
     def bulk_agree_delay_min_seconds(self) -> int:
-        return int(self._s.value("bulk_agree/delay_min_seconds", 10))
+        return int(self._s.value("bulk_agree/dna_delay_min_seconds", 0))
 
     @bulk_agree_delay_min_seconds.setter
     def bulk_agree_delay_min_seconds(self, v: int) -> None:
-        self._s.setValue("bulk_agree/delay_min_seconds", int(v))
+        self._s.setValue("bulk_agree/dna_delay_min_seconds", int(v))
 
     @property
     def bulk_agree_delay_max_seconds(self) -> int:
-        return int(self._s.value("bulk_agree/delay_max_seconds", 30))
+        return int(self._s.value("bulk_agree/dna_delay_max_seconds", 0))
 
     @bulk_agree_delay_max_seconds.setter
     def bulk_agree_delay_max_seconds(self, v: int) -> None:
-        self._s.setValue("bulk_agree/delay_max_seconds", int(v))
+        self._s.setValue("bulk_agree/dna_delay_max_seconds", int(v))
 
     @property
     def bulk_agree_dry_run(self) -> bool:
@@ -331,6 +325,14 @@ class AppSettings:
     @bulk_agree_dry_run.setter
     def bulk_agree_dry_run(self, v: bool) -> None:
         self._s.setValue("bulk_agree/dry_run", v)
+
+    @property
+    def bulk_agree_tag_other_identifiers(self) -> bool:
+        return self._s.value("bulk_agree/tag_other_identifiers", False, type=bool)
+
+    @bulk_agree_tag_other_identifiers.setter
+    def bulk_agree_tag_other_identifiers(self, v: bool) -> None:
+        self._s.setValue("bulk_agree/tag_other_identifiers", v)
 
     # ------------------------------------------------------------------
     # Bulk disagree setup defaults

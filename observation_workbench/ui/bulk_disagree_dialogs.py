@@ -1781,6 +1781,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         dry_run: bool = False,
         on_skip_forever: Optional[Callable[[BulkDisagreeCandidate], None]] = None,
         on_unskip_forever: Optional[Callable[[BulkDisagreeCandidate], None]] = None,
+        on_observation_link_used: Optional[Callable[[int], None]] = None,
         request_reauthentication: Optional[
             Callable[
                 [Callable[[str, str], None], Callable[[str], None]],
@@ -1813,6 +1814,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         self._target_field_name = target_field_name
         self._on_skip_forever = on_skip_forever
         self._on_unskip_forever = on_unskip_forever
+        self._on_observation_link_used = on_observation_link_used
         self._request_reauthentication = request_reauthentication
         self._pool = QThreadPool.globalInstance()
         self._removed_obs_ids: set[int] = set()
@@ -2181,9 +2183,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
             lambda _checked=False, c=candidate: self._post_alternate(c)
         )
         open_btn.clicked.connect(
-            lambda _checked=False, c=candidate: open_external_url_silently(
-                c.observation.url
-            )
+            lambda _checked=False, c=candidate: self._open_observation(c)
         )
         copy_url_btn.clicked.connect(
             lambda _checked=False, c=candidate: self._copy_observation_url(c)
@@ -2208,7 +2208,16 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
             copy_url_btn,
         ]
 
+    def _note_observation_link_used(self, candidate: BulkDisagreeCandidate) -> None:
+        if self._on_observation_link_used is not None:
+            self._on_observation_link_used(candidate.observation.obs_id)
+
+    def _open_observation(self, candidate: BulkDisagreeCandidate) -> None:
+        self._note_observation_link_used(candidate)
+        open_external_url_silently(candidate.observation.url)
+
     def _copy_observation_url(self, candidate: BulkDisagreeCandidate) -> None:
+        self._note_observation_link_used(candidate)
         url = candidate.observation.url
         QApplication.clipboard().setText(url)
         self._browser_status_label.setText(f"Copied observation URL: {url}")
@@ -2271,7 +2280,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
     def _open_current_observation(self) -> None:
         candidate = self._current_visible_candidate()
         if candidate:
-            open_external_url_silently(candidate.observation.url)
+            self._open_observation(candidate)
 
     def _load_photo(self, candidate: BulkDisagreeCandidate, photo) -> None:
         target = _photo_fetch_target(photo, "large")
@@ -2706,6 +2715,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
         candidate: BulkDisagreeCandidate,
         pending: _PendingAlternatePost,
     ) -> None:
+        self._note_observation_link_used(candidate)
         recent = pending.post_taxon
         api_token = self._api_token
         worker = _AlternatePostWorker(
@@ -3937,8 +3947,8 @@ class BulkDisagreeProgressDialog(QDialog):
         self._open_review_obs_btn.clicked.connect(self._open_review_observation)
         self._open_all_review_btn = QPushButton("Open all needing review in browser")
         self._open_all_review_btn.setToolTip(
-            "Open every remaining observation that needs human review in your "
-            "browser, and skip all of them here."
+            "Open the remaining observations that need human review in your "
+            f"browser, {REVIEW_OPEN_BATCH_SIZE} at a time, and skip them here."
         )
         self._open_all_review_btn.clicked.connect(self.open_all_review_requested)
         self._review_actions.addWidget(self._copy_review_url_btn)
@@ -4084,13 +4094,18 @@ class BulkDisagreeProgressDialog(QDialog):
     def pause_on_comments_since_autovalidation(self) -> bool:
         return self._human_review_guard and self._pause_comments_cb.isChecked()
 
-    def set_paused_for_review(self, reason: str) -> None:
-        """Enter an indefinite human-review pause and show the reason."""
+    def set_paused_for_review(self, reason: str, review_backlog: int = 0) -> None:
+        """Enter an indefinite human-review pause and show the reason.
+
+        ``review_backlog`` is how many queued items still need review; it sizes
+        the batched open-in-browser button.
+        """
         self._paused = True
         self._pause_btn.setText("Resume")
         self.set_waiting()
         self._review_banner.setText(f"HUMAN REVIEW REQUIRED\n{reason}")
         self._review_banner.setVisible(True)
+        self._open_all_review_btn.setText(review_open_button_text(review_backlog))
         self._set_review_actions_visible(True)
         self.set_status(f"Paused for human review: {reason}")
         self._countdown.setText(
@@ -4291,6 +4306,24 @@ def _is_auth_failure_message(msg: str) -> bool:
         or "missing inaturalist api token" in text
         or "unauthorized" in text
     )
+
+
+# iNaturalist answers a burst of observation-page loads with HTTP 429, and
+# roughly 60 tabs opened at once was enough to trip it, so "open all needing
+# review" hands them to the browser in batches of this size.
+REVIEW_OPEN_BATCH_SIZE = 25
+
+
+def review_open_button_text(remaining: int) -> str:
+    """Label for the open-needing-review button given the remaining backlog."""
+    if remaining > REVIEW_OPEN_BATCH_SIZE:
+        return (
+            f"Open next {REVIEW_OPEN_BATCH_SIZE} of {remaining} needing review "
+            "in browser"
+        )
+    if remaining > 0:
+        return f"Open all {remaining} needing review in browser"
+    return "Open all needing review in browser"
 
 
 def _bool_default(value, default: bool) -> bool:

@@ -170,6 +170,8 @@ class StudyObservation:
     votes: List[StudyVote] = field(default_factory=list)
     provisional_species_name: str = ""
     species_name_override: str = ""
+    # Name the sequencing pipeline inferred from the barcode (MycoMap).
+    barcode_inferred_name: str = ""
     dna_barcode_its: str = ""
     quality_grade: str = ""
     obscured: bool = False
