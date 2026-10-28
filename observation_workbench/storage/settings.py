@@ -624,6 +624,24 @@ class AppSettings:
         self._s.remove("auth/inat_user_id")
         self.sync()
 
+    @property
+    def mycomap_vision_token(self) -> str:
+        """Return the saved MycoMap Vision API token.
+
+        API credentials share the same permission-hardened settings store as
+        the iNaturalist token. Callers must never log this value.
+        """
+        return self._s.value("auth/mycomap_vision_token", "", type=str).strip()
+
+    @mycomap_vision_token.setter
+    def mycomap_vision_token(self, value: str) -> None:
+        token = str(value or "").strip()
+        if token:
+            self._s.setValue("auth/mycomap_vision_token", token)
+        else:
+            self._s.remove("auth/mycomap_vision_token")
+        self.sync()
+
     # DNA linking stores only UI preferences here. Durable scan/review/write
     # state lives independently in dna_linking.db.
     @property

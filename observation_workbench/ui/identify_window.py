@@ -37,9 +37,13 @@ from PySide6.QtWidgets import (
 )
 
 from observation_workbench.api.client import INatClient
+from observation_workbench.api.mycomap_vision import MycomapVisionClient
 from observation_workbench.api.parsers import parse_observation
 from observation_workbench.models import StudyTaxon
-from observation_workbench.services.identify_session import IdentifySession
+from observation_workbench.services.identify_session import (
+    IdentifySession,
+    IdentifySessionItem,
+)
 from observation_workbench.services.image_cache import ImageCache
 from observation_workbench.services.identify_actions import (
     IdentifyActionManager,
@@ -57,6 +61,11 @@ from observation_workbench.services.prefetcher import (
     ImagePrefetcher,
     ImageRequestMode,
 )
+from observation_workbench.services.vision_taxonomy import (
+    VisionTaxonCandidate,
+    VisionTaxonResolution,
+    resolve_vision_taxa,
+)
 from observation_workbench.storage.settings import AppSettings
 from observation_workbench.ui.identify_add_id_dialog import IdentifyAddIDDialog
 from observation_workbench.ui.identify_captive_dialog import IdentifyCaptiveDialog
@@ -68,6 +77,10 @@ from observation_workbench.ui.identify_read_error import (
     format_read_failure,
     show_safe_read_failure,
 )
+from observation_workbench.ui.mycomap_vision_family_dialog import (
+    MycomapVisionFamilyDialog,
+)
+from observation_workbench.ui.mycomap_vision_panel import MycomapVisionPanel
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +155,59 @@ class _CurrentUserWorker(QRunnable):
             self.signals.loaded.emit(user_id)
         except Exception as exc:
             self.signals.failed.emit(exc)
+
+
+class _MycomapVisionSignals(QObject):
+    loaded = Signal(int, object)
+    failed = Signal(int, object)
+
+
+class _MycomapVisionWorker(QRunnable):
+    """Run one Vision lookup without blocking or retaining UI objects."""
+
+    def __init__(self, observation_id: int, token: str) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self._observation_id = int(observation_id)
+        self._token = token
+        self.signals = _MycomapVisionSignals()
+
+    def run(self) -> None:
+        try:
+            result = MycomapVisionClient().identify_inat(
+                self._observation_id,
+                self._token,
+            )
+            self.signals.loaded.emit(self._observation_id, result)
+        except Exception as exc:
+            self.signals.failed.emit(self._observation_id, exc)
+
+
+class _VisionTaxonomySignals(QObject):
+    loaded = Signal(int, object)
+    failed = Signal(int, object)
+
+
+class _VisionTaxonomyWorker(QRunnable):
+    def __init__(
+        self,
+        client: INatClient,
+        observation_id: int,
+        candidates: tuple[VisionTaxonCandidate, ...],
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self._client = client
+        self._observation_id = int(observation_id)
+        self._candidates = candidates
+        self.signals = _VisionTaxonomySignals()
+
+    def run(self) -> None:
+        try:
+            resolutions = resolve_vision_taxa(self._client, self._candidates)
+            self.signals.loaded.emit(self._observation_id, resolutions)
+        except Exception as exc:
+            self.signals.failed.emit(self._observation_id, exc)
 
 
 @dataclass
@@ -304,6 +370,17 @@ class IdentifyWindow(QMainWindow):
         self._reviewed_resolution_request_id: int | None = None
         self._current_user_id: int | None = None
         self._current_user_live_signals: set[_CurrentUserSignals] = set()
+        self._vision_results: dict[int, dict] = {}
+        self._vision_errors: dict[int, str] = {}
+        self._vision_pending_items: dict[int, IdentifySessionItem] = {}
+        self._vision_ready_ids: set[int] = set()
+        self._vision_live_signals: set[_MycomapVisionSignals] = set()
+        self._vision_family_results: dict[
+            int, tuple[VisionTaxonResolution, ...]
+        ] = {}
+        self._vision_family_generations: dict[int, int] = {}
+        self._vision_family_pending_generations: dict[int, int] = {}
+        self._vision_family_live_signals: set[_VisionTaxonomySignals] = set()
 
         self.setWindowTitle("iNaturalist Identify")
         self._prefetch = ImagePrefetcher(
@@ -407,7 +484,10 @@ class IdentifyWindow(QMainWindow):
         image_layout.addLayout(captive_controls)
 
         self._splitter.addWidget(image_side)
-        self._tabs = QTabWidget(self._splitter)
+        right_side = QWidget(self._splitter)
+        right_layout = QVBoxLayout(right_side)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self._tabs = QTabWidget(right_side)
         current_login = ""
         if self._action_manager is not None:
             snapshot = self._action_manager.current_authentication()
@@ -431,7 +511,17 @@ class IdentifyWindow(QMainWindow):
         )
         self._refresh_button.clicked.connect(self._refresh_current_observation)
         self._tabs.setCornerWidget(self._refresh_button, Qt.Corner.TopRightCorner)
-        self._splitter.addWidget(self._tabs)
+        right_layout.addWidget(self._tabs, 1)
+        self._vision_panel = MycomapVisionPanel(right_side)
+        self._vision_panel.family_comparison_requested.connect(
+            self._request_vision_family_comparison
+        )
+        self._vision_panel.id_comment_requested.connect(
+            self._copy_vision_results_to_id_comment
+        )
+        self._vision_panel.top_name_requested.connect(self._apply_vision_top_name)
+        right_layout.addWidget(self._vision_panel, 0)
+        self._splitter.addWidget(right_side)
         self._splitter.setSizes([900, 300])
         self.setCentralWidget(self._splitter)
 
@@ -456,6 +546,12 @@ class IdentifyWindow(QMainWindow):
         self._favorite_action = QAction("Favorite", self)
         self._favorite_action.triggered.connect(self._open_favorite)
         toolbar.addAction(self._favorite_action)
+        self._vision_action = QAction("Vision", self)
+        self._vision_action.setToolTip(
+            "Ask MycoMap Vision, then immediately advance (V)"
+        )
+        self._vision_action.triggered.connect(self._request_mycomap_vision)
+        toolbar.addAction(self._vision_action)
         self._refresh_action_entry_availability()
 
         self._network_label = QLabel("Network: normal", self)
@@ -501,6 +597,11 @@ class IdentifyWindow(QMainWindow):
         self._brightness = 0
         self._update_header()
         self._info_tab.set_observation(observation)
+        self._update_vision_panel(observation.obs_id)
+        self._vision_ready_ids.discard(observation.obs_id)
+        self._vision_action.setEnabled(
+            observation.obs_id not in self._vision_pending_items
+        )
         self._refresh_action_entry_availability()
         self._update_pending_action_status()
         self._ensure_thumbnail_strip(observation)
@@ -662,6 +763,284 @@ class IdentifyWindow(QMainWindow):
         self._selected_photo_id = None
         self._show_current_observation(direction=step)
 
+    def _request_mycomap_vision(self) -> None:
+        if self._closed or not self._session.items:
+            return
+        token = self._settings.mycomap_vision_token
+        if not token:
+            QMessageBox.information(
+                self,
+                "MycoMap Vision token needed",
+                "Add your Vision token under Settings → MycoMap Vision, "
+                "then press V again.",
+            )
+            return
+        item = self._session.items[self._observation_index]
+        observation_id = item.observation_id
+        if observation_id in self._vision_pending_items:
+            return
+
+        self._vision_pending_items[observation_id] = item
+        self._vision_results.pop(observation_id, None)
+        self._vision_errors.pop(observation_id, None)
+        self._vision_family_results.pop(observation_id, None)
+        self._vision_family_generations[observation_id] = (
+            self._vision_family_generations.get(observation_id, 0) + 1
+        )
+        self._vision_family_pending_generations.pop(observation_id, None)
+        worker = _MycomapVisionWorker(observation_id, token)
+        signals = worker.signals
+        self._vision_live_signals.add(signals)
+        signals.loaded.connect(
+            lambda loaded_id, result, source=signals: self._vision_finished(
+                source, loaded_id, result=result
+            )
+        )
+        signals.failed.connect(
+            lambda failed_id, exc, source=signals: self._vision_finished(
+                source, failed_id, error=exc
+            )
+        )
+
+        # Keep the only queue item visible while it runs: there is no next
+        # observation to advance to. Normal multi-item sessions remove it and
+        # immediately show the following item (or the previous one at the end).
+        if len(self._session.items) > 1:
+            self._session.items.pop(self._observation_index)
+            self._observation_index = min(
+                self._observation_index, len(self._session.items) - 1
+            )
+            self._photo_index = 0
+            self._selected_photo_id = None
+            self._sync_vision_queue_to_prefetcher()
+            self._show_current_observation(direction=1)
+        else:
+            self._vision_action.setEnabled(False)
+            self._vision_panel.clear_result()
+
+        QThreadPool.globalInstance().start(worker)
+        self.statusBar().showMessage(
+            f"MycoMap Vision is analyzing observation #{observation_id}; "
+            f"{len(self._vision_pending_items)} lookup(s) running in the background.",
+            8000,
+        )
+
+    def _vision_finished(
+        self,
+        signals: _MycomapVisionSignals,
+        observation_id: int,
+        *,
+        result: object | None = None,
+        error: object | None = None,
+    ) -> None:
+        self._vision_live_signals.discard(signals)
+        item = self._vision_pending_items.pop(int(observation_id), None)
+        if self._closed or item is None:
+            return
+
+        if isinstance(result, dict):
+            self._vision_results[observation_id] = result
+            self._vision_errors.pop(observation_id, None)
+            ready_text = "results are ready"
+        else:
+            message = str(error or "MycoMap Vision could not answer.").strip()
+            self._vision_errors[observation_id] = message
+            self._vision_results.pop(observation_id, None)
+            ready_text = "returned an error"
+
+        existing_index = next(
+            (
+                index
+                for index, candidate in enumerate(self._session.items)
+                if candidate.observation_id == observation_id
+            ),
+            None,
+        )
+        if existing_index is None:
+            insertion_index = min(
+                self._observation_index + 1, len(self._session.items)
+            )
+            self._session.items.insert(insertion_index, item)
+            self._vision_ready_ids.add(observation_id)
+            self._sync_vision_queue_to_prefetcher()
+            next_text = " It is next in the Right Arrow queue."
+        else:
+            next_text = ""
+            if existing_index == self._observation_index:
+                self._update_vision_panel(observation_id)
+                self._vision_action.setEnabled(True)
+
+        self._update_header()
+        self.statusBar().showMessage(
+            f"MycoMap Vision {ready_text} for observation #{observation_id}."
+            f"{next_text}",
+            12000,
+        )
+
+    def _sync_vision_queue_to_prefetcher(self) -> None:
+        self._prefetch.reorder_observations(self._session.observations)
+
+    def _update_vision_panel(self, observation_id: int) -> None:
+        result = self._vision_results.get(observation_id)
+        if result is not None:
+            self._vision_panel.show_result(result)
+            self._vision_panel.set_family_lookup_state(
+                loading=observation_id
+                in self._vision_family_pending_generations,
+                ready=observation_id in self._vision_family_results,
+            )
+            return
+        error = self._vision_errors.get(observation_id)
+        if error:
+            self._vision_panel.show_error(error)
+            return
+        self._vision_panel.clear_result()
+
+    def _request_vision_family_comparison(self) -> None:
+        if self._closed or not self._session.items:
+            return
+        observation_id = self._current_observation().obs_id
+        cached = self._vision_family_results.get(observation_id)
+        if cached is not None:
+            self._show_vision_family_comparison(cached)
+            return
+        if observation_id in self._vision_family_pending_generations:
+            return
+        candidates = self._vision_panel.taxon_candidates
+        if not candidates:
+            return
+
+        generation = self._vision_family_generations.get(observation_id, 0)
+        self._vision_family_pending_generations[observation_id] = generation
+        self._vision_panel.set_family_lookup_state(loading=True)
+        worker = _VisionTaxonomyWorker(self._client, observation_id, candidates)
+        signals = worker.signals
+        self._vision_family_live_signals.add(signals)
+        signals.loaded.connect(
+            lambda loaded_id, resolutions, source=signals: (
+                self._vision_family_lookup_finished(
+                    source,
+                    loaded_id,
+                    generation,
+                    resolutions=resolutions,
+                )
+            )
+        )
+        signals.failed.connect(
+            lambda failed_id, exc, source=signals: (
+                self._vision_family_lookup_finished(
+                    source,
+                    failed_id,
+                    generation,
+                    error=exc,
+                )
+            )
+        )
+        QThreadPool.globalInstance().start(worker)
+        self.statusBar().showMessage(
+            "Looking up current iNaturalist families and lineages in the background…",
+            6000,
+        )
+
+    def _vision_family_lookup_finished(
+        self,
+        signals: _VisionTaxonomySignals,
+        observation_id: int,
+        generation: int,
+        *,
+        resolutions: object | None = None,
+        error: object | None = None,
+    ) -> None:
+        self._vision_family_live_signals.discard(signals)
+        if (
+            self._vision_family_pending_generations.get(int(observation_id))
+            == generation
+        ):
+            self._vision_family_pending_generations.pop(int(observation_id), None)
+        if self._closed:
+            return
+        if self._vision_family_generations.get(observation_id, 0) != generation:
+            return
+        is_current = bool(
+            self._session.items
+            and self._current_observation().obs_id == observation_id
+        )
+        if not isinstance(resolutions, tuple) or not all(
+            isinstance(item, VisionTaxonResolution) for item in resolutions
+        ):
+            if is_current:
+                self._vision_panel.set_family_lookup_state(loading=False)
+            message = str(error or "The iNaturalist taxonomy lookup failed.").strip()
+            self.statusBar().showMessage(message, 10000)
+            if is_current and QApplication.activeWindow() is self:
+                QMessageBox.warning(self, "Family lookup failed", message)
+            return
+
+        self._vision_family_results[observation_id] = resolutions
+        if is_current:
+            self._vision_panel.set_family_lookup_state(loading=False, ready=True)
+        if is_current and QApplication.activeWindow() is self:
+            self._show_vision_family_comparison(resolutions)
+        else:
+            self.statusBar().showMessage(
+                f"Family comparison is ready for observation #{observation_id}.",
+                8000,
+            )
+
+    def _show_vision_family_comparison(
+        self, resolutions: tuple[VisionTaxonResolution, ...]
+    ) -> None:
+        dialog = MycomapVisionFamilyDialog(resolutions, self)
+        dialog.exec()
+
+    def _copy_vision_results_to_id_comment(self, text: str) -> None:
+        if self._closed or not self._session.items or not str(text).strip():
+            return
+        observation_id = self._current_observation().obs_id
+        self._open_add_id()
+        dialog = self._add_id_dialog
+        if (
+            dialog is None
+            or dialog.observation_id != observation_id
+            or not dialog.append_body_text(text)
+        ):
+            self.statusBar().showMessage(
+                "Vision results could not be added. Finish the current action, "
+                "authenticate if needed, and try again.",
+                8000,
+            )
+            return
+        dialog.raise_()
+        dialog.activateWindow()
+        self.statusBar().showMessage(
+            "MycoMap Vision results added to the identification comment.", 5000
+        )
+
+    def _apply_vision_top_name(self, taxon_name: str, comment: str) -> None:
+        name = str(taxon_name or "").strip()
+        if self._closed or not self._session.items or not name:
+            return
+        observation_id = self._current_observation().obs_id
+        self._open_add_id()
+        dialog = self._add_id_dialog
+        if (
+            dialog is None
+            or dialog.observation_id != observation_id
+            or not dialog.apply_vision_suggestion(name, comment)
+        ):
+            self.statusBar().showMessage(
+                "The top Vision name could not be applied. Finish the current action, "
+                "authenticate if needed, and try again.",
+                8000,
+            )
+            return
+        dialog.raise_()
+        dialog.activateWindow()
+        self.statusBar().showMessage(
+            f"Looking up the iNaturalist taxon for {name}; review it before submitting.",
+            6000,
+        )
+
     def _is_observation_reviewed(self, observation) -> bool:
         return (
             self._current_user_id is not None
@@ -669,6 +1048,8 @@ class IdentifyWindow(QMainWindow):
         )
 
     def _is_index_visible(self, index: int) -> bool:
+        if self._session.items[index].observation_id in self._vision_ready_ids:
+            return True
         if self._show_reviewed_checkbox.isChecked():
             return True
         return not self._is_observation_reviewed(self._session.items[index].observation)
@@ -1306,6 +1687,13 @@ class IdentifyWindow(QMainWindow):
             if not self._can_open_captive():
                 return False
             action = self._open_captive
+        elif (
+            key == Qt.Key.Key_V
+            and not has_alt_or_meta
+            and not has_shift
+            and not bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        ):
+            action = self._request_mycomap_vision
         else:
             return False
         if execute:
@@ -1367,6 +1755,7 @@ class IdentifyWindow(QMainWindow):
             "reviewed observations are hidden\n"
             "F: add or remove favorite\n"
             "X: change your Captive/Cultivated Data Quality vote\n"
+            "V: ask MycoMap Vision and immediately advance; the result returns next\n"
             "Z: toggle fit / 1:1\n"
             "Alt or Cmd + Up / Down: adjust brightness\n"
             "?: show this help",
@@ -2944,6 +3333,7 @@ class IdentifyWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._closed = True
         self._generation += 1
+        self._vision_action.setEnabled(False)
         self._agree_operation = None
         self._agree_resolution_request_id = None
         self._reviewed_operation = None

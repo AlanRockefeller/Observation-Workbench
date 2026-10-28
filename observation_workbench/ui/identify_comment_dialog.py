@@ -18,6 +18,9 @@ from observation_workbench.services.identify_actions import (
     ObservationUUIDResolution,
 )
 from observation_workbench.storage.cache_db import IdentifyEnqueueResult
+from observation_workbench.ui.clipboard_shortcuts import (
+    handle_super_clipboard_shortcut,
+)
 from observation_workbench.ui.identify_journal_dialog import IdentifyJournalDialog
 
 
@@ -92,6 +95,10 @@ class IdentifyCommentDialog(IdentifyJournalDialog):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.KeyPress or not isinstance(event, QKeyEvent):
             return super().eventFilter(watched, event)
+        if watched is self._body_edit and handle_super_clipboard_shortcut(
+            self._body_edit, event
+        ):
+            return True
         if watched is self._body_edit and event.key() in (
             Qt.Key.Key_Return,
             Qt.Key.Key_Enter,

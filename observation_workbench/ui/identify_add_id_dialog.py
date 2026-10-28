@@ -26,6 +26,9 @@ from observation_workbench.services.identify_actions import (
     IdentifyActionManager,
     ObservationUUIDResolution,
 )
+from observation_workbench.ui.clipboard_shortcuts import (
+    handle_super_clipboard_shortcut,
+)
 from observation_workbench.ui.taxon_autocomplete import TaxonAutocompleteField
 
 log = logging.getLogger(__name__)
@@ -170,9 +173,44 @@ class IdentifyAddIDDialog(QDialog):
         outer.addLayout(button_row)
         self._refresh_submit_enabled()
 
+    @property
+    def observation_id(self) -> int:
+        return self._observation_id
+
+    def append_body_text(self, text: str) -> bool:
+        """Append externally prepared text without overwriting user intent."""
+        value = str(text or "").strip()
+        if self._closed or self._busy or not value:
+            return False
+        existing = self._body_edit.toPlainText().rstrip()
+        self._body_edit.setPlainText(f"{existing}\n\n{value}" if existing else value)
+        cursor = self._body_edit.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._body_edit.setTextCursor(cursor)
+        return True
+
+    def apply_vision_suggestion(self, taxon_name: str, comment: str) -> bool:
+        """Resolve a Vision name and provide its comment as an editable default."""
+        name = str(taxon_name or "").strip()
+        if self._closed or self._busy or not name:
+            return False
+        existing_name = self._taxon_field.line_edit.text().strip()
+        if existing_name and existing_name.casefold() != name.casefold():
+            return False
+        if not self._taxon_field.search_exact_name(name):
+            return False
+        if not self._body_edit.toPlainText().strip():
+            self._body_edit.setPlainText(str(comment or "").strip())
+        self._taxon_field.focus_editor()
+        return True
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.KeyPress or not isinstance(event, QKeyEvent):
             return super().eventFilter(watched, event)
+        if watched is self._body_edit and handle_super_clipboard_shortcut(
+            self._body_edit, event
+        ):
+            return True
         if event.key() not in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             return super().eventFilter(watched, event)
         if watched is self._body_edit:

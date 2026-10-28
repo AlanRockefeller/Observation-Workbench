@@ -160,6 +160,7 @@ class StudyObservation:
     observer_login: str
     uuid: str = ""
     observed_on: str = ""
+    time_observed_at: str = ""
     place_guess: str = ""
     taxon: Optional[StudyTaxon] = None  # observation's own taxon (obs taxon)
     community_taxon: Optional[StudyTaxon] = None  # community ID taxon
