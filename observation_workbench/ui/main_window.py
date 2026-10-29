@@ -2628,7 +2628,7 @@ class MainWindow(QMainWindow):
         if is_url_query:
             log.debug(
                 "Loading iNaturalist query URL: %s taxon_id=%s",
-                observation_query.display_url,
+                observation_query.display_url.split("?", 1)[0],
                 filters_dict.get("taxon_id"),
             )
             self._status_label.setText(

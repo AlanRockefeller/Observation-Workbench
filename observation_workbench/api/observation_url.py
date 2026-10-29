@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
 
 QueryParams = List[Tuple[str, str]]
 
@@ -105,7 +105,7 @@ def parse_observations_url(text: str) -> Optional[ObservationURLQuery]:
         # Query parameters on a project page control that page (for example,
         # its selected tab); they are not observation-search parameters. The
         # path's project ID or slug is the complete API translation.
-        params = [("project_id", project_match.group(1))]
+        params = [("project_id", unquote(project_match.group(1)))]
         sources = ["Project URL"]
     else:
         raise ObservationURLParseError(

@@ -1348,10 +1348,15 @@ class IdentifyWindow(QMainWindow):
                 0,
             ):
                 continue
-            if not self._session.replace(observation):
-                continue
+            in_session = self._session.replace(observation)
+            if not in_session:
+                pending = self._vision_pending_items.get(observation.obs_id)
+                if pending is None:
+                    continue
+                pending.observation = observation
             returned_ids.add(observation.obs_id)
-            self._prefetch.replace_observation(observation)
+            if in_session:
+                self._prefetch.replace_observation(observation)
             state = self._detail_states[observation.obs_id]
             state.status = "complete"
             state.retry_after = 0.0
@@ -1768,21 +1773,28 @@ class IdentifyWindow(QMainWindow):
         :meth:`_reconcile_current_after_detail` deliberately preserves its view
         state, including zoom, pan, and brightness.
         """
-        if self._closed or not self._session.replace(observation):
+        if self._closed:
             return False
+        in_session = self._session.replace(observation)
+        if not in_session:
+            pending = self._vision_pending_items.get(observation.obs_id)
+            if pending is None:
+                return False
+            pending.observation = observation
         # The authoritative observation now reflects the confirmed write, so
         # the optimistic placeholder is retired without any further notice.
         self._optimistic_taxa.pop(observation.obs_id, None)
         self._observation_refresh_versions[observation.obs_id] = (
             self._observation_refresh_versions.get(observation.obs_id, 0) + 1
         )
-        self._prefetch.replace_observation(observation)
+        if in_session:
+            self._prefetch.replace_observation(observation)
         state = self._detail_states.setdefault(observation.obs_id, _DetailState())
         state.status = "complete"
         state.retry_after = 0.0
         state.automatic_attempts = 0
         state.diagnostic = ""
-        if observation.obs_id == self._current_observation().obs_id:
+        if in_session and observation.obs_id == self._current_observation().obs_id:
             self._reconcile_current_after_detail(self._selected_photo_id)
         return True
 

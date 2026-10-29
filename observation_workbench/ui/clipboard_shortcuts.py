@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 
@@ -13,6 +15,8 @@ def handle_super_clipboard_shortcut(widget: object, event: QKeyEvent) -> bool:
     Super-key bindings used by this desktop. Keep ordinary Qt handling intact
     and translate only an otherwise-unmodified Meta shortcut.
     """
+    if not sys.platform.startswith("linux"):
+        return False
     modifiers = event.modifiers()
     if not modifiers & Qt.KeyboardModifier.MetaModifier:
         return False

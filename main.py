@@ -41,6 +41,15 @@ _FILE_LOG_QUIET_LOGGERS = (
 )
 
 
+def _file_log_allows(record: logging.LogRecord) -> bool:
+    """Suppress high-volume image DEBUG records only in the file log."""
+    is_quiet_logger = any(
+        record.name == name or record.name.startswith(f"{name}.")
+        for name in _FILE_LOG_QUIET_LOGGERS
+    )
+    return not is_quiet_logger or record.levelno >= logging.INFO
+
+
 def main() -> None:
     global _INSTANCE_LOCK
     parser = argparse.ArgumentParser(description="Observation Workbench")
@@ -211,7 +220,8 @@ def _install_file_log(log_dir: Path) -> None:
     """
     log = logging.getLogger(__name__)
     try:
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        log_dir.chmod(0o700)
         handler = logging.handlers.TimedRotatingFileHandler(
             log_dir / LOG_FILE_NAME,
             when="midnight",
@@ -222,6 +232,7 @@ def _install_file_log(log_dir: Path) -> None:
         log.warning("File logging disabled: %s", exc)
         return
     handler.setLevel(logging.DEBUG)
+    handler.addFilter(_file_log_allows)
     handler.setFormatter(
         logging.Formatter(
             "%(asctime)s %(levelname)-8s %(threadName)s %(name)s: %(message)s"
@@ -229,8 +240,6 @@ def _install_file_log(log_dir: Path) -> None:
     )
     logging.getLogger().addHandler(handler)
     logging.getLogger("observation_workbench").setLevel(logging.DEBUG)
-    for name in _FILE_LOG_QUIET_LOGGERS:
-        logging.getLogger(name).setLevel(logging.INFO)
 
     previous_hook = sys.excepthook
 

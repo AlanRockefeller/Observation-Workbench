@@ -259,7 +259,7 @@ def assess_dna_backed_target(
                     f"{target.taxon.name} differs from the {source} ({expected})",
                 )
             )
-        elif not autovalidated:
+        else:
             reasons.append(
                 ReviewReason(
                     REVIEW_UNCONFIRMED,

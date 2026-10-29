@@ -77,7 +77,7 @@ observation-workbench
 | Exact rank       | Show only identifications at the chosen rank                                                 |
 | From / To        | Optional date range filter                                                                   |
 
-When you use an observations URL, its query becomes the base query. A project URL becomes a `project_id` query, which includes the child projects of an umbrella project. Taxon can still narrow either URL further. Username-only controls like Leading IDs only and rank filtering are ignored in URL mode.
+When you use an observations URL, its query becomes the base query. A project URL becomes a `project_id` query, which includes the child projects of an umbrella project. The Taxon field adds a `taxon_id` to either URL; for an observations URL that already has `taxon_id`, the selected Taxon replaces it. Username-only controls like Leading IDs only and rank filtering are ignored in URL mode.
 
 Example:
 `https://www.inaturalist.org/observations?place_id=14&taxon_id=63421&field:DNA%20Barcode%20ITS=`

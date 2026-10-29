@@ -344,9 +344,7 @@ def parse_observation(
             observed_on=raw_obs.get("observed_on", "")
             or raw_obs.get("observed_on_string", "")
             or "",
-            time_observed_at=raw_obs.get("time_observed_at", "")
-            or raw_obs.get("observed_on_string", "")
-            or "",
+            time_observed_at=raw_obs.get("time_observed_at", "") or "",
             place_guess=raw_obs.get("place_guess", "") or "",
             taxon=obs_taxon,
             community_taxon=community_taxon,
