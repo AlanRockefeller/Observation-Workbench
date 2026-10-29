@@ -75,8 +75,8 @@ class AutovalidatedIdSetupDialog(QDialog):
             "Finds observations that carry a DNA Barcode ITS sequence and an "
             f"automated identification comment from @{AUTOVALIDATOR_LOGIN}, but whose "
             "community consensus is not yet the autovalidated name. The name is read "
-            "from the observation's Provisional Species Name field, falling back to "
-            "Species Name Override, and is matched to an iNaturalist taxon by exact "
+            "from the observation's Species Name Override field, falling back to "
+            "Provisional Species Name, and is matched to an iNaturalist taxon by exact "
             "name only — a near miss is never accepted. Observations whose observer "
             'set "ID Update Needed" to "Yes" are excluded, and you review every '
             "observation and its photos before anything is posted."

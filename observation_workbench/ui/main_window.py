@@ -34,6 +34,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     QSize,
+    QUrl,
     Signal,
     Slot,
     QEvent,
@@ -75,13 +76,23 @@ from observation_workbench.api.observation_url import (
 )
 from observation_workbench.models import StudyObservation
 from observation_workbench.services.bulk_identification import (
+    RECHECK_AFTER_SECONDS,
+    REVIEW_COMMENTS,
+    REVIEW_FAMILY_CONFLICT,
+    REVIEW_LATER_ID,
     BulkAgreeCandidate,
     BulkAgreePlanResult,
     BulkAgreePlanStats,
-    plan_provisional_candidates,
+    assess_dna_backed_target,
+    candidate_from_assessment,
+    plan_dna_backed_candidates,
+    proposal_applies,
+    provisional_name_settled,
+    weighed_in_recently,
 )
 from observation_workbench.services.autovalidated_ids import (
     needs_autovalidated_human_review,
+    normalize_taxon_name,
     plan_autovalidated_id_candidates,
     post_autovalidated_identification,
 )
@@ -102,9 +113,8 @@ from observation_workbench.services.identification_actions import (
     agree_with_most_recent,
     already_current_taxon,
     build_agreement_comment,
+    current_user_identification,
     make_target_from_ident,
-    most_recent_non_self_current_identification,
-    needs_human_review,
     post_agreement,
     previously_withdrew_taxon,
     refresh_observation,
@@ -291,18 +301,15 @@ class _BulkPlanWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            result = plan_provisional_candidates(
+            result = plan_dna_backed_candidates(
                 self.loader,
                 self.filters,
                 self.login,
                 api_token=self.api_token,
                 max_observations=self.options.get("max_observations"),
-                require_dna_barcode_its=self.options.get(
-                    "require_dna_barcode_its", True
-                ),
                 only_if_needed=self.options.get("only_if_needed", True),
                 # The URL results are re-scanned on every run, so a cached page
-                # could hide a provisional ID added since the last load.
+                # could hide an identification added since the last load.
                 use_cache=False,
                 is_cancelled=lambda: self.get_gen() != self.generation,
                 progress=lambda seen, total: self.signals.progress.emit(seen, total),
@@ -320,6 +327,13 @@ class _BulkPostSignals(QObject):
 
 
 class _BulkPostWorker(QRunnable):
+    """Post one DNA-backed agreement, re-reading the observation only when stale.
+
+    A snapshot younger than a day that the operator never opened or copied is
+    posted as planned: nobody else is likely to have changed it in the meantime,
+    and skipping the read halves the requests per item.
+    """
+
     def __init__(
         self,
         client: INatClient,
@@ -330,6 +344,8 @@ class _BulkPostWorker(QRunnable):
         allow_changed_target: bool = False,
         dry_run: bool = False,
         only_if_needed: bool = True,
+        refresh_before_post: bool = True,
+        allow_new_review: bool = False,
     ) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -341,111 +357,198 @@ class _BulkPostWorker(QRunnable):
         self.allow_changed_target = allow_changed_target
         self.dry_run = dry_run
         self.only_if_needed = only_if_needed
+        self.refresh_before_post = refresh_before_post
+        self.allow_new_review = allow_new_review
         self.signals = _BulkPostSignals()
+
+    def _finish(self, status: str, message: str, **kwargs) -> None:
+        self.signals.finished.emit(
+            self.candidate, AgreeResult(status, message, **kwargs)
+        )
 
     def run(self) -> None:
         try:
-            fresh = refresh_observation(
-                self.client,
-                self.token,
-                self.candidate.observation.obs_id,
-            )
-            if fresh is None:
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "skipped", "Could not refresh observation before posting."
-                    ),
+            if self.candidate.review_only:
+                self._finish(
+                    "skipped",
+                    "No species-level identification to agree with; left for "
+                    "manual follow-up.",
                 )
                 return
-            ident = most_recent_non_self_current_identification(
-                fresh,
-                self.login,
-                provisional_only=True,
-            )
-            if ident is None:
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "skipped",
-                        "No current non-self provisional identification remains.",
-                        refreshed_observation=fresh,
-                    ),
-                )
-                return
-            target = make_target_from_ident(fresh, ident)
-            taxon_changed = target.taxon_id != self.candidate.target.taxon_id
-            source_changed_only = (
-                target.source_ident_id != self.candidate.target.source_ident_id
-                and not taxon_changed
-            )
-            if source_changed_only:
-                log.info(
-                    "Bulk provisional source identification changed without taxon change "
-                    "obs=%s preview_source=%s preview_ident_id=%s current_source=%s current_ident_id=%s taxon=%s taxon_id=%s",
-                    self.candidate.observation.obs_id,
-                    self.candidate.target.source_login or "unknown",
-                    self.candidate.target.source_ident_id,
-                    target.source_login or "unknown",
-                    target.source_ident_id,
-                    target.taxon_name,
-                    target.taxon_id,
-                )
-            if previously_withdrew_taxon(fresh, self.login, target.taxon_id):
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "skipped",
-                        "Skipped because you previously withdrew this provisional ID.",
-                        target=target,
-                        refreshed_observation=fresh,
-                    ),
-                )
-                return
-            if self.only_if_needed and observation_finished_at_target(
-                fresh, target.taxon_id
-            ):
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "skipped",
-                        f"Skipped because already Research Grade for {target.taxon_name}.",
-                        target=target,
-                        refreshed_observation=fresh,
-                    ),
-                )
-                return
-            if taxon_changed and not self.allow_changed_target:
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "changed",
-                        "The current provisional target taxon changed after refresh.",
-                        target=target,
-                        refreshed_observation=fresh,
-                    ),
-                )
-                return
+            if self.refresh_before_post:
+                checked = self._recheck()
+                if checked is None:
+                    return
+                obs, target = checked
+            else:
+                obs, target = self.candidate.observation, self.candidate.target
             if self.dry_run:
-                self.signals.finished.emit(
-                    self.candidate,
-                    AgreeResult(
-                        "skipped",
-                        (
-                            f"Dry run: would agree with {target.taxon_name} on "
-                            f"observation {fresh.obs_id}."
-                        ),
-                        target=target,
-                        refreshed_observation=fresh,
+                self._finish(
+                    "skipped",
+                    (
+                        f"Dry run: would "
+                        f"{'propose' if self.candidate.proposes_name else 'agree with'} "
+                        f"{target.taxon_name} on observation {obs.obs_id}."
                     ),
+                    target=target,
+                    refreshed_observation=obs,
                 )
                 return
             result = post_agreement(
-                self.client, self.token, self.login, fresh, target, self.body
+                self.client,
+                self.token,
+                self.login,
+                obs,
+                target,
+                self.body,
+                refresh_after=False,
             )
             self.signals.finished.emit(self.candidate, result)
         except Exception as exc:
             self.signals.error.emit(self.candidate, _format_api_error(exc))
+
+    def _recheck(self):
+        """Re-read and re-assess; emit and return None when it should not post."""
+        fresh = refresh_observation(
+            self.client,
+            self.token,
+            self.candidate.observation.obs_id,
+        )
+        if fresh is None:
+            self._finish("skipped", "Could not refresh observation before posting.")
+            return None
+        # Checked before the ident-changed guard: after a write error the
+        # failed-looking post may have landed, and that must not post again.
+        if already_current_taxon(fresh, self.login, self.candidate.target.taxon_id):
+            self._finish(
+                "skipped",
+                f"Already currently identified as {self.candidate.target.taxon_name}.",
+                refreshed_observation=fresh,
+            )
+            return None
+        mine = current_user_identification(fresh, self.login)
+        if (
+            self.candidate.checked_at > 0
+            and (mine.ident_id if mine else None) != self.candidate.user_ident_id
+        ):
+            self._finish(
+                "skipped",
+                "Your identification changed since this observation was checked; "
+                "leaving it as you set it.",
+                refreshed_observation=fresh,
+            )
+            return None
+        if weighed_in_recently(fresh, self.login, time.time()):
+            self._finish(
+                "skipped",
+                "You identified or commented on this within the last hour; "
+                "leaving it as you left it.",
+                refreshed_observation=fresh,
+            )
+            return None
+        assessment = assess_dna_backed_target(fresh, self.login)
+        if (
+            self.candidate.proposes_name
+            and assessment is not None
+            and proposal_applies(assessment)
+        ):
+            return self._recheck_proposal(fresh, assessment)
+        # A proposal that somebody else's species-level ID has overtaken falls
+        # through to the ordinary agreement checks below.
+        if assessment is None or assessment.review_only:
+            self._finish(
+                "skipped",
+                "No current species-level identification by somebody else remains.",
+                refreshed_observation=fresh,
+            )
+            return None
+        target = make_target_from_ident(fresh, assessment.target)
+        taxon_changed = target.taxon_id != self.candidate.target.taxon_id
+        if (
+            target.source_ident_id != self.candidate.target.source_ident_id
+            and not taxon_changed
+        ):
+            log.info(
+                "Bulk DNA-backed source identification changed without taxon change "
+                "obs=%s preview_source=%s preview_ident_id=%s current_source=%s current_ident_id=%s taxon=%s taxon_id=%s",
+                self.candidate.observation.obs_id,
+                self.candidate.target.source_login or "unknown",
+                self.candidate.target.source_ident_id,
+                target.source_login or "unknown",
+                target.source_ident_id,
+                target.taxon_name,
+                target.taxon_id,
+            )
+        if previously_withdrew_taxon(fresh, self.login, target.taxon_id):
+            self._finish(
+                "skipped",
+                "Skipped because you previously withdrew this ID.",
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        if self.only_if_needed and observation_finished_at_target(
+            fresh, target.taxon_id
+        ):
+            self._finish(
+                "skipped",
+                f"Skipped because already Research Grade for {target.taxon_name}.",
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        if taxon_changed and not self.allow_changed_target:
+            self._finish(
+                "changed",
+                "The DNA-backed target taxon changed after refresh.",
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        known = {reason.kind for reason in self.candidate.review_reasons}
+        new_reasons = [
+            reason.text
+            for reason in assessment.review_reasons
+            if reason.kind not in known
+        ]
+        if new_reasons and not self.allow_new_review:
+            self._finish(
+                "review",
+                " and ".join(new_reasons),
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        return fresh, target
+
+
+    def _recheck_proposal(self, fresh: StudyObservation, assessment):
+        """Re-confirm a provisional-name proposal; emit and return None to stop."""
+        target = self.candidate.target
+        if not (
+            self.candidate.proposal_taxon is not None
+            and provisional_name_settled(
+                fresh, assessment.expected_name, self.candidate.proposal_taxon
+            )
+            and normalize_taxon_name(assessment.expected_name)
+            == normalize_taxon_name(target.taxon_name)
+        ):
+            self._finish(
+                "review",
+                f"{target.taxon_name} is no longer an undisputed DNA-backed name",
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        if previously_withdrew_taxon(fresh, self.login, target.taxon_id):
+            self._finish(
+                "skipped",
+                "Skipped because you previously withdrew this ID.",
+                target=target,
+                refreshed_observation=fresh,
+            )
+            return None
+        return fresh, target
 
 
 class _AutovalidatedIdPlanSignals(QObject):
@@ -1317,6 +1420,8 @@ class MainWindow(QMainWindow):
         self._bulk_dialog = None
         self._bulk_resume_after_auth = False
         self._bulk_deferred_review_keys: set[tuple[int, int]] = set()
+        self._bulk_touched_obs_ids: set[int] = set()
+        self._bulk_allow_new_review_keys: set[tuple[int, int]] = set()
         self._bulk_agree_options: dict = {}
         self._pending_target_obs_id: Optional[int] = None
         self._pending_target_taxon: str = ""
@@ -1736,9 +1841,10 @@ class MainWindow(QMainWindow):
         action_menu.addAction(act_dna_vote_review)
         action_menu.addSeparator()
 
-        act_bulk_provisional = QAction("Agree to provisional IDs…", self)
+        act_bulk_provisional = QAction("Agree to DNA-backed IDs…", self)
         act_bulk_provisional.setToolTip(
-            "Preview and supervise provisional-name agreements from an observations URL"
+            "Preview and supervise agreements with DNA-backed identifications "
+            "(provisional or published names) from an observations URL"
         )
         act_bulk_provisional.triggered.connect(self._start_bulk_agree_setup)
         action_menu.addAction(act_bulk_provisional)
@@ -1805,6 +1911,13 @@ class MainWindow(QMainWindow):
         act_debug_level.setObjectName("act_debug_level")
         act_debug_level.triggered.connect(self._toggle_debug_logging)
         debug_menu.addAction(act_debug_level)
+
+        act_open_logs = QAction("Open Log &Folder", self)
+        act_open_logs.setToolTip(
+            "Open the folder holding the rotating log file (kept for two days)."
+        )
+        act_open_logs.triggered.connect(self._open_log_folder)
+        debug_menu.addAction(act_open_logs)
 
         debug_menu.addSeparator()
         act_cache_info = QAction("Cache &info…", self)
@@ -2247,9 +2360,10 @@ class MainWindow(QMainWindow):
     def _toggle_debug_logging(self, checked: bool) -> None:
         level = logging.DEBUG if checked else logging.INFO
         logging.getLogger().setLevel(level)
-        # Also set the log handler level
+        # Also set the panel/terminal handler levels; the file log always
+        # records DEBUG and is left alone.
         for h in logging.getLogger().handlers:
-            if hasattr(h, "signals"):  # our QtLogHandler
+            if not isinstance(h, logging.FileHandler):
                 h.setLevel(level)
         log.info("Log level set to %s", "DEBUG" if checked else "INFO")
 
@@ -2446,7 +2560,7 @@ class MainWindow(QMainWindow):
         source_text = filters_dict.get("username", "").strip()
         if not source_text:
             self._status_label.setText(
-                "Please enter an identifier username or observations URL."
+                "Please enter an identifier username, observations URL, or project URL."
             )
             return
         try:
@@ -2513,8 +2627,8 @@ class MainWindow(QMainWindow):
         ctx = " · ".join(p for p in [place, taxon] if p)
         if is_url_query:
             log.debug(
-                "Loading observations URL: %s taxon_id=%s",
-                observation_query.display_url,
+                "Loading iNaturalist query URL: %s taxon_id=%s",
+                observation_query.display_url.split("?", 1)[0],
                 filters_dict.get("taxon_id"),
             )
             self._status_label.setText(
@@ -2687,7 +2801,7 @@ class MainWindow(QMainWindow):
 
         if total == 0 or loaded_count == 0:
             if getattr(self._current_filters, "observation_query", None):
-                msg = "No results found. Check the observations URL or try a different query."
+                msg = "No results found. Check the iNaturalist URL or try a different query."
             else:
                 msg = "No results found. Check username, filters, or try a different query."
             self._status_label.setText(msg)
@@ -3625,7 +3739,7 @@ class MainWindow(QMainWindow):
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             self._status_label.setText(
-                "Provisional agreement workflow cancelled before planning."
+                "DNA-backed agreement workflow cancelled before planning."
             )
             return
 
@@ -3636,7 +3750,7 @@ class MainWindow(QMainWindow):
             if filters is None:
                 QMessageBox.information(
                     self,
-                    "Agree to Provisional IDs",
+                    "Agree to DNA-Backed IDs",
                     "Load a query before running the workflow against it.",
                 )
                 return
@@ -3647,25 +3761,25 @@ class MainWindow(QMainWindow):
                 apply_taxon_filter_to_observation_url=False,
             )
         self._bulk_agree_options = {
-            "require_dna_barcode_its": dlg.require_dna_barcode_its(),
             "only_if_needed": dlg.only_if_needed(),
             "max_observations": dlg.max_observations(),
             "delay_min_seconds": dlg.delay_min_seconds(),
             "delay_max_seconds": dlg.delay_max_seconds(),
             "dry_run": dlg.dry_run(),
+            "tag_other_identifiers": dlg.tag_other_identifiers(),
         }
-        self._start_bulk_provisional_plan(filters)
+        self._start_bulk_dna_plan(filters)
 
     def _bulk_agree_setup_defaults(self) -> dict:
         return {
             "url": self._settings.bulk_agree_url,
             "source_mode": self._settings.bulk_agree_source_mode,
-            "require_dna_barcode_its": self._settings.bulk_agree_require_dna_barcode_its,
             "only_if_needed": self._settings.bulk_agree_only_if_needed,
             "max_observations": self._settings.bulk_agree_max_observations,
             "delay_min_seconds": self._settings.bulk_agree_delay_min_seconds,
             "delay_max_seconds": self._settings.bulk_agree_delay_max_seconds,
             "dry_run": self._settings.bulk_agree_dry_run,
+            "tag_other_identifiers": self._settings.bulk_agree_tag_other_identifiers,
         }
 
     def _save_bulk_agree_setup_defaults(self, dlg) -> None:
@@ -3675,14 +3789,12 @@ class MainWindow(QMainWindow):
         )
         if query is not None:
             self._settings.bulk_agree_url = query.display_url
-        self._settings.bulk_agree_require_dna_barcode_its = (
-            dlg.require_dna_barcode_its()
-        )
         self._settings.bulk_agree_only_if_needed = dlg.only_if_needed()
         self._settings.bulk_agree_max_observations = dlg.max_observations()
         self._settings.bulk_agree_delay_min_seconds = dlg.delay_min_seconds()
         self._settings.bulk_agree_delay_max_seconds = dlg.delay_max_seconds()
         self._settings.bulk_agree_dry_run = dlg.dry_run()
+        self._settings.bulk_agree_tag_other_identifiers = dlg.tag_other_identifiers()
         self._settings.sync()
 
     def _bulk_agree_current_url_prefill(self) -> str:
@@ -3701,10 +3813,13 @@ class MainWindow(QMainWindow):
             return f"Observations by {filters.username}"
         return "The query currently loaded in the viewer"
 
-    def _start_bulk_provisional_plan(self, filters: LoadFilters) -> None:
+    def _start_bulk_dna_plan(self, filters: LoadFilters) -> None:
         self._bulk_generation = getattr(self, "_bulk_generation", 0) + 1
         gen = self._bulk_generation
-        self._status_label.setText("Planning provisional-name agreements…")
+        # Observations the operator opens or copies from here on are re-read
+        # before posting, since they may have identified them by hand.
+        self._bulk_touched_obs_ids.clear()
+        self._status_label.setText("Planning DNA-backed agreements…")
         worker = _BulkPlanWorker(
             self._loader,
             filters,
@@ -3760,31 +3875,35 @@ class MainWindow(QMainWindow):
             )
         if stats.skipped_previously_withdrew:
             skip_notes.append(
-                f"{stats.skipped_previously_withdrew} skipped — previously withdrew this provisional ID"
+                f"{stats.skipped_previously_withdrew} skipped — previously withdrew this ID"
             )
         status_note = f"  ({', '.join(skip_notes)})" if skip_notes else ""
+        review_note = (
+            f" ({stats.review_count} need human review)" if stats.review_count else ""
+        )
 
         if not candidates:
             self._status_label.setText(
-                f"No provisional non-self IDs need agreement.{status_note}"
+                f"No DNA-backed IDs need agreement.{status_note}"
             )
             QMessageBox.information(
                 self,
-                "Agree to Provisional IDs",
-                "No current non-self provisional IDs were found that need your "
+                "Agree to DNA-Backed IDs",
+                "No DNA-backed identifications were found that need your "
                 "agreement.\n\n" + format_agree_plan_stats(stats),
             )
             return
 
         self._status_label.setText(
-            f"Found {len(candidates)} provisional IDs to preview.{status_note}"
+            f"Found {len(candidates)} DNA-backed IDs to preview{review_note}.{status_note}"
         )
         if self._skip_agree_confirmation:
             self._status_label.setText(
-                f"Found {len(candidates)} provisional IDs; starting without preview.{status_note}"
+                f"Found {len(candidates)} DNA-backed IDs{review_note}; starting without "
+                f"preview.{status_note}"
             )
             log.info(
-                "Skipping bulk provisional agreement preview confirmation due to --skipagree"
+                "Skipping bulk DNA-backed agreement preview confirmation due to --skipagree"
             )
             self._start_bulk_execution(candidates, stats)
             return
@@ -3798,27 +3917,28 @@ class MainWindow(QMainWindow):
             login=self._auth_state.login,
             on_skip_forever=self._add_bulk_agree_skip_for_candidate,
             on_unskip_forever=self._remove_bulk_agree_skip_for_candidate,
+            on_observation_link_used=self._bulk_touched_obs_ids.add,
             request_reauthentication=self._reauthenticate_photo_browser,
             dry_run=self._bulk_agree_options.get("dry_run", False),
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             if dlg.back_requested():
-                self._status_label.setText("Returned to provisional agreement setup.")
+                self._status_label.setText("Returned to DNA-backed agreement setup.")
                 QTimer.singleShot(0, self._start_bulk_agree_setup)
                 return
             self._status_label.setText(
-                "Bulk provisional agreement cancelled before posting."
+                "Bulk DNA-backed agreement cancelled before posting."
             )
             return
         candidates = dlg.candidates()
         if not candidates:
             self._status_label.setText(
-                "Bulk provisional agreement cancelled: no candidates remain."
+                "Bulk DNA-backed agreement cancelled: no candidates remain."
             )
             QMessageBox.information(
                 self,
-                "Agree to Provisional IDs",
+                "Agree to DNA-Backed IDs",
                 "No candidates remain after photo browsing.",
             )
             return
@@ -3855,15 +3975,17 @@ class MainWindow(QMainWindow):
             stats.skipped_previously_withdrew if stats else 0
         )
         self._bulk_deferred_review_keys = set()
+        self._bulk_allow_new_review_keys = set()
         self._bulk_resume_after_auth = False
         self._bulk_cancelled = False
         self._bulk_paused = False
         self._bulk_dialog = BulkAgreeProgressDialog(
             self,
-            delay_min_seconds=options.get("delay_min_seconds", 10),
-            delay_max_seconds=options.get("delay_max_seconds", 30),
+            delay_min_seconds=options.get("delay_min_seconds", 0),
+            delay_max_seconds=options.get("delay_max_seconds", 0),
             dry_run=options.get("dry_run", False),
         )
+        self._bulk_dialog.observation_link_used.connect(self._bulk_mark_current_touched)
         self._bulk_dialog.cancel_requested.connect(self._bulk_cancel)
         self._bulk_dialog.skip_requested.connect(self._bulk_skip_current)
         self._bulk_dialog.skip_forever_requested.connect(self._bulk_skip_forever)
@@ -3901,7 +4023,7 @@ class MainWindow(QMainWindow):
                     "Moved item needing human review to the end of the queue."
                 )
             log.debug(
-                "Bulk provisional agreement deferred for human review obs=%s taxon=%s reason=%s",
+                "Bulk DNA-backed agreement deferred for human review obs=%s taxon=%s reason=%s",
                 candidate.observation.obs_id,
                 candidate.target.taxon_name,
                 review_reason,
@@ -3911,19 +4033,24 @@ class MainWindow(QMainWindow):
         self._pending_target_taxon = candidate.target.taxon_name
         self._show_workflow_observation(candidate.observation)
         if self._bulk_dialog:
-            comment = build_agreement_comment(
-                candidate.observation,
-                self._auth_state.login,
-                candidate.target.taxon_id,
-            )
             self._bulk_dialog.show_candidate(
                 self._bulk_index,
                 len(self._bulk_candidates),
                 candidate,
-                comment=comment,
+                comment=self._bulk_agreement_comment(candidate),
             )
             self._bulk_dialog.set_status("Reviewing refreshed target before posting.")
         self._bulk_start_delay(force_pause_reason=review_reason)
+
+    def _bulk_agreement_comment(self, candidate: BulkAgreeCandidate) -> str:
+        """@-mentions to pre-fill, only when the setup dialog opted into tagging."""
+        if not self._bulk_agree_options.get("tag_other_identifiers"):
+            return ""
+        return build_agreement_comment(
+            candidate.observation,
+            self._auth_state.login,
+            candidate.target.taxon_id,
+        )
 
     def _bulk_candidate_key(self, candidate: BulkAgreeCandidate) -> tuple[int, int]:
         return candidate.observation.obs_id, candidate.target.taxon_id
@@ -3931,16 +4058,19 @@ class MainWindow(QMainWindow):
     def _bulk_review_reason(self, candidate: BulkAgreeCandidate) -> str:
         if not self._bulk_dialog:
             return ""
-        recent_not_prov, has_comments = needs_human_review(
-            candidate.observation,
-            candidate.target,
-            self._auth_state.login,
-        )
         reasons = []
-        if recent_not_prov and self._bulk_dialog.pause_on_recent_not_provisional():
-            reasons.append("most recent identification is not provisional")
-        if has_comments and self._bulk_dialog.pause_on_comments_since():
-            reasons.append("comments exist since the provisional name was proposed")
+        for reason in candidate.review_reasons:
+            if (
+                reason.kind == REVIEW_LATER_ID
+                and not self._bulk_dialog.pause_on_later_identification()
+            ):
+                continue
+            if (
+                reason.kind == REVIEW_COMMENTS
+                and not self._bulk_dialog.pause_on_comments_since()
+            ):
+                continue
+            reasons.append(reason.text)
         if candidate.ai_review and candidate.ai_review.requires_human_review:
             reasons.append(f"AI review: {candidate.ai_review.short_text()}")
         return " and ".join(reasons)
@@ -3976,7 +4106,10 @@ class MainWindow(QMainWindow):
         if force_pause_reason:
             self._bulk_paused = True
             if self._bulk_dialog:
-                self._bulk_dialog.set_paused_for_review(force_pause_reason)
+                self._bulk_dialog.set_paused_for_review(
+                    force_pause_reason,
+                    review_backlog=len(self._bulk_review_indices()),
+                )
             return
         if self._bulk_dialog:
             self._bulk_dialog.set_waiting()
@@ -3991,7 +4124,7 @@ class MainWindow(QMainWindow):
 
     def _bulk_delay_range(self) -> tuple[int, int]:
         if not self._bulk_dialog:
-            return 10, 30
+            return 0, 0
         return (
             self._bulk_dialog.delay_min_seconds(),
             self._bulk_dialog.delay_max_seconds(),
@@ -4046,7 +4179,7 @@ class MainWindow(QMainWindow):
             self._bulk_paused = False
             self._bulk_skipped += 1
             log.info(
-                "Bulk provisional agreement skipped obs=%s taxon=%s",
+                "Bulk DNA-backed agreement skipped obs=%s taxon=%s",
                 self._bulk_candidates[self._bulk_index].observation.obs_id,
                 self._bulk_candidates[self._bulk_index].target.taxon_name,
             )
@@ -4068,7 +4201,7 @@ class MainWindow(QMainWindow):
             self._db.add_bulk_agree_skip(obs_id)
             self._bulk_skipped += 1
             log.info(
-                "Bulk provisional agreement skipped forever obs=%s taxon=%s",
+                "Bulk DNA-backed agreement skipped forever obs=%s taxon=%s",
                 obs_id,
                 candidate.target.taxon_name,
             )
@@ -4087,22 +4220,33 @@ class MainWindow(QMainWindow):
             self._bulk_dialog.set_status("Paused — click Resume to continue.")
             self._bulk_dialog.set_countdown(self._bulk_delay_remaining)
 
-    def _bulk_open_all_review(self) -> None:
-        """Open every remaining observation needing human review, skipping all of them.
-
-        Items needing review are deferred to the end of the queue by
-        :meth:`_bulk_show_current`, so by the time the reviewer is paused on one
-        the rest tend to be bunched at the tail. This lets the reviewer hand the
-        whole batch off to their browser at once instead of clicking Resume/Skip
-        through each one individually.
-        """
-        if not self._bulk_dialog or not self._bulk_paused:
-            return
-        review_indices = [
+    def _bulk_review_indices(self) -> list[int]:
+        """Queue indices, from the current item on, that need human review."""
+        return [
             i
             for i in range(self._bulk_index, len(self._bulk_candidates))
             if self._bulk_review_reason(self._bulk_candidates[i])
         ]
+
+    def _bulk_open_all_review(self) -> None:
+        """Open the next batch of observations needing human review, skipping them.
+
+        Items needing review are deferred to the end of the queue by
+        :meth:`_bulk_show_current`, so by the time the reviewer is paused on one
+        the rest tend to be bunched at the tail. This lets the reviewer hand
+        them off to their browser instead of clicking Resume/Skip through each
+        one. At most :data:`REVIEW_OPEN_BATCH_SIZE` open per click, because a
+        larger burst of page loads gets HTTP 429 from iNaturalist; the run then
+        pauses on the next review item with the button offering the next batch.
+        """
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            REVIEW_OPEN_BATCH_SIZE,
+        )
+
+        if not self._bulk_dialog or not self._bulk_paused:
+            return
+        backlog = self._bulk_review_indices()
+        review_indices = backlog[:REVIEW_OPEN_BATCH_SIZE]
         if not review_indices:
             return
         for i in review_indices:
@@ -4115,14 +4259,13 @@ class MainWindow(QMainWindow):
             del self._bulk_candidates[i]
         self._bulk_skipped += count
         log.info(
-            "Bulk provisional agreement opened %d observation(s) needing human "
+            "Bulk DNA-backed agreement opened %d observation(s) needing human "
             "review in the browser and skipped them",
             count,
         )
         if self._bulk_dialog:
             self._bulk_dialog.set_status(
-                f"Opened {count} observation(s) needing human review in your "
-                "browser and skipped them here."
+                _review_batch_status(count, len(backlog) - count)
             )
         self._bulk_show_current()
 
@@ -4152,10 +4295,19 @@ class MainWindow(QMainWindow):
             return
         candidate = self._bulk_candidates[self._bulk_index]
         body = self._bulk_dialog.get_comment() if self._bulk_dialog else ""
+        obs_id = candidate.observation.obs_id
+        refresh = (
+            candidate.checked_at <= 0
+            or time.time() - candidate.checked_at > RECHECK_AFTER_SECONDS
+            or obs_id in self._bulk_touched_obs_ids
+        )
+        candidate_key = self._bulk_candidate_key(candidate)
         if self._bulk_dialog:
             self._bulk_dialog.set_posting()
             self._bulk_dialog.set_status(
                 "Refreshing observation and posting if still valid…"
+                if refresh
+                else "Posting…"
             )
         worker = _BulkPostWorker(
             self._client,
@@ -4168,6 +4320,8 @@ class MainWindow(QMainWindow):
             only_if_needed=getattr(self, "_bulk_agree_options", {}).get(
                 "only_if_needed", True
             ),
+            refresh_before_post=refresh,
+            allow_new_review=candidate_key in self._bulk_allow_new_review_keys,
         )
         sigs = worker.signals
         self._live_bulk_signals.add(sigs)
@@ -4196,10 +4350,13 @@ class MainWindow(QMainWindow):
         if result.status == "changed":
             self._handle_bulk_changed_target(candidate, result)
             return
+        if result.status == "review":
+            self._handle_bulk_new_review(candidate, result)
+            return
         if result.status == "posted":
             self._bulk_posted += 1
             log.debug(
-                "Bulk provisional agreement posted obs=%s taxon=%s",
+                "Bulk DNA-backed agreement posted obs=%s taxon=%s",
                 candidate.observation.obs_id,
                 (
                     result.target.taxon_name
@@ -4210,7 +4367,7 @@ class MainWindow(QMainWindow):
         else:
             self._bulk_skipped += 1
             log.debug(
-                "Bulk provisional agreement skipped obs=%s reason=%s",
+                "Bulk DNA-backed agreement skipped obs=%s reason=%s",
                 candidate.observation.obs_id,
                 result.message,
             )
@@ -4245,7 +4402,7 @@ class MainWindow(QMainWindow):
         current_taxon_name = current_target.taxon_name if current_target else "unknown"
         current_taxon_id = current_target.taxon_id if current_target else "unknown"
         msg = (
-            "The provisional target taxon changed after refresh.\n\n"
+            "The DNA-backed target taxon changed after refresh.\n\n"
             f"Observation: {candidate.observation.obs_id}\n\n"
             f"Preview source: {preview_source}  ident {preview_ident_id}\n"
             f"Preview taxon: {preview_taxon_name}  (taxon_id={preview_taxon_id})\n\n"
@@ -4269,16 +4426,77 @@ class MainWindow(QMainWindow):
             self._bulk_index += 1
             self._bulk_show_current()
         elif clicked is continue_btn and result.target and result.refreshed_observation:
-            self._bulk_candidates[self._bulk_index] = BulkAgreeCandidate(
-                observation=result.refreshed_observation,
-                target=result.target,
-                user_has_different_id=not already_current_taxon(
-                    result.refreshed_observation,
-                    self._auth_state.login,
-                    result.target.taxon_id,
-                ),
+            refreshed = self._bulk_refreshed_candidate(
+                candidate, result.refreshed_observation
             )
+            if refreshed is None:
+                self._bulk_skipped += 1
+                self._bulk_index += 1
+                self._bulk_show_current()
+                return
+            self._bulk_candidates[self._bulk_index] = refreshed
+            self._bulk_allow_new_review_keys.add(self._bulk_candidate_key(refreshed))
             self._bulk_post_current(allow_changed_target=True)
+
+    def _bulk_refreshed_candidate(
+        self, candidate: BulkAgreeCandidate, fresh: StudyObservation
+    ) -> Optional[BulkAgreeCandidate]:
+        """Rebuild a candidate from a just-read observation, keeping lineage flags."""
+        assessment = assess_dna_backed_target(fresh, self._auth_state.login)
+        if assessment is None:
+            return None
+        refreshed = candidate_from_assessment(
+            fresh, assessment, self._auth_state.login, time.time()
+        )
+        if refreshed.target.taxon_id == candidate.target.taxon_id:
+            refreshed.review_reasons.extend(
+                reason
+                for reason in candidate.review_reasons
+                if reason.kind == REVIEW_FAMILY_CONFLICT
+            )
+        refreshed.ai_review = candidate.ai_review
+        self._bulk_touched_obs_ids.discard(fresh.obs_id)
+        return refreshed
+
+    def _handle_bulk_new_review(
+        self, candidate: BulkAgreeCandidate, result: AgreeResult
+    ) -> None:
+        """Pause on an item whose re-read turned up a new reason to look at it."""
+        refreshed = (
+            self._bulk_refreshed_candidate(candidate, result.refreshed_observation)
+            if result.refreshed_observation
+            else None
+        )
+        if refreshed is None:
+            self._bulk_skipped += 1
+            self._bulk_index += 1
+            self._bulk_show_current()
+            return
+        self._bulk_candidates[self._bulk_index] = refreshed
+        key = self._bulk_candidate_key(refreshed)
+        # Resuming now means the operator has seen the new reason.
+        self._bulk_allow_new_review_keys.add(key)
+        self._bulk_deferred_review_keys.add(key)
+        log.debug(
+            "Bulk DNA-backed agreement paused on re-check obs=%s reason=%s",
+            refreshed.observation.obs_id,
+            result.message,
+        )
+        self._show_workflow_observation(refreshed.observation)
+        if self._bulk_dialog:
+            self._bulk_dialog.show_candidate(
+                self._bulk_index,
+                len(self._bulk_candidates),
+                refreshed,
+                comment=self._bulk_agreement_comment(refreshed),
+            )
+        self._bulk_start_delay(force_pause_reason=result.message)
+
+    def _bulk_mark_current_touched(self) -> None:
+        if 0 <= self._bulk_index < len(self._bulk_candidates):
+            self._bulk_touched_obs_ids.add(
+                self._bulk_candidates[self._bulk_index].observation.obs_id
+            )
 
     def _on_bulk_post_error(self, candidate: BulkAgreeCandidate, msg: str) -> None:
         if getattr(self, "_bulk_cancelled", False):
@@ -4293,6 +4511,9 @@ class MainWindow(QMainWindow):
             self._handle_bulk_auth_error(candidate, msg)
             return
         self._bulk_failed += 1
+        # The write may have reached iNaturalist even though it reported an
+        # error, so any retry of this observation must re-read it first.
+        self._bulk_touched_obs_ids.add(candidate.observation.obs_id)
         if self._bulk_dialog:
             self._bulk_dialog.set_status("Error: " + msg)
         box = QMessageBox(self)
@@ -4404,7 +4625,7 @@ class MainWindow(QMainWindow):
             f", {skipped_no_dna} skipped (no DNA barcode)" if skipped_no_dna else ""
         )
         withdrew_note = (
-            f", {skipped_previously_withdrew} skipped (previously withdrew provisional ID)"
+            f", {skipped_previously_withdrew} skipped (previously withdrew this ID)"
             if skipped_previously_withdrew
             else ""
         )
@@ -4414,7 +4635,7 @@ class MainWindow(QMainWindow):
             else ""
         )
         self._status_label.setText(
-            f"Bulk provisional workflow {'cancelled' if cancelled else 'complete'}: "
+            f"Bulk DNA-backed workflow {'cancelled' if cancelled else 'complete'}: "
             f"{self._bulk_posted} posted, {self._bulk_skipped} skipped, "
             f"{self._bulk_failed} failed{dna_note}{withdrew_note}.{dry_run_note}"
         )
@@ -5714,7 +5935,10 @@ class MainWindow(QMainWindow):
         if force_pause_reason:
             self._disagree_paused = True
             if self._disagree_dialog:
-                self._disagree_dialog.set_paused_for_review(force_pause_reason)
+                self._disagree_dialog.set_paused_for_review(
+                    force_pause_reason,
+                    review_backlog=len(self._disagree_review_indices()),
+                )
             return
         if self._disagree_paused:
             # A pause requested during the previous post persists to this item,
@@ -5841,17 +6065,28 @@ class MainWindow(QMainWindow):
             self._disagree_dialog.set_status("Paused — click Resume to continue.")
             self._disagree_dialog.set_countdown(self._disagree_delay_remaining)
 
-    def _disagree_open_all_review(self) -> None:
-        """Open and skip all remaining autovalidated items needing review."""
-        if not self._disagree_dialog or not self._disagree_paused:
-            return
-        review_indices = [
+    def _disagree_review_indices(self) -> list[int]:
+        """Queue indices, from the current item on, that need human review."""
+        return [
             index
-            for index in range(
-                self._disagree_index, len(self._disagree_candidates)
-            )
+            for index in range(self._disagree_index, len(self._disagree_candidates))
             if self._disagree_review_reason(self._disagree_candidates[index])
         ]
+
+    def _disagree_open_all_review(self) -> None:
+        """Open and skip the next batch of autovalidated items needing review.
+
+        Capped at :data:`REVIEW_OPEN_BATCH_SIZE` per click; see
+        :meth:`_bulk_open_all_review`.
+        """
+        from observation_workbench.ui.bulk_disagree_dialogs import (
+            REVIEW_OPEN_BATCH_SIZE,
+        )
+
+        if not self._disagree_dialog or not self._disagree_paused:
+            return
+        backlog = self._disagree_review_indices()
+        review_indices = backlog[:REVIEW_OPEN_BATCH_SIZE]
         if not review_indices:
             return
         for index in review_indices:
@@ -5872,8 +6107,7 @@ class MainWindow(QMainWindow):
         )
         if self._disagree_dialog:
             self._disagree_dialog.set_status(
-                f"Opened {count} observation(s) needing human review in your "
-                "browser and skipped them here."
+                _review_batch_status(count, len(backlog) - count)
             )
         self._disagree_show_current()
 
@@ -5995,7 +6229,10 @@ class MainWindow(QMainWindow):
                 candidate.observation = result.refreshed_observation
             self._disagree_paused = True
             if self._disagree_dialog:
-                self._disagree_dialog.set_paused_for_review(result.message)
+                self._disagree_dialog.set_paused_for_review(
+                    result.message,
+                    review_backlog=len(self._disagree_review_indices()),
+                )
             log.info(
                 "Autovalidated identification paused after execution-time refresh "
                 "obs=%s taxon=%s reason=%s",
@@ -6229,12 +6466,14 @@ class MainWindow(QMainWindow):
         obs = self._current_observation()
         if obs is None:
             return
+        self._bulk_touched_obs_ids.add(obs.obs_id)
         open_external_url_silently(obs.url)
 
     def _copy_obs_url(self) -> None:
         obs = self._current_observation()
         if obs is None:
             return
+        self._bulk_touched_obs_ids.add(obs.obs_id)
         QApplication.clipboard().setText(obs.url)
         self._status_label.setText(f"Copied observation URL: {obs.url}")
 
@@ -6306,6 +6545,15 @@ class MainWindow(QMainWindow):
                 self._status_label.setText(
                     "Image cache directory change saved; restart to apply it."
                 )
+
+    def _open_log_folder(self) -> None:
+        log_dir = self._settings.journal_dir / "logs"
+        if not log_dir.is_dir():
+            QMessageBox.information(
+                self, "Log Folder", f"No log folder exists yet at:\n{log_dir}"
+            )
+            return
+        open_external_url_silently(QUrl.fromLocalFile(str(log_dir)))
 
     def _show_cache_info(self) -> None:
         total_bytes = self._disk_cache.total_size_bytes()
@@ -6654,6 +6902,16 @@ def _safe_confirmed_refresh_diagnostic(exc: object) -> str:
     if isinstance(exc, BaseException):
         return type(exc).__name__
     return "Unknown detail refresh failure"
+
+
+def _review_batch_status(opened: int, remaining: int) -> str:
+    text = (
+        f"Opened {opened} observation(s) needing human review in your browser "
+        "and skipped them here."
+    )
+    if remaining > 0:
+        text += f" {remaining} more still need review; open the next batch when ready."
+    return text
 
 
 def _is_auth_failure_message(msg: str) -> bool:

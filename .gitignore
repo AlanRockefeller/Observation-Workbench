@@ -60,6 +60,7 @@ nohup.out
 *.wal
 *.conf
 tokens.json
+vision.token.txt
 
 # Backup / patch / merge leftovers
 *.bak

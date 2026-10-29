@@ -217,6 +217,27 @@ class TaxonAutocompleteField(QWidget):
     def focus_editor(self) -> None:
         self.line_edit.setFocus()
 
+    def search_exact_name(self, name: str) -> bool:
+        """Populate the editor and immediately resolve an exact taxon name."""
+        query = str(name or "").strip()
+        if self._closed or len(query) < 2:
+            return False
+        if (
+            self._selected_item is not None
+            and self._selected_item.scientific_name.casefold() == query.casefold()
+        ):
+            self.line_edit.setText(self._selected_item.scientific_name)
+            return True
+        self._generation += 1
+        self._timer.stop()
+        self._items = ()
+        self._hide_suggestions()
+        self._clear_selection()
+        self.search_status_changed.emit("")
+        self.line_edit.setText(query)
+        self._start_search()
+        return True
+
     def shutdown(self) -> None:
         """Invalidate late callbacks while retaining each signal until it ends."""
         if self._closed:

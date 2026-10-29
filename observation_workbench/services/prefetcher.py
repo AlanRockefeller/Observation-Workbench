@@ -355,6 +355,16 @@ class ImagePrefetcher(QObject):
         """Extend the current generation without discarding warm image state."""
         self._observations.extend(observations)
 
+    def reorder_observations(self, observations: list[StudyObservation]) -> None:
+        """Replace queue order without discarding warm images or workers.
+
+        Identify uses this when an observation temporarily leaves the queue
+        for an asynchronous service. In-flight requests carry stable
+        observation and photo IDs; their captured list indexes are diagnostic
+        only, so retaining the generation is safe and avoids needless reloads.
+        """
+        self._observations = list(observations)
+
     def update_position(
         self,
         obs_idx: int,

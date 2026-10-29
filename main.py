@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -27,6 +28,26 @@ from observation_workbench.ui.log_panel import QtLogHandler
 from observation_workbench.ui.main_window import MainWindow
 
 _INSTANCE_LOCK: QLockFile | None = None
+
+# The on-disk log always records DEBUG from the app's own loggers so a bulk
+# run can be reconstructed afterwards; it rotates at midnight and keeps two
+# old files, since logs are only useful for a day or two.
+LOG_FILE_NAME = "observation-workbench.log"
+LOG_FILE_BACKUP_COUNT = 2
+# Per-image chatter that would drown out workflow lines in the file log.
+_FILE_LOG_QUIET_LOGGERS = (
+    "observation_workbench.services.prefetcher",
+    "observation_workbench.services.image_cache",
+)
+
+
+def _file_log_allows(record: logging.LogRecord) -> bool:
+    """Suppress high-volume image DEBUG records only in the file log."""
+    is_quiet_logger = any(
+        record.name == name or record.name.startswith(f"{name}.")
+        for name in _FILE_LOG_QUIET_LOGGERS
+    )
+    return not is_quiet_logger or record.levelno >= logging.INFO
 
 
 def main() -> None:
@@ -54,6 +75,10 @@ def main() -> None:
         datefmt="%H:%M:%S",
         stream=sys.stderr,
     )
+    # The package logger runs at DEBUG for the file log, so the terminal
+    # handler filters on its own level instead of relying on the root's.
+    for handler in logging.getLogger().handlers:
+        handler.setLevel(log_level)
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -153,6 +178,8 @@ def main() -> None:
     # are still tearing down worker threads after the event loop returns.
     _INSTANCE_LOCK = instance_lock
 
+    _install_file_log(journal_dir / "logs")
+
     # Make Ctrl+C in the terminal quit the app gracefully (triggers closeEvent).
     # Qt replaces Python's SIGINT handler; we restore it here so the signal
     # reaches Python. A periodic no-op timer is required because Qt's event
@@ -181,6 +208,50 @@ def main() -> None:
     window.showMaximized()
     log.debug("Window ready.")
     sys.exit(app.exec())
+
+
+def _install_file_log(log_dir: Path) -> None:
+    """Write a rotating DEBUG log of the app's own loggers under ``log_dir``.
+
+    Only the ``observation_workbench`` package is raised to DEBUG; the root
+    level is left alone so third-party libraries stay quiet and code that
+    checks the root level (e.g. browser-output suppression) is unaffected.
+    A failure here never prevents startup.
+    """
+    log = logging.getLogger(__name__)
+    try:
+        log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        log_dir.chmod(0o700)
+        handler = logging.handlers.TimedRotatingFileHandler(
+            log_dir / LOG_FILE_NAME,
+            when="midnight",
+            backupCount=LOG_FILE_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log.warning("File logging disabled: %s", exc)
+        return
+    handler.setLevel(logging.DEBUG)
+    handler.addFilter(_file_log_allows)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-8s %(threadName)s %(name)s: %(message)s"
+        )
+    )
+    logging.getLogger().addHandler(handler)
+    logging.getLogger("observation_workbench").setLevel(logging.DEBUG)
+
+    previous_hook = sys.excepthook
+
+    def _log_uncaught(exc_type, exc, tb) -> None:
+        if not issubclass(exc_type, KeyboardInterrupt):
+            logging.getLogger("observation_workbench").critical(
+                "Uncaught exception", exc_info=(exc_type, exc, tb)
+            )
+        previous_hook(exc_type, exc, tb)
+
+    sys.excepthook = _log_uncaught
+    log.info("Writing log file to %s", log_dir / LOG_FILE_NAME)
 
 
 def _apply_dark_palette(app: QApplication) -> None:

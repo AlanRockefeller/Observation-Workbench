@@ -3,7 +3,8 @@
 MycoMap's sequence autovalidator posts a comment from a single account and
 writes the identification it inferred into an observation field (a Provisional
 Species Name, or a Species Name Override when the sequence matched a published
-name). It never posts an identification itself, so the community consensus often
+name). Either field can later be corrected by hand; a Species Name Override is
+the more reliable of the two. It never posts an identification itself, so the community consensus often
 lags behind the autovalidated name -- sometimes because nobody has agreed yet,
 sometimes because the provisional name does not exist on iNaturalist at all.
 
@@ -181,17 +182,32 @@ def normalize_taxon_name(value: str) -> str:
 
 
 def _field_suggested_name(obs: StudyObservation) -> str:
-    """Return the name the autovalidator wrote into an observation field.
+    """Return the name the observation fields say the sequence supports.
 
-    Provisional Species Name wins over Species Name Override: when both are set
-    they disagree by design, the override holding the closest published name and
-    the provisional name holding the sequence-based name the autovalidator
-    actually inferred.
+    Species Name Override wins over Provisional Species Name: either can go out
+    of date, but a provisional name is far more likely to be the stale one, and
+    an override is usually set by a person correcting it.
     """
-    provisional = (obs.provisional_species_name or "").strip()
-    if provisional:
-        return provisional
-    return (obs.species_name_override or "").strip()
+    override = (obs.species_name_override or "").strip()
+    if override:
+        return override
+    return (obs.provisional_species_name or "").strip()
+
+
+def _field_names(obs: StudyObservation) -> set[str]:
+    """Normalized names from both name fields, for corroborating a bare-name comment.
+
+    The autovalidator may have written either field, and a person may since have
+    set the other one, so a comment naming either still counts as its comment.
+    """
+    return {
+        name
+        for name in (
+            normalize_taxon_name(obs.species_name_override or ""),
+            normalize_taxon_name(obs.provisional_species_name or ""),
+        )
+        if name
+    }
 
 
 def _bare_taxon_name(body: str) -> str:
@@ -242,9 +258,9 @@ def _name_comment_autovalidation(obs: StudyObservation) -> str:
     its own -- the name still has to resolve to an exact iNaturalist taxon before
     anything is posted.
     """
-    wanted = normalize_taxon_name(_field_suggested_name(obs))
+    wanted = _field_names(obs)
     for name in autovalidator_name_comments(obs):
-        if not wanted or normalize_taxon_name(name) == wanted:
+        if not wanted or normalize_taxon_name(name) in wanted:
             return name
     return ""
 
@@ -257,11 +273,16 @@ def suggested_name_for(obs: StudyObservation) -> str:
     return _name_comment_autovalidation(obs)
 
 
-def is_autovalidated(obs: StudyObservation) -> bool:
+def has_autovalidation_comment(obs: StudyObservation) -> bool:
     """True when the autovalidator account left either form of its comment."""
+    return _has_marker_comment(obs) or bool(_name_comment_autovalidation(obs))
+
+
+def is_autovalidated(obs: StudyObservation) -> bool:
+    """True when autovalidated and the observer has not contested the result."""
     if (obs.id_update_needed or "").strip().casefold() == "yes":
         return False
-    return _has_marker_comment(obs) or bool(_name_comment_autovalidation(obs))
+    return has_autovalidation_comment(obs)
 
 
 def consensus_taxon(obs: StudyObservation) -> Optional[StudyTaxon]:
@@ -277,8 +298,9 @@ def _timestamp(value: str) -> Optional[datetime]:
     return parsed if parsed.tzinfo is not None else None
 
 
-def _latest_autovalidation_time(obs: StudyObservation) -> Optional[datetime]:
-    wanted = normalize_taxon_name(_field_suggested_name(obs))
+def latest_autovalidation_time(obs: StudyObservation) -> Optional[datetime]:
+    """When the autovalidator last commented in either qualifying form."""
+    wanted = _field_names(obs)
     dates = []
     for comment in obs.comments:
         if comment.user_login.casefold() != AUTOVALIDATOR_LOGIN.casefold():
@@ -286,7 +308,7 @@ def _latest_autovalidation_time(obs: StudyObservation) -> Optional[datetime]:
         body = comment.body or ""
         bare_name = _bare_taxon_name(body)
         if AUTOVALIDATION_COMMENT_MARKER not in body.casefold() and not (
-            bare_name and (not wanted or normalize_taxon_name(bare_name) == wanted)
+            bare_name and (not wanted or normalize_taxon_name(bare_name) in wanted)
         ):
             continue
         date = _timestamp(comment.created_at)
@@ -299,7 +321,7 @@ def identified_after_autovalidation(obs: StudyObservation, login: str) -> bool:
     """Respect the operator's ID after the latest qualifying automated comment."""
     if not login.strip():
         return False
-    latest = _latest_autovalidation_time(obs)
+    latest = latest_autovalidation_time(obs)
     if latest is None:
         return False
     for ident in obs.all_identifications:
@@ -313,7 +335,7 @@ def identified_after_autovalidation(obs: StudyObservation, login: str) -> bool:
 
 def commented_after_autovalidation(obs: StudyObservation) -> bool:
     """Later human discussion warrants review, without judging its contents."""
-    latest = _latest_autovalidation_time(obs)
+    latest = latest_autovalidation_time(obs)
     if latest is None:
         return False
     for comment in obs.comments:
@@ -339,7 +361,7 @@ def needs_autovalidated_human_review(
     that supports the autovalidated target is not evidence of a disagreement,
     and withdrawn identifications no longer need to hold the workflow.
     """
-    latest = _latest_autovalidation_time(obs)
+    latest = latest_autovalidation_time(obs)
     if latest is None:
         return False, False
 
@@ -1082,10 +1104,14 @@ def _candidate_from_refreshed(
         observation=fresh,
         source_taxon_id=0,
         source_taxon_name="",
-        # Re-checked before posting: the observation must still carry this exact
-        # autovalidated name in its Provisional Species Name field.
+        # Re-checked before posting: when the name came from the Provisional
+        # Species Name field, the observation must still carry it there. An
+        # override outranks that field, so a name read from it is not tied to it.
         source_provisional_name=(
-            suggested if (fresh.provisional_species_name or "").strip() else ""
+            suggested
+            if (fresh.provisional_species_name or "").strip()
+            and not (fresh.species_name_override or "").strip()
+            else ""
         ),
         source_display_name=suggested,
         target_taxon_id=suggested_taxon.taxon_id,

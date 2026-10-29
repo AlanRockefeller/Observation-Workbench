@@ -62,8 +62,13 @@ class IdentifyInfoTab(QScrollArea):
 
         self._add_heading("Observation details")
         self._add_value("Observer", observation.observer_login)
-        self._add_value("Observed date", observation.observed_on)
-        self._add_value("Created date", observation.created_at)
+        self._add_value(
+            "Observed date",
+            _display_timestamp(
+                observation.time_observed_at or observation.observed_on
+            ),
+        )
+        self._add_value("Created date", _display_timestamp(observation.created_at))
         self._add_value("Place", observation.place_guess)
         self._add_value("Coordinates", _coordinates(observation))
         self._add_value(

@@ -344,6 +344,7 @@ def parse_observation(
             observed_on=raw_obs.get("observed_on", "")
             or raw_obs.get("observed_on_string", "")
             or "",
+            time_observed_at=raw_obs.get("time_observed_at", "") or "",
             place_guess=raw_obs.get("place_guess", "") or "",
             taxon=obs_taxon,
             community_taxon=community_taxon,
@@ -359,6 +360,10 @@ def parse_observation(
             species_name_override=_observation_field_value(
                 raw_obs,
                 "Species Name Override",
+            ),
+            barcode_inferred_name=_observation_field_value(
+                raw_obs,
+                "Barcode Inferred Species or Name",
             ),
             id_update_needed=_observation_field_value(raw_obs, "ID Update Needed"),
             dna_barcode_its=_observation_field_value(

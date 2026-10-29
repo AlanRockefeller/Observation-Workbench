@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Sequence
@@ -11,7 +11,11 @@ from PySide6.QtCore import QStandardPaths
 
 from observation_workbench.api.client import INatClient
 from observation_workbench.api.parsers import parse_observation
-from observation_workbench.models import StudyIdentification, StudyObservation
+from observation_workbench.models import (
+    StudyIdentification,
+    StudyObservation,
+    StudyTaxon,
+)
 
 
 @dataclass
@@ -364,7 +368,15 @@ def post_agreement(
     refreshed_obs: StudyObservation,
     target: AgreeTarget,
     body: str = "",
+    *,
+    refresh_after: bool = True,
 ) -> AgreeResult:
+    """Post an agreeing identification unless the user already holds that taxon.
+
+    ``refresh_after=False`` skips re-reading the observation after the write and
+    returns a local copy with the new identification applied instead, saving a
+    request per post in bulk runs.
+    """
     if already_current_taxon(refreshed_obs, login, target.taxon_id):
         return AgreeResult(
             "skipped",
@@ -379,6 +391,16 @@ def post_agreement(
         taxon_id=target.taxon_id,
         body=body,
     )
+    if not refresh_after:
+        return AgreeResult(
+            "posted",
+            f"Added identification: {target.taxon_name}",
+            target=target,
+            refreshed_observation=_with_local_identification(
+                refreshed_obs, login, target, response
+            ),
+            raw_response=response,
+        )
     try:
         updated = (
             refresh_observation(client, api_token, target.observation_id)
@@ -395,3 +417,42 @@ def post_agreement(
         refreshed_observation=updated,
         raw_response=response,
     )
+
+
+def _with_local_identification(
+    obs: StudyObservation,
+    login: str,
+    target: AgreeTarget,
+    response: Optional[dict],
+) -> StudyObservation:
+    """Return ``obs`` as it should look after posting, without re-reading it.
+
+    iNaturalist withdraws the user's previous identification when a new one is
+    added, so the local copy does the same.
+    """
+    login_key = login.casefold()
+    raw = response if isinstance(response, dict) else {}
+    if isinstance(raw.get("results"), list) and raw["results"]:
+        raw = raw["results"][0] if isinstance(raw["results"][0], dict) else {}
+    try:
+        ident_id = int(raw.get("id") or 0)
+    except (TypeError, ValueError):
+        ident_id = 0
+    idents = [
+        (
+            replace(ident, current=False)
+            if ident.current and ident.user_login.casefold() == login_key
+            else ident
+        )
+        for ident in obs.all_identifications
+    ]
+    idents.append(
+        StudyIdentification(
+            ident_id=ident_id,
+            taxon=StudyTaxon(taxon_id=target.taxon_id, name=target.taxon_name),
+            user_login=login,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            current=True,
+        )
+    )
+    return replace(obs, all_identifications=idents)

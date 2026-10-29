@@ -133,6 +133,24 @@ class SettingsDialog(QDialog):
         display_form.addRow("Include common names:", self._common_names_cb)
         layout.addWidget(display_group)
 
+        vision_group = QGroupBox("MycoMap Vision")
+        vision_form = QFormLayout(vision_group)
+        self._vision_token_edit = QLineEdit()
+        self._vision_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._vision_token_edit.setPlaceholderText("vision_…")
+        self._vision_token_edit.setToolTip(
+            "Saved in the same owner-readable settings store as the "
+            "iNaturalist API token."
+        )
+        vision_form.addRow("Vision token:", self._vision_token_edit)
+        vision_help = QLabel(
+            "Request a token at mycomap.org/vision-keys. It works after a "
+            "MycoMap administrator approves it."
+        )
+        vision_help.setWordWrap(True)
+        vision_form.addRow("", vision_help)
+        layout.addWidget(vision_group)
+
         # Buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -151,6 +169,7 @@ class SettingsDialog(QDialog):
         self._result_list_scale_spin.setValue(s.result_list_font_scale)
         self._scroll_speed_spin.setValue(s.scroll_speed_multiplier)
         self._common_names_cb.setChecked(s.show_common_names)
+        self._vision_token_edit.setText(s.mycomap_vision_token)
 
     def _save_and_accept(self) -> None:
         s = self._settings
@@ -162,6 +181,7 @@ class SettingsDialog(QDialog):
         s.result_list_font_scale = self._result_list_scale_spin.value()
         s.scroll_speed_multiplier = self._scroll_speed_spin.value()
         s.show_common_names = self._common_names_cb.isChecked()
+        s.mycomap_vision_token = self._vision_token_edit.text()
         s.sync()
         self.accept()
 
