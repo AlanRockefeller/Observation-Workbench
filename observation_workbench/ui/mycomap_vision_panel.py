@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -79,6 +80,9 @@ class MycomapVisionPanel(QGroupBox):
         self._browser.setHtml(_result_html(result))
         self._family_button.setVisible(bool(self._candidates))
         self._id_comment_button.setEnabled(bool(self._comment_text))
+        self._top_name_button.setText(
+            f"Apply {self._top_name}" if self._top_name else "Apply top name"
+        )
         self._top_name_button.setEnabled(bool(self._top_name))
         self.show()
 
@@ -235,17 +239,41 @@ def _result_comment_text(result: dict[str, Any]) -> str:
 
 
 def _top_name_action(result: dict[str, Any]) -> tuple[str, str]:
+    """Pick the name to apply: the top species when the answer is coarser."""
     answer = result.get("answer")
-    if not isinstance(answer, dict):
-        return "", ""
-    name = str(answer.get("name") or "").strip()
+    answer = answer if isinstance(answer, dict) else {}
+    chosen = answer
+    ranks = result.get("ranks")
+    species = ranks.get("species") if isinstance(ranks, dict) else None
+    answer_rank = str(answer.get("rank") or "").strip().lower()
+    if (
+        answer_rank != "species"
+        and isinstance(species, list)
+        and species
+        and isinstance(species[0], dict)
+        and species[0].get("name")
+    ):
+        chosen = species[0]
+    name = _strip_internal_suffix(str(chosen.get("name") or "").strip())
     if not name:
         return "", ""
-    confidence = _percent(answer.get("confidence"))
+    confidence = _percent(chosen.get("confidence"))
     comment = "According to MycoMap Vision"
     if confidence:
         comment += f" ({confidence} sure)"
     return name, comment
+
+
+def _strip_internal_suffix(name: str) -> str:
+    """Drop MycoMap-internal group labels (``-ca02``) and infraspecific ranks."""
+    name = re.sub(r"-[a-z]{2}\d{2}$", "", name, flags=re.IGNORECASE)
+    # Lookup is by species name; omit infraspecific ranks (var., subsp., f.).
+    return re.sub(
+        r"\s+(?:var|subvar|subsp|ssp|f|fo|forma)\.?\s+\S.*$",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    )
 
 
 def _percent(value: object) -> str:

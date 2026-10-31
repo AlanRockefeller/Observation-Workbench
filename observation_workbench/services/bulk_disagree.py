@@ -970,6 +970,10 @@ def _make_candidate(
 
 
 def _is_ambiguous_write_error(exc: INatAPIError) -> bool:
+    if getattr(exc, "outcome_unknown", False):
+        return True
+    # Compatibility for errors raised by older/custom clients that predate the
+    # structured outcome flag.
     text = str(exc).casefold()
     return "may have reached inaturalist" in text or "result is unknown" in text
 

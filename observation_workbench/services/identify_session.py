@@ -197,6 +197,7 @@ def load_identify_session(
         if not results:
             break
 
+        client.add_infrageneric_genus(results)
         new_ids = 0
         for record in results:
             _raise_if_cancelled(is_cancelled)

@@ -76,7 +76,6 @@ from observation_workbench.api.observation_url import (
 )
 from observation_workbench.models import StudyObservation
 from observation_workbench.services.bulk_identification import (
-    RECHECK_AFTER_SECONDS,
     REVIEW_COMMENTS,
     REVIEW_FAMILY_CONFLICT,
     REVIEW_LATER_ID,
@@ -327,12 +326,7 @@ class _BulkPostSignals(QObject):
 
 
 class _BulkPostWorker(QRunnable):
-    """Post one DNA-backed agreement, re-reading the observation only when stale.
-
-    A snapshot younger than a day that the operator never opened or copied is
-    posted as planned: nobody else is likely to have changed it in the meantime,
-    and skipping the read halves the requests per item.
-    """
+    """Post one DNA-backed agreement after re-reading the observation."""
 
     def __init__(
         self,
@@ -344,8 +338,8 @@ class _BulkPostWorker(QRunnable):
         allow_changed_target: bool = False,
         dry_run: bool = False,
         only_if_needed: bool = True,
-        refresh_before_post: bool = True,
-        allow_new_review: bool = False,
+        pause_on_later_identification: bool = True,
+        pause_on_comments_since: bool = True,
     ) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -357,8 +351,8 @@ class _BulkPostWorker(QRunnable):
         self.allow_changed_target = allow_changed_target
         self.dry_run = dry_run
         self.only_if_needed = only_if_needed
-        self.refresh_before_post = refresh_before_post
-        self.allow_new_review = allow_new_review
+        self.pause_on_later_identification = pause_on_later_identification
+        self.pause_on_comments_since = pause_on_comments_since
         self.signals = _BulkPostSignals()
 
     def _finish(self, status: str, message: str, **kwargs) -> None:
@@ -375,13 +369,10 @@ class _BulkPostWorker(QRunnable):
                     "manual follow-up.",
                 )
                 return
-            if self.refresh_before_post:
-                checked = self._recheck()
-                if checked is None:
-                    return
-                obs, target = checked
-            else:
-                obs, target = self.candidate.observation, self.candidate.target
+            checked = self._recheck()
+            if checked is None:
+                return
+            obs, target = checked
             if self.dry_run:
                 self._finish(
                     "skipped",
@@ -505,13 +496,20 @@ class _BulkPostWorker(QRunnable):
                 refreshed_observation=fresh,
             )
             return None
-        known = {reason.kind for reason in self.candidate.review_reasons}
+        known = {(reason.kind, reason.text) for reason in self.candidate.review_reasons}
         new_reasons = [
             reason.text
             for reason in assessment.review_reasons
-            if reason.kind not in known
+            if (reason.kind, reason.text) not in known
+            and not (
+                reason.kind == REVIEW_LATER_ID
+                and not self.pause_on_later_identification
+            )
+            and not (
+                reason.kind == REVIEW_COMMENTS and not self.pause_on_comments_since
+            )
         ]
-        if new_reasons and not self.allow_new_review:
+        if new_reasons:
             self._finish(
                 "review",
                 " and ".join(new_reasons),
@@ -520,7 +518,6 @@ class _BulkPostWorker(QRunnable):
             )
             return None
         return fresh, target
-
 
     def _recheck_proposal(self, fresh: StudyObservation, assessment):
         """Re-confirm a provisional-name proposal; emit and return None to stop."""
@@ -1420,8 +1417,6 @@ class MainWindow(QMainWindow):
         self._bulk_dialog = None
         self._bulk_resume_after_auth = False
         self._bulk_deferred_review_keys: set[tuple[int, int]] = set()
-        self._bulk_touched_obs_ids: set[int] = set()
-        self._bulk_allow_new_review_keys: set[tuple[int, int]] = set()
         self._bulk_agree_options: dict = {}
         self._pending_target_obs_id: Optional[int] = None
         self._pending_target_taxon: str = ""
@@ -1442,6 +1437,7 @@ class MainWindow(QMainWindow):
         self._disagree_resume_after_auth = False
         self._disagree_deferred_review_keys: set[tuple[int, int]] = set()
         self._disagree_review_acknowledged_keys: set[tuple[int, int]] = set()
+        self._disagree_pending_review_key: Optional[tuple[int, int]] = None
         self._disagree_cancelled = False
         self._disagree_paused = False
         self._disagree_posting = False
@@ -3816,9 +3812,6 @@ class MainWindow(QMainWindow):
     def _start_bulk_dna_plan(self, filters: LoadFilters) -> None:
         self._bulk_generation = getattr(self, "_bulk_generation", 0) + 1
         gen = self._bulk_generation
-        # Observations the operator opens or copies from here on are re-read
-        # before posting, since they may have identified them by hand.
-        self._bulk_touched_obs_ids.clear()
         self._status_label.setText("Planning DNA-backed agreements…")
         worker = _BulkPlanWorker(
             self._loader,
@@ -3917,7 +3910,6 @@ class MainWindow(QMainWindow):
             login=self._auth_state.login,
             on_skip_forever=self._add_bulk_agree_skip_for_candidate,
             on_unskip_forever=self._remove_bulk_agree_skip_for_candidate,
-            on_observation_link_used=self._bulk_touched_obs_ids.add,
             request_reauthentication=self._reauthenticate_photo_browser,
             dry_run=self._bulk_agree_options.get("dry_run", False),
             parent=self,
@@ -3975,7 +3967,6 @@ class MainWindow(QMainWindow):
             stats.skipped_previously_withdrew if stats else 0
         )
         self._bulk_deferred_review_keys = set()
-        self._bulk_allow_new_review_keys = set()
         self._bulk_resume_after_auth = False
         self._bulk_cancelled = False
         self._bulk_paused = False
@@ -3985,7 +3976,6 @@ class MainWindow(QMainWindow):
             delay_max_seconds=options.get("delay_max_seconds", 0),
             dry_run=options.get("dry_run", False),
         )
-        self._bulk_dialog.observation_link_used.connect(self._bulk_mark_current_touched)
         self._bulk_dialog.cancel_requested.connect(self._bulk_cancel)
         self._bulk_dialog.skip_requested.connect(self._bulk_skip_current)
         self._bulk_dialog.skip_forever_requested.connect(self._bulk_skip_forever)
@@ -4295,19 +4285,10 @@ class MainWindow(QMainWindow):
             return
         candidate = self._bulk_candidates[self._bulk_index]
         body = self._bulk_dialog.get_comment() if self._bulk_dialog else ""
-        obs_id = candidate.observation.obs_id
-        refresh = (
-            candidate.checked_at <= 0
-            or time.time() - candidate.checked_at > RECHECK_AFTER_SECONDS
-            or obs_id in self._bulk_touched_obs_ids
-        )
-        candidate_key = self._bulk_candidate_key(candidate)
         if self._bulk_dialog:
             self._bulk_dialog.set_posting()
             self._bulk_dialog.set_status(
                 "Refreshing observation and posting if still valid…"
-                if refresh
-                else "Posting…"
             )
         worker = _BulkPostWorker(
             self._client,
@@ -4320,8 +4301,13 @@ class MainWindow(QMainWindow):
             only_if_needed=getattr(self, "_bulk_agree_options", {}).get(
                 "only_if_needed", True
             ),
-            refresh_before_post=refresh,
-            allow_new_review=candidate_key in self._bulk_allow_new_review_keys,
+            pause_on_later_identification=(
+                not self._bulk_dialog
+                or self._bulk_dialog.pause_on_later_identification()
+            ),
+            pause_on_comments_since=(
+                not self._bulk_dialog or self._bulk_dialog.pause_on_comments_since()
+            ),
         )
         sigs = worker.signals
         self._live_bulk_signals.add(sigs)
@@ -4435,7 +4421,6 @@ class MainWindow(QMainWindow):
                 self._bulk_show_current()
                 return
             self._bulk_candidates[self._bulk_index] = refreshed
-            self._bulk_allow_new_review_keys.add(self._bulk_candidate_key(refreshed))
             self._bulk_post_current(allow_changed_target=True)
 
     def _bulk_refreshed_candidate(
@@ -4455,7 +4440,6 @@ class MainWindow(QMainWindow):
                 if reason.kind == REVIEW_FAMILY_CONFLICT
             )
         refreshed.ai_review = candidate.ai_review
-        self._bulk_touched_obs_ids.discard(fresh.obs_id)
         return refreshed
 
     def _handle_bulk_new_review(
@@ -4474,9 +4458,9 @@ class MainWindow(QMainWindow):
             return
         self._bulk_candidates[self._bulk_index] = refreshed
         key = self._bulk_candidate_key(refreshed)
-        # Resuming now means the operator has seen the new reason.
-        self._bulk_allow_new_review_keys.add(key)
         self._bulk_deferred_review_keys.add(key)
+        review_reason = self._bulk_review_reason(refreshed)
+        pause_reason = review_reason or result.message
         log.debug(
             "Bulk DNA-backed agreement paused on re-check obs=%s reason=%s",
             refreshed.observation.obs_id,
@@ -4490,13 +4474,7 @@ class MainWindow(QMainWindow):
                 refreshed,
                 comment=self._bulk_agreement_comment(refreshed),
             )
-        self._bulk_start_delay(force_pause_reason=result.message)
-
-    def _bulk_mark_current_touched(self) -> None:
-        if 0 <= self._bulk_index < len(self._bulk_candidates):
-            self._bulk_touched_obs_ids.add(
-                self._bulk_candidates[self._bulk_index].observation.obs_id
-            )
+        self._bulk_start_delay(force_pause_reason=pause_reason)
 
     def _on_bulk_post_error(self, candidate: BulkAgreeCandidate, msg: str) -> None:
         if getattr(self, "_bulk_cancelled", False):
@@ -4511,9 +4489,6 @@ class MainWindow(QMainWindow):
             self._handle_bulk_auth_error(candidate, msg)
             return
         self._bulk_failed += 1
-        # The write may have reached iNaturalist even though it reported an
-        # error, so any retry of this observation must re-read it first.
-        self._bulk_touched_obs_ids.add(candidate.observation.obs_id)
         if self._bulk_dialog:
             self._bulk_dialog.set_status("Error: " + msg)
         box = QMessageBox(self)
@@ -5807,6 +5782,7 @@ class MainWindow(QMainWindow):
         self._disagree_resume_after_auth = False
         self._disagree_deferred_review_keys = set()
         self._disagree_review_acknowledged_keys = set()
+        self._disagree_pending_review_key = None
         self._disagree_cancelled = False
         self._disagree_paused = False
         self._disagree_posting = False
@@ -5921,6 +5897,30 @@ class MainWindow(QMainWindow):
             reasons.append(f"AI review: {candidate.ai_review.short_text()}")
         return " and ".join(reasons)
 
+    def _disagree_conflict_review_required(
+        self, candidate: BulkDisagreeCandidate
+    ) -> bool:
+        """Whether this snapshot has an enabled execution conflict to acknowledge."""
+        if not self._disagree_options.get("human_review_guard"):
+            return False
+        if not self._disagree_dialog:
+            return False
+        later_id, later_comment = needs_autovalidated_human_review(
+            candidate.observation,
+            candidate.target_taxon_id,
+            self._auth_state.login,
+        )
+        return bool(
+            (
+                later_id
+                and self._disagree_dialog.pause_on_later_conflicting_identification()
+            )
+            or (
+                later_comment
+                and self._disagree_dialog.pause_on_comments_since_autovalidation()
+            )
+        )
+
     def _disagree_start_delay(self, *, force_pause_reason: str = "") -> None:
         min_delay, max_delay = self._disagree_delay_range()
         self._disagree_delay_remaining = (
@@ -5934,6 +5934,12 @@ class MainWindow(QMainWindow):
             self._disagree_dialog.set_countdown(self._disagree_delay_remaining)
         if force_pause_reason:
             self._disagree_paused = True
+            candidate = self._disagree_candidates[self._disagree_index]
+            self._disagree_pending_review_key = (
+                self._disagree_candidate_key(candidate)
+                if self._disagree_conflict_review_required(candidate)
+                else None
+            )
             if self._disagree_dialog:
                 self._disagree_dialog.set_paused_for_review(
                     force_pause_reason,
@@ -6000,6 +6006,7 @@ class MainWindow(QMainWindow):
 
     def _disagree_skip_current_delay(self) -> None:
         if self._disagree_paused:
+            self._disagree_acknowledge_pending_review()
             self._disagree_paused = False
             self._disagree_post_current()
         elif self._disagree_delay_timer and self._disagree_delay_timer.isActive():
@@ -6014,6 +6021,7 @@ class MainWindow(QMainWindow):
             if self._disagree_delay_timer:
                 self._disagree_delay_timer.stop()
             self._disagree_paused = False
+            self._disagree_pending_review_key = None
             candidate = self._disagree_candidates[self._disagree_index]
             self._disagree_skipped += 1
             log.info(
@@ -6036,6 +6044,7 @@ class MainWindow(QMainWindow):
             if self._disagree_delay_timer:
                 self._disagree_delay_timer.stop()
             self._disagree_paused = False
+            self._disagree_pending_review_key = None
             candidate = self._disagree_candidates[self._disagree_index]
             reason = (
                 "Skipped during bulk disagree-to-taxon workflow; "
@@ -6096,6 +6105,7 @@ class MainWindow(QMainWindow):
         if self._disagree_delay_timer:
             self._disagree_delay_timer.stop()
         self._disagree_paused = False
+        self._disagree_pending_review_key = None
         count = len(review_indices)
         for index in reversed(review_indices):
             del self._disagree_candidates[index]
@@ -6112,15 +6122,7 @@ class MainWindow(QMainWindow):
         self._disagree_show_current()
 
     def _disagree_resume(self) -> None:
-        if (
-            self._disagree_paused
-            and self._disagree_index < len(self._disagree_candidates)
-            and self._disagree_options.get("human_review_guard")
-        ):
-            candidate = self._disagree_candidates[self._disagree_index]
-            self._disagree_review_acknowledged_keys.add(
-                self._disagree_candidate_key(candidate)
-            )
+        self._disagree_acknowledge_pending_review()
         self._disagree_paused = False
         if getattr(self, "_disagree_posting", False):
             # The current item is still posting; it will advance on its own once
@@ -6142,6 +6144,18 @@ class MainWindow(QMainWindow):
             self._disagree_delay_timer.start(1000)
         else:
             self._disagree_post_current()
+
+    def _disagree_acknowledge_pending_review(self) -> None:
+        key = self._disagree_pending_review_key
+        if key is None:
+            return
+        if self._disagree_index < len(self._disagree_candidates):
+            current = self._disagree_candidate_key(
+                self._disagree_candidates[self._disagree_index]
+            )
+            if current == key:
+                self._disagree_review_acknowledged_keys.add(key)
+        self._disagree_pending_review_key = None
 
     def _disagree_cancel(self) -> None:
         self._disagree_cancelled = True
@@ -6228,6 +6242,7 @@ class MainWindow(QMainWindow):
             if result.refreshed_observation:
                 candidate.observation = result.refreshed_observation
             self._disagree_paused = True
+            self._disagree_pending_review_key = self._disagree_candidate_key(candidate)
             if self._disagree_dialog:
                 self._disagree_dialog.set_paused_for_review(
                     result.message,
@@ -6423,6 +6438,7 @@ class MainWindow(QMainWindow):
         self._pending_target_obs_id = None
         self._pending_target_taxon = ""
         self._disagree_resume_after_auth = False
+        self._disagree_pending_review_key = None
         if self._disagree_delay_timer:
             self._disagree_delay_timer.stop()
         if self._disagree_dialog:
@@ -6466,14 +6482,12 @@ class MainWindow(QMainWindow):
         obs = self._current_observation()
         if obs is None:
             return
-        self._bulk_touched_obs_ids.add(obs.obs_id)
         open_external_url_silently(obs.url)
 
     def _copy_obs_url(self) -> None:
         obs = self._current_observation()
         if obs is None:
             return
-        self._bulk_touched_obs_ids.add(obs.obs_id)
         QApplication.clipboard().setText(obs.url)
         self._status_label.setText(f"Copied observation URL: {obs.url}")
 
@@ -6821,6 +6835,11 @@ class MainWindow(QMainWindow):
             self._pending_identify_actions_dialog.close()
         for window in list(self._identify_windows):
             window.close()
+        from observation_workbench.ui.identify_window import (
+            clear_pending_mycomap_vision_requests,
+        )
+
+        clear_pending_mycomap_vision_requests()
         for window in list(self._reconciliation_windows):
             window.close()
         s = self._settings

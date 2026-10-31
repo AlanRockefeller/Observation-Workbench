@@ -10,13 +10,24 @@ from __future__ import annotations
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
+    QIODevice,
+    QObject,
+    QRunnable,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QImage, QImageReader, QPixmap
 
 from observation_workbench.api.client import INatClient
 from observation_workbench.models import StudyObservation, StudyPhoto
@@ -42,6 +53,13 @@ _MAX_PARTIAL_FAILURES = 12
 # (non-focused) prefetch/upgrade workers run at once keeps the media budget
 # in check without shrinking the size any single photo is fetched at.
 _MAX_CONCURRENT_BACKGROUND_PREFETCH = 3
+# Identify decodes only as many nearby photos as fit in this share of the
+# memory budget; the rest of the radius is downloaded to disk without decoding.
+# Warming more than fits would evict the very photos the reviewer sees next.
+_IDENTIFY_WARM_MEMORY_FRACTION = 0.75
+# Decoded size of a typical iNat "original" (2048x1536, 32-bit) used before any
+# pixmap has been cached to measure real sizes.
+_TYPICAL_ORIGINAL_PIXMAP_BYTES = 2048 * 1536 * 4
 
 
 class ImageRequestMode(str, Enum):
@@ -113,6 +131,8 @@ class _ImageRequest:
     counts_against_background_cap: bool = False
     focus_exempt: bool = False
     started_at: float = 0.0
+    # Download to the disk cache only; no decode, no memory-cache entry.
+    disk_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -194,6 +214,51 @@ class _ImageWorker(QRunnable):
         for candidate_number, (size, url) in enumerate(self._candidates, start=1):
             if self._is_cancelled():
                 return _ImageTerminalResult(self._request, cancelled=True)
+
+            if self._request.disk_only:
+                if self._disk_cache.has(self._request.photo_id, size):
+                    return _ImageTerminalResult(
+                        self._request,
+                        loaded_size=size,
+                        attempts=tuple(failures),
+                        source="disk",
+                    )
+                try:
+                    data = self._client.download_image(url)
+                except Exception as exc:
+                    failures.append(
+                        _failure_from_exception(
+                            self._request.photo_id,
+                            url,
+                            size,
+                            candidate_number,
+                            exc,
+                        )
+                    )
+                    continue
+                if not _has_readable_image_header(data):
+                    failures.append(
+                        ImageAttemptFailure(
+                            photo_id=self._request.photo_id,
+                            url=url,
+                            size=size,
+                            candidate_number=candidate_number,
+                            exception_type="ImageDecodeError",
+                            message="Downloaded image bytes could not be decoded",
+                            status_code=None,
+                            timestamp=_utc_timestamp(),
+                        )
+                    )
+                    continue
+                self._disk_cache.put(
+                    self._request.photo_id, size, data, _detect_extension(data)
+                )
+                return _ImageTerminalResult(
+                    self._request,
+                    loaded_size=size,
+                    attempts=tuple(failures),
+                    source="network",
+                )
 
             cached_bytes = self._disk_cache.get(self._request.photo_id, size)
             if cached_bytes is not None:
@@ -317,6 +382,22 @@ class ImagePrefetcher(QObject):
         self._superseded_tokens: set[int] = set()
         self._background_prefetch_in_flight = 0
         self._focused_photo_id: int | None = None
+        # While > 0, request-state emissions are coalesced into one emit when
+        # the outermost batch ends (a navigation can start dozens of requests).
+        self._state_emit_batch_depth = 0
+        self._state_emit_pending = False
+        # Last Identify position as (generation, obs_idx, photo_idx, radius,
+        # direction). Finished background requests re-run it so free slots are
+        # refilled while the reviewer stays on one observation.
+        self._identify_position: tuple[int, int, int, int, int] | None = None
+        # Photos decoded into memory since the last Identify navigation. A
+        # refill never re-decodes these, so a too-small memory budget cannot
+        # turn into an endless evict/re-decode loop.
+        self._identify_warmed: set[int] = set()
+        self._identify_refill_timer = QTimer(self)
+        self._identify_refill_timer.setSingleShot(True)
+        self._identify_refill_timer.setInterval(0)
+        self._identify_refill_timer.timeout.connect(self._refill_identify_prefetch)
 
     def set_observations(
         self,
@@ -364,6 +445,7 @@ class ImagePrefetcher(QObject):
         only, so retaining the generation is safe and avoids needless reloads.
         """
         self._observations = list(observations)
+        self._identify_position = None
 
     def update_position(
         self,
@@ -375,6 +457,24 @@ class ImagePrefetcher(QObject):
         include_secondary: bool = True,
     ) -> None:
         """Prefetch likely next observations without lowering image quality."""
+        with self._batched_request_state():
+            self._update_position_unbatched(
+                obs_idx,
+                photo_idx,
+                radius,
+                direction=direction,
+                include_secondary=include_secondary,
+            )
+
+    def _update_position_unbatched(
+        self,
+        obs_idx: int,
+        photo_idx: int = 0,
+        radius: int = 3,
+        *,
+        direction: int = 0,
+        include_secondary: bool = True,
+    ) -> None:
         del photo_idx
         if not self._observations:
             return
@@ -435,54 +535,122 @@ class ImagePrefetcher(QObject):
         radius: int = 3,
         direction: int = 0,
     ) -> None:
-        """Identify prefetch prioritizes the visible photo without bypassing cooldowns."""
+        """Identify prefetch prioritizes the visible photo without bypassing cooldowns.
+
+        Photos nearest the reviewer's direction of travel are decoded into
+        memory while they fit in the memory budget; the rest of the radius is
+        only downloaded to disk. Free background slots are refilled as
+        requests finish, until this position's work is done.
+        """
+        self._identify_position = (
+            self._generation,
+            obs_idx,
+            photo_idx,
+            radius,
+            direction,
+        )
+        self._identify_warmed.clear()
+        with self._batched_request_state():
+            self._prefetch_identify_position_unbatched(
+                obs_idx, photo_idx, radius, direction
+            )
+
+    def _prefetch_identify_position_unbatched(
+        self,
+        obs_idx: int,
+        photo_idx: int = 0,
+        radius: int = 3,
+        direction: int = 0,
+    ) -> None:
         if not 0 <= obs_idx < len(self._observations):
             return
         current = self._observations[obs_idx]
+        selected_index = 0
         focused_photo_id: int | None = None
         if current.photos:
             selected_index = min(max(0, photo_idx), len(current.photos) - 1)
             focused_photo_id = current.photos[selected_index].photo_id
         self._set_focused_photo(focused_photo_id)
+
+        # Visiting order is priority order: the selected photo, the rest of
+        # the current observation, then neighbors with the direction of travel
+        # first (the observation behind at distance d follows the one ahead at
+        # distance d + 1).
+        ordered: list[tuple[int, int, StudyPhoto, bool]] = []
         if current.photos:
-            self.request_photo(
-                current.photos[selected_index],
-                current.obs_id,
-                obs_idx,
-                selected_index,
-                priority=100,
+            ordered.append(
+                (obs_idx, selected_index, current.photos[selected_index], True)
+            )
+            ordered.extend(
+                (obs_idx, image_index, photo, False)
+                for image_index, photo in enumerate(current.photos)
+                if image_index != selected_index
+            )
+        forward = 1 if direction >= 0 else -1
+        neighbor_indexes: list[int] = []
+        for distance in range(1, radius + 1):
+            neighbor_indexes.append(obs_idx + forward * distance)
+            if distance > 1:
+                neighbor_indexes.append(obs_idx - forward * (distance - 1))
+        if radius:
+            neighbor_indexes.append(obs_idx - forward * radius)
+        for index in neighbor_indexes:
+            if 0 <= index < len(self._observations):
+                ordered.extend(
+                    (index, image_index, photo, False)
+                    for image_index, photo in enumerate(
+                        self._observations[index].photos
+                    )
+                )
+
+        warm_slots = self._identify_warm_slots()
+        for position, (index, image_index, photo, focused) in enumerate(ordered):
+            warm = position < warm_slots
+            if warm and photo.photo_id in self._identify_warmed:
+                continue
+            started = self.request_photo(
+                photo,
+                self._observations[index].obs_id,
+                index,
+                image_index,
+                priority=100 if focused else 90 - position,
                 request_mode=ImageRequestMode.BACKGROUND_PREFETCH,
                 # The focused photo must stay instant regardless of how many
                 # neighboring background prefetches are already in flight.
-                background_cap_exempt=True,
+                background_cap_exempt=focused,
+                disk_only=not warm,
             )
-            for image_index, photo in enumerate(current.photos):
-                if image_index != selected_index:
-                    self.request_photo(
-                        photo,
-                        current.obs_id,
-                        obs_idx,
-                        image_index,
-                        priority=90,
-                        request_mode=ImageRequestMode.BACKGROUND_PREFETCH,
-                    )
+            if warm and (started or self._has_memory_rendition(photo.photo_id)):
+                self._identify_warmed.add(photo.photo_id)
+        # The requests above touched the memory LRU in priority order, leaving
+        # the selected photo least recent. Re-touch the warm window from
+        # lowest to highest priority so eviction takes far photos first.
+        for _index, _image_index, photo, _focused in reversed(ordered[:warm_slots]):
+            for size in _SIZE_ORDER:
+                key = (photo.photo_id, size)
+                if key in self._memory:
+                    self._memory.move_to_end(key)
 
-        offsets = (1, -1) if direction >= 0 else (-1, 1)
-        for distance in range(1, radius + 1):
-            for offset in offsets:
-                index = obs_idx + distance * offset
-                if not 0 <= index < len(self._observations):
-                    continue
-                observation = self._observations[index]
-                for image_index, photo in enumerate(observation.photos):
-                    self.request_photo(
-                        photo,
-                        observation.obs_id,
-                        index,
-                        image_index,
-                        priority=80 - distance * 10 - image_index,
-                        request_mode=ImageRequestMode.BACKGROUND_PREFETCH,
-                    )
+    def _identify_warm_slots(self) -> int:
+        if self._memory:
+            per_photo = max(1, self._memory_bytes // len(self._memory))
+        else:
+            per_photo = _TYPICAL_ORIGINAL_PIXMAP_BYTES
+        budget = self._max_memory_bytes * _IDENTIFY_WARM_MEMORY_FRACTION
+        return max(1, int(budget // per_photo))
+
+    def _has_memory_rendition(self, photo_id: int) -> bool:
+        return any((photo_id, size) in self._memory for size in _SIZE_ORDER)
+
+    def _refill_identify_prefetch(self) -> None:
+        position = self._identify_position
+        if position is None or position[0] != self._generation:
+            return
+        _generation, obs_idx, photo_idx, radius, direction = position
+        with self._batched_request_state():
+            self._prefetch_identify_position_unbatched(
+                obs_idx, photo_idx, radius, direction
+            )
 
     def request_photo(
         self,
@@ -495,6 +663,7 @@ class ImagePrefetcher(QObject):
         request_mode: ImageRequestMode = ImageRequestMode.NORMAL,
         retry: bool | None = None,
         background_cap_exempt: bool = False,
+        disk_only: bool = False,
     ) -> bool:
         """Request a photo and return whether a new worker was started.
 
@@ -515,6 +684,7 @@ class ImagePrefetcher(QObject):
             priority,
             request_mode,
             background_cap_exempt=background_cap_exempt,
+            disk_only=disk_only,
         )
 
     def is_request_in_flight(self, photo_id: int) -> bool:
@@ -614,6 +784,7 @@ class ImagePrefetcher(QObject):
         request_mode: ImageRequestMode,
         *,
         background_cap_exempt: bool = False,
+        disk_only: bool = False,
     ) -> bool:
         existing_token = self._request_for_photo.get(photo.photo_id)
         existing_request = (
@@ -655,6 +826,16 @@ class ImagePrefetcher(QObject):
             previous_loaded_size is not None
             and candidates[0][0] == previous_loaded_size
         )
+        if disk_only:
+            if warming_memory_cache:
+                return False  # Already on disk; nothing to download.
+            if previous_loaded_size is None and self._disk_cache.has(
+                photo.photo_id, candidates[0][0]
+            ):
+                # Cached by an earlier session: record it so later passes skip
+                # the stat calls, and let a warm request decode it when needed.
+                state.loaded_size = candidates[0][0]
+                return False
         if existing_token is not None and existing_request is not None:
             self._supersede_request(existing_token, existing_request)
         counts_against_cap = (
@@ -696,6 +877,7 @@ class ImagePrefetcher(QObject):
             counts_against_background_cap=counts_against_cap,
             focus_exempt=background_cap_exempt,
             started_at=(time.monotonic() if log.isEnabledFor(logging.DEBUG) else 0.0),
+            disk_only=disk_only,
         )
         if counts_against_cap:
             self._background_prefetch_in_flight += 1
@@ -835,6 +1017,8 @@ class ImagePrefetcher(QObject):
             self._background_prefetch_in_flight = max(
                 0, self._background_prefetch_in_flight - 1
             )
+            if self._identify_position is not None:
+                self._identify_refill_timer.start()
         if result.cancelled:
             self._emit_request_state()
             if (
@@ -858,7 +1042,9 @@ class ImagePrefetcher(QObject):
         state = self._state_for(request.photo_id, create=True)
         assert state is not None
         now = time.monotonic()
-        if (
+        if request.disk_only and result.loaded_size:
+            self._accept_disk_only_success(request, result, state, now)
+        elif (
             result.image is not None
             and not result.image.isNull()
             and result.loaded_size
@@ -874,7 +1060,7 @@ class ImagePrefetcher(QObject):
         ):
             log.debug(
                 "Image request finished obs=%d index=%d photo=%d mode=%s source=%s "
-                "size=%s elapsed=%.1fms attempts=%d",
+                "size=%s elapsed=%.1fms attempts=%d disk_only=%s",
                 request.observation_id,
                 request.observation_index,
                 request.photo_id,
@@ -883,6 +1069,7 @@ class ImagePrefetcher(QObject):
                 result.loaded_size,
                 max(0.0, (now - request.started_at) * 1000.0),
                 len(result.attempts),
+                request.disk_only,
             )
 
     def _accept_success(
@@ -919,6 +1106,24 @@ class ImagePrefetcher(QObject):
             pixmap,
         )
         self.image_diagnostics_changed.emit(request.photo_id)
+
+    def _accept_disk_only_success(
+        self,
+        request: _ImageRequest,
+        result: _ImageTerminalResult,
+        state: _PhotoLoadState,
+        now: float,
+    ) -> None:
+        assert result.loaded_size is not None
+        state.loaded_size = _better_size(state.loaded_size, result.loaded_size)
+        if result.loaded_size == "original":
+            _clear_negative_state(state)
+        elif result.attempts:
+            _append_partial_failures(state, result.attempts)
+            state.complete_failure = None
+            state.last_failure_time = now
+            state.next_original_upgrade_at = now + _ORIGINAL_UPGRADE_COOLDOWN_SECONDS
+            self.image_diagnostics_changed.emit(request.photo_id)
 
     def _accept_failure(
         self,
@@ -966,7 +1171,21 @@ class ImagePrefetcher(QObject):
             self._photo_states.popitem(last=False)
             blocked = 0
 
+    @contextmanager
+    def _batched_request_state(self) -> Iterator[None]:
+        self._state_emit_batch_depth += 1
+        try:
+            yield
+        finally:
+            self._state_emit_batch_depth -= 1
+            if self._state_emit_batch_depth == 0 and self._state_emit_pending:
+                self._state_emit_pending = False
+                self._emit_request_state()
+
     def _emit_request_state(self) -> None:
+        if self._state_emit_batch_depth:
+            self._state_emit_pending = True
+            return
         self.request_state_changed.emit(
             len(self._in_flight),
             tuple(sorted(self._request_for_photo)),
@@ -1047,6 +1266,16 @@ def _append_partial_failures(
     state.partial_failures.extend(attempts)
     if len(state.partial_failures) > _MAX_PARTIAL_FAILURES:
         del state.partial_failures[:-_MAX_PARTIAL_FAILURES]
+
+
+def _has_readable_image_header(data: bytes) -> bool:
+    """Cheaply validate downloaded bytes by reading only the image header."""
+    buffer = QBuffer()
+    buffer.setData(QByteArray(data))
+    if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
+        return False
+    reader = QImageReader(buffer)
+    return reader.canRead() and reader.size().isValid()
 
 
 def _decode_image(data: bytes) -> QImage:

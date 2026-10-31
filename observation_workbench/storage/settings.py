@@ -54,7 +54,7 @@ LEGACY_CACHE_DIR_NAME = "inat_study"
 
 # Defaults
 DEFAULT_CACHE_MAX_GB = 2.0
-DEFAULT_MEMORY_CACHE_MAX_MB = 256
+DEFAULT_MEMORY_CACHE_MAX_MB = 1024
 DEFAULT_PREFETCH_RADIUS = 2  # items either side of current
 DEFAULT_SCROLL_SPEED_MULTIPLIER = 1.0
 DEFAULT_NAVIGATION_REPEAT_RATE = 4.0  # observations per second
@@ -832,15 +832,6 @@ class AppSettings:
     @identify_active_tab.setter
     def identify_active_tab(self, value: int) -> None:
         self._s.setValue("identify/active_tab", int(value))
-
-    @property
-    def identify_show_reviewed(self) -> bool:
-        """Whether the Identify queue includes observations already reviewed by the viewer."""
-        return self._s.value("identify/show_reviewed", False, type=bool)
-
-    @identify_show_reviewed.setter
-    def identify_show_reviewed(self, value: bool) -> None:
-        self._s.setValue("identify/show_reviewed", bool(value))
 
     # ------------------------------------------------------------------
     # Window geometry
