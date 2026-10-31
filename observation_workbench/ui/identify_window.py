@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import html
 import logging
+import queue
+import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStyle,
     QTabWidget,
@@ -55,6 +58,7 @@ from observation_workbench.services.identify_action_presentation import (
     describe_cancelled_opposite_actions,
     present_identify_action,
 )
+from observation_workbench.services.local_taxonomy import shared_local_taxonomy
 from observation_workbench.services.prefetcher import (
     ImageFailure,
     ImageLoadDiagnostics,
@@ -68,6 +72,7 @@ from observation_workbench.services.vision_taxonomy import (
 )
 from observation_workbench.storage.settings import AppSettings
 from observation_workbench.ui.identify_add_id_dialog import IdentifyAddIDDialog
+from observation_workbench.ui.identify_shortcuts import IdentifyShortcutsDialog
 from observation_workbench.ui.identify_captive_dialog import IdentifyCaptiveDialog
 from observation_workbench.ui.identify_comment_dialog import IdentifyCommentDialog
 from observation_workbench.ui.identify_favorite_dialog import IdentifyFavoriteDialog
@@ -101,8 +106,84 @@ _OPTIMISTIC_REVERT_STATES = frozenset(
 )
 
 _DETAIL_RETRY_COOLDOWN_SECONDS = 45.0
+_THUMBNAIL_EDGE = 64
+_MAX_THUMBNAIL_ICONS = 600
 _MISSING_DETAIL_RETRY_COOLDOWN_SECONDS = 90.0
 _MAX_AUTOMATIC_DETAIL_ATTEMPTS = 2
+
+
+class _PhaseTimer:
+    """Per-phase wall-clock timer for ``--debug`` Identify profiling.
+
+    Every method is a no-op when disabled, so navigation pays nothing for it
+    outside DEBUG logging.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = log.isEnabledFor(logging.DEBUG)
+        self._started = time.perf_counter() if self.enabled else 0.0
+        self._last = self._started
+        self._phases: list[str] = []
+
+    def mark(self, phase: str) -> None:
+        if not self.enabled:
+            return
+        now = time.perf_counter()
+        self._phases.append(f"{phase}={(now - self._last) * 1000.0:.1f}")
+        self._last = now
+
+    def summary(self) -> str:
+        total = (time.perf_counter() - self._started) * 1000.0
+        return f"total={total:.1f}ms " + " ".join(self._phases)
+
+
+class _DaemonTaskPool:
+    """Small bounded daemon pool for long calls that must not delay shutdown."""
+
+    def __init__(self, max_workers: int) -> None:
+        self._tasks: queue.Queue[QRunnable] = queue.Queue()
+        self._threads = [
+            threading.Thread(
+                target=self._run,
+                name=f"mycomap-vision-{index + 1}",
+                daemon=True,
+            )
+            for index in range(max_workers)
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def start(self, task: QRunnable) -> None:
+        self._tasks.put(task)
+
+    def clear(self) -> None:
+        while True:
+            try:
+                self._tasks.get_nowait()
+            except queue.Empty:
+                return
+            else:
+                self._tasks.task_done()
+
+    def _run(self) -> None:
+        while True:
+            task = self._tasks.get()
+            try:
+                task.run()
+            finally:
+                self._tasks.task_done()
+
+
+# Vision calls can block for up to two minutes. Keep them off Qt's shared pool
+# so image loading, detail refreshes, autocomplete, and application shutdown do
+# not queue behind a burst of Vision requests. Daemon workers let an in-flight
+# HTTP call finish without holding process shutdown open.
+_MYCOMAP_VISION_POOL = _DaemonTaskPool(max_workers=2)
+
+
+def clear_pending_mycomap_vision_requests() -> None:
+    """Discard Vision requests that have not started during application shutdown."""
+    _MYCOMAP_VISION_POOL.clear()
 
 
 class _DetailsSignals(QObject):
@@ -228,6 +309,7 @@ class _DetailRequest:
     observation_versions: tuple[tuple[int, int], ...]
     explicit: bool
     operation: str
+    started_at: float = 0.0
 
     def version_for(self, observation_id: int) -> int:
         for candidate_id, version in self.observation_versions:
@@ -357,8 +439,19 @@ class IdentifyWindow(QMainWindow):
         self._active_image_photo_ids: frozenset[int] = frozenset()
         self._thumbnail_buttons: dict[int, QPushButton] = {}
         self._thumbnail_photo_ids: tuple[int, ...] = ()
+        # photo_id -> (source pixmap cacheKey, scaled icon); avoids re-scaling
+        # multi-megapixel originals on the GUI thread on every revisit.
+        self._thumbnail_icons: OrderedDict[int, tuple[int, QIcon, QSize]] = (
+            OrderedDict()
+        )
+        # (photo_id, perf_counter start) while DEBUG timing a visible photo
+        # that was not already in memory when it was selected.
+        self._pending_image_timing: tuple[int, float] | None = None
         self._optimistic_taxa: dict[int, _OptimisticTaxon] = {}
         self._add_id_dialog: IdentifyAddIDDialog | None = None
+        self._shortcuts_dialog: IdentifyShortcutsDialog | None = None
+        # Last cancelled Add ID entry: (observation_id, taxon, body, disagree).
+        self._add_id_draft: tuple[int, str, str, bool] | None = None
         self._comment_dialog: IdentifyCommentDialog | None = None
         self._favorite_dialog: IdentifyFavoriteDialog | None = None
         self._captive_dialog: IdentifyCaptiveDialog | None = None
@@ -383,6 +476,9 @@ class IdentifyWindow(QMainWindow):
         self._vision_family_live_signals: set[_VisionTaxonomySignals] = set()
 
         self.setWindowTitle("iNaturalist Identify")
+        # Fungal names for instant Add ID suggestions; loads/refreshes off-thread.
+        self._local_taxonomy = shared_local_taxonomy(settings.cache_dir)
+        self._local_taxonomy.ensure_started()
         self._prefetch = ImagePrefetcher(
             client,
             cache,
@@ -439,7 +535,6 @@ class IdentifyWindow(QMainWindow):
         self._header.setFont(header_font)
         header_row.addWidget(self._header, 1)
         self._show_reviewed_checkbox = QCheckBox("Show reviewed", self)
-        self._show_reviewed_checkbox.setChecked(self._settings.identify_show_reviewed)
         self._show_reviewed_checkbox.toggled.connect(self._on_show_reviewed_toggled)
         header_row.addWidget(self._show_reviewed_checkbox, 0, Qt.AlignmentFlag.AlignTop)
         image_layout.addLayout(header_row)
@@ -478,6 +573,9 @@ class IdentifyWindow(QMainWindow):
 
         captive_controls = QHBoxLayout()
         self._captive_button = QPushButton("Captive/Cultivated", self)
+        self._captive_button.setToolTip(
+            "Change your Captive/Cultivated Data Quality vote (X)"
+        )
         self._captive_button.clicked.connect(self._open_captive)
         captive_controls.addWidget(self._captive_button)
         captive_controls.addStretch()
@@ -541,9 +639,11 @@ class IdentifyWindow(QMainWindow):
         self._comment_action.triggered.connect(self._open_comment)
         toolbar.addAction(self._comment_action)
         self._reviewed_action = QAction("Reviewed", self)
+        self._reviewed_action.setToolTip("Mark the observation reviewed (R)")
         self._reviewed_action.triggered.connect(self._mark_reviewed)
         toolbar.addAction(self._reviewed_action)
         self._favorite_action = QAction("Favorite", self)
+        self._favorite_action.setToolTip("Add or remove favorite (F)")
         self._favorite_action.triggered.connect(self._open_favorite)
         toolbar.addAction(self._favorite_action)
         self._vision_action = QAction("Vision", self)
@@ -552,6 +652,15 @@ class IdentifyWindow(QMainWindow):
         )
         self._vision_action.triggered.connect(self._request_mycomap_vision)
         toolbar.addAction(self._vision_action)
+        toolbar_spacer = QWidget(toolbar)
+        toolbar_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        toolbar.addWidget(toolbar_spacer)
+        self._shortcuts_action = QAction("Keyboard shortcuts", self)
+        self._shortcuts_action.setToolTip("Show all Identify keyboard shortcuts (?)")
+        self._shortcuts_action.triggered.connect(self._show_shortcuts)
+        toolbar.addAction(self._shortcuts_action)
         self._refresh_action_entry_availability()
 
         self._network_label = QLabel("Network: normal", self)
@@ -582,6 +691,7 @@ class IdentifyWindow(QMainWindow):
     def _show_current_observation(self, direction: int = 0) -> None:
         if self._closed or not self._session.items:
             return
+        timer = _PhaseTimer()
         self._navigation_direction = direction
         self._observation_index = max(
             0,
@@ -596,17 +706,25 @@ class IdentifyWindow(QMainWindow):
         )
         self._brightness = 0
         self._update_header()
+        # Pending actions first, without rendering, so the Info tab is built
+        # once below instead of once per call.
+        self._update_pending_action_status(render_info=False)
+        timer.mark("journal")
         self._info_tab.set_observation(observation)
+        timer.mark("info")
         self._update_vision_panel(observation.obs_id)
         self._vision_ready_ids.discard(observation.obs_id)
         self._vision_action.setEnabled(
             observation.obs_id not in self._vision_pending_items
         )
+        timer.mark("vision")
         self._refresh_action_entry_availability()
-        self._update_pending_action_status()
+        timer.mark("availability")
         self._ensure_thumbnail_strip(observation)
         self._update_thumbnail_selection(scroll_selected=True)
-        self._display_selected_photo(preserve_view=False)
+        timer.mark("thumbs")
+        image_state = self._display_selected_photo(preserve_view=False)
+        timer.mark("photo")
         self._prefetch.prefetch_identify_position(
             self._observation_index,
             self._photo_index,
@@ -614,20 +732,36 @@ class IdentifyWindow(QMainWindow):
             direction=direction,
         )
         self._update_selected_loading_state()
+        timer.mark("prefetch")
         self._load_nearby_details()
         self._derive_network_status()
+        timer.mark("details")
+        if timer.enabled:
+            log.debug(
+                "Identify timing: show obs=%d index=%d photos=%d image=%s %s",
+                observation.obs_id,
+                self._observation_index,
+                len(observation.photos),
+                image_state,
+                timer.summary(),
+            )
 
-    def _display_selected_photo(self, *, preserve_view: bool) -> None:
+    def _display_selected_photo(self, *, preserve_view: bool) -> str:
+        """Show the selected photo; return its cache state for debug timing."""
+        self._pending_image_timing = None
         observation = self._current_observation()
         if not observation.photos or self._selected_photo_id is None:
             self._photo_panel.show_no_photo()
-            return
+            return "none"
         photo = self._current_photo()
         if photo is None:
             self._photo_panel.show_no_photo()
-            return
+            return "none"
         self._photo_panel.begin_photo(photo.photo_id)
-        cached = self._prefetch.get_best_cached(photo.photo_id)
+        # Memory only: a disk-cached original takes tens to hundreds of ms to
+        # read and decode, which would stall key handling. The focused-photo
+        # prefetch request decodes it on a worker instead.
+        cached = self._prefetch.get_best_memory_cached(photo.photo_id)
         if cached is not None:
             pixmap, size = cached
             self._photo_panel.set_photo(
@@ -644,6 +778,13 @@ class IdentifyWindow(QMainWindow):
         diagnostics = self._prefetch.diagnostics_for_photo(photo.photo_id)
         if diagnostics is not None and diagnostics.partial_failures:
             self._photo_panel.show_partial_details(photo.photo_id)
+        if cached is not None:
+            return f"memory:{cached[1]}"
+        if failure is not None:
+            return "failed"
+        if log.isEnabledFor(logging.DEBUG):
+            self._pending_image_timing = (photo.photo_id, time.perf_counter())
+        return "pending"
 
     def _update_selected_loading_state(self) -> None:
         photo = self._current_photo()
@@ -697,10 +838,14 @@ class IdentifyWindow(QMainWindow):
                 )
             )
             self._thumbnail_buttons[photo.photo_id] = button
-            cached = self._prefetch.get_best_cached(photo.photo_id)
+            cached = self._prefetch.get_best_memory_cached(photo.photo_id)
             if cached is not None:
                 self._set_thumbnail_pixmap(photo.photo_id, cached[0])
             self._thumbnail_layout.addWidget(button)
+            # Children added to a visible parent are shown via a queued call;
+            # until then they are excluded from sizeHint() and adjustSize()
+            # would collapse the (non-resizable) strip to a few pixels.
+            button.show()
         self._thumbnail_body.adjustSize()
         self._thumbnail_body.setMinimumWidth(self._thumbnail_body.sizeHint().width())
         self._thumbnail_scroll.horizontalScrollBar().setValue(horizontal_scroll)
@@ -718,14 +863,34 @@ class IdentifyWindow(QMainWindow):
         button = self._thumbnail_buttons.get(photo_id)
         if button is None or pixmap.isNull():
             return
-        icon_pixmap = pixmap.scaled(
-            64,
-            64,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        button.setIcon(QIcon(icon_pixmap))
-        button.setIconSize(icon_pixmap.size())
+        cached_icon = self._thumbnail_icons.get(photo_id)
+        if cached_icon is not None and cached_icon[0] == pixmap.cacheKey():
+            self._thumbnail_icons.move_to_end(photo_id)
+            _key, icon, icon_size = cached_icon
+        else:
+            source = pixmap
+            if max(pixmap.width(), pixmap.height()) > _THUMBNAIL_EDGE * 4:
+                # A cheap first pass makes the smooth pass operate on ~256px
+                # instead of a full original, with no visible quality loss.
+                source = pixmap.scaled(
+                    _THUMBNAIL_EDGE * 4,
+                    _THUMBNAIL_EDGE * 4,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                )
+            icon_pixmap = source.scaled(
+                _THUMBNAIL_EDGE,
+                _THUMBNAIL_EDGE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            icon = QIcon(icon_pixmap)
+            icon_size = icon_pixmap.size()
+            self._thumbnail_icons[photo_id] = (pixmap.cacheKey(), icon, icon_size)
+            while len(self._thumbnail_icons) > _MAX_THUMBNAIL_ICONS:
+                self._thumbnail_icons.popitem(last=False)
+        button.setIcon(icon)
+        button.setIconSize(icon_size)
 
     def _select_photo_id(self, photo_id: int) -> None:
         observation = self._current_observation()
@@ -734,7 +899,8 @@ class IdentifyWindow(QMainWindow):
                 self._photo_index = index
                 self._selected_photo_id = photo_id
                 self._brightness = 0
-                self._display_selected_photo(preserve_view=False)
+                timer = _PhaseTimer()
+                image_state = self._display_selected_photo(preserve_view=False)
                 self._prefetch.prefetch_identify_position(
                     self._observation_index,
                     self._photo_index,
@@ -744,6 +910,14 @@ class IdentifyWindow(QMainWindow):
                 self._update_selected_loading_state()
                 self._update_thumbnail_selection(scroll_selected=True)
                 self._derive_network_status()
+                if timer.enabled:
+                    log.debug(
+                        "Identify timing: photo obs=%d photo=%d image=%s %s",
+                        observation.obs_id,
+                        photo_id,
+                        image_state,
+                        timer.summary(),
+                    )
                 return
 
     def move_observation(self, delta: int) -> None:
@@ -818,7 +992,7 @@ class IdentifyWindow(QMainWindow):
             self._vision_action.setEnabled(False)
             self._vision_panel.clear_result()
 
-        QThreadPool.globalInstance().start(worker)
+        _MYCOMAP_VISION_POOL.start(worker)
         self.statusBar().showMessage(
             f"MycoMap Vision is analyzing observation #{observation_id}; "
             f"{len(self._vision_pending_items)} lookup(s) running in the background.",
@@ -1073,8 +1247,6 @@ class IdentifyWindow(QMainWindow):
         return candidate if candidate is not None else 0
 
     def _on_show_reviewed_toggled(self, checked: bool) -> None:
-        self._settings.identify_show_reviewed = checked
-        self._settings.sync()
         self._update_reviewed_availability()
         if (
             checked
@@ -1164,6 +1336,16 @@ class IdentifyWindow(QMainWindow):
         if photo_id != self._selected_photo_id:
             self._derive_network_status()
             return
+        timing = self._pending_image_timing
+        if timing is not None and timing[0] == photo_id:
+            self._pending_image_timing = None
+            log.debug(
+                "Identify timing: image obs=%d photo=%d size=%s visible after %.1fms",
+                observation_id,
+                photo_id,
+                size,
+                (time.perf_counter() - timing[1]) * 1000.0,
+            )
         self._photo_panel.set_photo(
             photo_id,
             pixmap,
@@ -1306,6 +1488,7 @@ class IdentifyWindow(QMainWindow):
             ),
             explicit=explicit,
             operation=operation,
+            started_at=time.perf_counter() if log.isEnabledFor(logging.DEBUG) else 0.0,
         )
         worker = _DetailsWorker(self._client, tuple(sorted(requested_ids)), token)
         signals = worker.signals
@@ -1330,6 +1513,7 @@ class IdentifyWindow(QMainWindow):
     def _details_loaded(self, request: _DetailRequest, raw: object) -> None:
         if not self._is_current_detail_request(request):
             return
+        timer = _PhaseTimer()
         records = raw.get("results") if isinstance(raw, dict) else []
         returned_ids: set[int] = set()
         current_id = self._current_observation().obs_id
@@ -1381,9 +1565,22 @@ class IdentifyWindow(QMainWindow):
             )
             self._recent_failures.append(("Observation details", state.diagnostic))
 
+        timer.mark("parse")
         if current_id in returned_ids:
             self._reconcile_current_after_detail(previous_photo_id)
+            timer.mark("refresh_current")
         self._derive_network_status()
+        if timer.enabled:
+            log.debug(
+                "Identify timing: details ids=%d returned=%d round_trip=%.1fms "
+                "handler %s",
+                len(request.requested_ids),
+                len(returned_ids),
+                (time.perf_counter() - request.started_at) * 1000.0
+                if request.started_at
+                else 0.0,
+                timer.summary(),
+            )
 
     def _details_failed(self, request: _DetailRequest, exc: Exception) -> None:
         if not self._is_current_detail_request(request):
@@ -1450,9 +1647,9 @@ class IdentifyWindow(QMainWindow):
             selected_photo_changed = previous_photo_id is not None
 
         self._update_header()
+        self._update_pending_action_status(render_info=False)
         self._info_tab.set_observation(observation)
         self._refresh_action_entry_availability()
-        self._update_pending_action_status()
         self._ensure_thumbnail_strip(observation)
         self._update_thumbnail_selection(scroll_selected=selected_photo_changed)
         if selected_photo_changed:
@@ -1597,7 +1794,11 @@ class IdentifyWindow(QMainWindow):
         QMessageBox.information(self, "Recent network failures", text)
 
     def _handle_identify_shortcut(self, event: QKeyEvent, *, execute: bool) -> bool:
-        """Recognize one Identify shortcut for ShortcutOverride or KeyPress."""
+        """Recognize one Identify shortcut for ShortcutOverride or KeyPress.
+
+        Keep ``identify_shortcut_sections()`` in ``ui/identify_shortcuts.py`` in step
+        with any binding added, removed or changed here.
+        """
         key = event.key()
         modifiers = event.modifiers()
         has_alt_or_meta = bool(
@@ -1746,25 +1947,17 @@ class IdentifyWindow(QMainWindow):
         self.statusBar().showMessage(f"Brightness: {sign}{self._brightness}", 1500)
 
     def _show_shortcuts(self) -> None:
-        QMessageBox.information(
-            self,
-            "Identify shortcuts",
-            "Left / Right: previous / next observation\n"
-            "Up / Down: previous / next photo\n"
-            "Alt or Cmd + Left / Right: previous / next photo\n"
-            "Shift + Left / Right: previous / next tab\n"
-            "I: add an identification\n"
-            "A: agree with the observation taxon\n"
-            "C: add a comment\n"
-            "R: mark the observation reviewed; go to the next observation when "
-            "reviewed observations are hidden\n"
-            "F: add or remove favorite\n"
-            "X: change your Captive/Cultivated Data Quality vote\n"
-            "V: ask MycoMap Vision and immediately advance; the result returns next\n"
-            "Z: toggle fit / 1:1\n"
-            "Alt or Cmd + Up / Down: adjust brightness\n"
-            "?: show this help",
-        )
+        dialog = self._shortcuts_dialog
+        if dialog is None:
+            dialog = IdentifyShortcutsDialog(self)
+            dialog.destroyed.connect(self._shortcuts_dialog_destroyed)
+            self._shortcuts_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _shortcuts_dialog_destroyed(self) -> None:
+        self._shortcuts_dialog = None
 
     def apply_confirmed_observation_refresh(self, observation) -> bool:
         """Apply MainWindow's one centralized safe refresh by stable ID.
@@ -1892,8 +2085,10 @@ class IdentifyWindow(QMainWindow):
             self._info_tab.set_login(snapshot.login if snapshot.authenticated else "")
         self._refresh_action_entry_availability()
         if self._session.items:
+            self._update_pending_action_status(render_info=False)
             self._info_tab.set_observation(self._current_observation())
-        self._update_pending_action_status()
+        else:
+            self._update_pending_action_status()
         # Any invalidated details in the current prefetch range restart under
         # the current account, or unauthenticated after logout.
         self._load_nearby_details()
@@ -2909,15 +3104,26 @@ class IdentifyWindow(QMainWindow):
             observation_uuid=observation.uuid,
             opened_login=snapshot.login,
             parent=self,
+            local_taxonomy=self._local_taxonomy,
         )
         dialog.identification_journaled.connect(self._add_id_journaled)
         dialog.pending_actions_requested.connect(self.pending_actions_requested.emit)
+        dialog.draft_discarded.connect(self._store_add_id_draft)
         dialog.destroyed.connect(
             lambda _object=None, tracked=dialog: self._add_id_dialog_destroyed(tracked)
         )
+        draft = self._add_id_draft
+        if draft is not None and draft[0] == dialog.observation_id:
+            dialog.restore_draft(draft[1], draft[2], draft[3])
+        self._add_id_draft = None
         self._add_id_dialog = dialog
         self._refresh_action_entry_availability()
         dialog.show()
+
+    def _store_add_id_draft(
+        self, observation_id: int, taxon: str, body: str, disagree: bool
+    ) -> None:
+        self._add_id_draft = (observation_id, taxon, body, disagree)
 
     def _add_id_dialog_destroyed(self, dialog: IdentifyAddIDDialog) -> None:
         if self._add_id_dialog is dialog:
@@ -3301,7 +3507,7 @@ class IdentifyWindow(QMainWindow):
             state.automatic_attempts = 0
             state.diagnostic = ""
 
-    def _update_pending_action_status(self) -> None:
+    def _update_pending_action_status(self, *, render_info: bool = True) -> None:
         if self._closed or self._action_manager is None or not self._session.items:
             self._pending_actions_panel.hide()
             return
@@ -3315,7 +3521,8 @@ class IdentifyWindow(QMainWindow):
                 action
                 for action in actions
                 if action.is_active or action.requires_attention
-            ]
+            ],
+            render=render_info,
         )
         text = compact_observation_action_text(actions)
         if text:

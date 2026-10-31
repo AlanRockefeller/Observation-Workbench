@@ -35,12 +35,16 @@ class StudyTaxon:
     rank: str = ""
     iconic_taxon_name: str = ""
     ancestry: str = ""  # e.g. "48460/1/2/355675"
+    # Name with the genus spelled out for infrageneric ranks, e.g.
+    # "Hygrophorus section Picearum"; iNat's bare name is just "Picearum".
+    full_name: str = ""
 
     @property
     def display_name(self) -> str:
+        name = self.full_name or self.name
         if StudyTaxon.show_common_names and self.common_name:
-            return f"{self.common_name} ({self.name})"
-        return self.name
+            return f"{self.common_name} ({name})"
+        return name
 
     @property
     def short_display(self) -> str:
@@ -193,15 +197,20 @@ class StudyObservation:
 
     @property
     def display_taxon(self) -> Optional[StudyTaxon]:
-        """Best taxon to display: first of target ID / community / obs taxon with a usable name."""
+        """Best taxon to display: first of target ID / obs taxon / community with a usable name.
+
+        The observation taxon is what iNaturalist shows as the observation's
+        identification; the community taxon can be coarser (e.g. a genus when
+        the observer's species ID lacks a 2/3 majority).
+        """
 
         def _usable(t: Optional["StudyTaxon"]) -> bool:
             return t is not None and bool(t.name) and t.name != "Unknown"
 
         candidates = [
             self.target_identification.taxon if self.target_identification else None,
-            self.community_taxon,
             self.taxon,
+            self.community_taxon,
         ]
         for t in candidates:
             if _usable(t):
@@ -210,7 +219,7 @@ class StudyObservation:
         # Nothing usable — fall back to original priority order
         if self.target_identification:
             return self.target_identification.taxon
-        return self.community_taxon or self.taxon
+        return self.taxon or self.community_taxon
 
     @property
     def display_date(self) -> str:

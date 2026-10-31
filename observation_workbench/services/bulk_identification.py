@@ -65,10 +65,6 @@ SPECIES_LEVEL_RANKS = frozenset(
     {"species", "hybrid", "subspecies", "variety", "form", "infrahybrid"}
 )
 
-# A planning snapshot is trusted at post time for this long, unless the
-# operator opened or copied the observation (and so may have identified it).
-RECHECK_AFTER_SECONDS = 24 * 60 * 60
-
 # An observation the operator identified or commented on this recently was
 # just handled by hand, so planning skips it.
 RECENT_ACTIVITY_SKIP_SECONDS = 60 * 60
