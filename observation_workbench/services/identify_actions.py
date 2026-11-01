@@ -12,10 +12,11 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
@@ -617,6 +618,22 @@ class IdentifyActionManager(QObject):
             "failed_terminal": summary.failed_terminal,
         }
 
+    def retryable_authentication_failure_count(self) -> int:
+        """Return definite failures caused by rejected/expired authentication."""
+        count = 0
+        for action in self._db.get_identify_actions(("failed_retryable",)):
+            try:
+                diagnostic = json.loads(str(action.get("last_error_json") or ""))
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(diagnostic, dict)
+                and diagnostic.get("diagnostic")
+                == "authentication_expired_or_rejected"
+            ):
+                count += 1
+        return count
+
     def history_summary(self) -> dict[str, int]:
         summary = self.action_summary()
         return {
@@ -719,13 +736,30 @@ class IdentifyActionManager(QObject):
         Authorization is deliberately in-memory and is removed before the
         action leaves ``queued``.  It is never inherited by later enqueues.
         """
-        allowed, _reason = self.can_request_dispatch(int(action_id))
-        if not allowed:
-            return False
-        self._dispatch_authorized_action_ids.add(int(action_id))
+        return bool(self.request_dispatch_actions((int(action_id),)))
+
+    def request_dispatch_actions(
+        self, action_ids: Iterable[int]
+    ) -> tuple[int, ...]:
+        """Authorize and schedule the valid current-account rows in one snapshot."""
+        if self._shutting_down:
+            return ()
+        authorized: list[int] = []
+        seen: set[int] = set()
+        for raw_action_id in action_ids:
+            action_id = int(raw_action_id)
+            if action_id in seen:
+                continue
+            seen.add(action_id)
+            allowed, _reason = self.can_request_dispatch(action_id)
+            if allowed:
+                authorized.append(action_id)
+        if not authorized:
+            return ()
+        self._dispatch_authorized_action_ids.update(authorized)
         self._paused = False
         self._dispatch_next()
-        return True
+        return tuple(authorized)
 
     def resume_queued_actions(self) -> bool:
         """Authorize exactly the current login's queued-row snapshot."""
@@ -798,26 +832,42 @@ class IdentifyActionManager(QObject):
 
     def retry_definite_failure(self, action_id: int) -> bool:
         """Explicitly make a known-not-applied action eligible for a later resume."""
-        action = self._action(action_id)
-        if action is None or int(action.get("outcome_unknown") or 0):
-            return False
-        # Terminal validation/resource failures need a corrected future action,
-        # not an unchanged blind resubmission. Authentication and temporary
-        # account-state failures are classified as failed_retryable instead.
-        if action["state"] != "failed_retryable":
-            return False
-        changed = self._db.transition_identify_action(
-            int(action_id),
-            (str(action["state"]),),
-            "queued",
-            last_error_json="",
-            last_operation_phase="",
-        )
-        if changed:
-            self._dispatch_authorized_action_ids.discard(int(action_id))
+        return bool(self.retry_definite_failures((int(action_id),)))
+
+    def retry_definite_failures(
+        self, action_ids: Iterable[int]
+    ) -> tuple[int, ...]:
+        """Re-queue selected known failures without authorizing or dispatching them."""
+        changed_ids: list[int] = []
+        seen: set[int] = set()
+        for raw_action_id in action_ids:
+            action_id = int(raw_action_id)
+            if action_id in seen:
+                continue
+            seen.add(action_id)
+            action = self._action(action_id)
+            if action is None or int(action.get("outcome_unknown") or 0):
+                continue
+            # Terminal validation/resource failures need a corrected future action,
+            # not an unchanged blind resubmission. Authentication and temporary
+            # account-state failures are classified as failed_retryable instead.
+            if action["state"] != "failed_retryable":
+                continue
+            changed = self._db.transition_identify_action(
+                action_id,
+                (str(action["state"]),),
+                "queued",
+                last_error_json="",
+                last_operation_phase="",
+            )
+            if changed:
+                self._dispatch_authorized_action_ids.discard(action_id)
+                changed_ids.append(action_id)
+        for action_id in changed_ids:
             self._emit_action_changed(action_id)
+        if changed_ids:
             self._emit_summary()
-        return changed
+        return tuple(changed_ids)
 
     def retry_anyway(
         self, action_id: int, duplicate_risk_confirmed: bool

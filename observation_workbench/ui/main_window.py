@@ -2009,6 +2009,9 @@ class MainWindow(QMainWindow):
         self._startup_recovery_prompt_shown = True
         summary = self._identify_actions.action_summary()
         queue = self._identify_actions.queue_summary()
+        auth_failure_count = (
+            self._identify_actions.retryable_authentication_failure_count()
+        )
         migrated = self._identify_actions.migrated_manual_retry_count
         relevant = {
             "submitted_unverified": summary.submitted_unverified,
@@ -2047,6 +2050,22 @@ class MainWindow(QMainWindow):
         lines.extend(
             f"{labels[key]}: {value}" for key, value in relevant.items() if value
         )
+        if auth_failure_count:
+            noun = "action" if auth_failure_count == 1 else "actions"
+            lines.extend(
+                (
+                    "",
+                    (
+                        f"{auth_failure_count} {noun} previously failed because "
+                        "iNaturalist rejected the authentication in use at that time."
+                    ),
+                    (
+                        "This is the recorded cause of those failures, not a check of "
+                        "your current token. If you authenticated since then, review and "
+                        "re-queue them; otherwise authenticate again first."
+                    ),
+                )
+            )
         if migrated:
             lines.append(
                 f"Legacy manual retries migrated to linked queued actions: {migrated}"
@@ -2060,6 +2079,11 @@ class MainWindow(QMainWindow):
         review = box.addButton(
             "Review pending actions", QMessageBox.ButtonRole.ActionRole
         )
+        authenticate = None
+        if auth_failure_count:
+            authenticate = box.addButton(
+                "Authenticate to iNaturalist…", QMessageBox.ButtonRole.ActionRole
+            )
         resume = box.addButton(
             "Resume queued actions", QMessageBox.ButtonRole.AcceptRole
         )
@@ -2070,6 +2094,8 @@ class MainWindow(QMainWindow):
         clicked = box.clickedButton()
         if clicked is review:
             self._open_pending_identify_actions()
+        elif authenticate is not None and clicked is authenticate:
+            self._authenticate_to_inaturalist()
         elif clicked is resume:
             allowed, required = self._identify_actions.can_resume_queued_actions()
             if allowed:

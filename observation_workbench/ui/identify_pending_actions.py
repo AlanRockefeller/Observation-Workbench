@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from collections.abc import Iterable
+
+from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -15,7 +17,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,11 @@ from observation_workbench.services.identify_action_presentation import (
 )
 from observation_workbench.services.identify_actions import IdentifyActionManager
 from observation_workbench.ui.external_links import open_external_url_silently
+from observation_workbench.ui.table_sort import (
+    SortableTableWidgetItem,
+    enable_click_sorting,
+    sorting_suspended,
+)
 
 
 class IdentifyActionDetailsDialog(QDialog):
@@ -133,6 +139,7 @@ class PendingIdentifyActionsDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._manager = manager
         self._closed = False
+        self._refresh_suspended = False
         self._actions: list[IdentifyActionPresentation] = []
 
         layout = QVBoxLayout(self)
@@ -145,11 +152,12 @@ class PendingIdentifyActionsDialog(QDialog):
         self._table = QTableWidget(0, len(self._COLUMNS), self)
         self._table.setHorizontalHeaderLabels(self._COLUMNS)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.itemSelectionChanged.connect(self._update_controls)
         self._table.itemDoubleClicked.connect(lambda _item: self._show_details())
+        enable_click_sorting(self._table)
         layout.addWidget(self._table, 1)
 
         self._selection_hint = QLabel(self)
@@ -171,7 +179,10 @@ class PendingIdentifyActionsDialog(QDialog):
         )
         self._verify_button = self._button("Verify again", self._verify_selected)
         self._retry_button = self._button(
-            "Retry (re-queue)", self._retry_definite_failure
+            "Retry", self._retry_definite_failure
+        )
+        self._retry_all_button = self._button(
+            "Retry all failed", self._retry_all_definite_failures
         )
         self._retry_anyway_button = self._button("Retry anyway", self._retry_anyway)
         self._open_button = self._button("Open observation", self._open_selected)
@@ -185,6 +196,7 @@ class PendingIdentifyActionsDialog(QDialog):
                 self._cancel_button,
                 self._verify_button,
                 self._retry_button,
+                self._retry_all_button,
                 self._retry_anyway_button,
                 self._open_button,
                 self._details_button,
@@ -210,57 +222,88 @@ class PendingIdentifyActionsDialog(QDialog):
         button.clicked.connect(slot)
         return button
 
-    def refresh(self, selected_action_id: int | None = None) -> None:
+    def refresh(self, selected_action_ids: int | Iterable[int] | None = None) -> None:
         if self._closed:
             return
-        if selected_action_id is None:
-            selected = self._selected_action()
-            selected_action_id = selected.local_action_id if selected else None
+        if selected_action_ids is None:
+            selected_ids = {
+                action.local_action_id for action in self._selected_actions()
+            }
+        elif isinstance(selected_action_ids, int):
+            selected_ids = {selected_action_ids}
+        else:
+            selected_ids = {int(action_id) for action_id in selected_action_ids}
         self._actions = [
             present_identify_action(action) for action in self._manager.list_actions()
         ]
-        self._table.setRowCount(len(self._actions))
-        selected_row = -1
-        for row, action in enumerate(self._actions):
-            values = (
-                f"#{action.local_action_id}",
-                str(action.observation_id),
-                action.account_login,
-                action.action_type,
-                action.intended_summary,
-                action.state_text,
-                action.created_text,
-                str(action.attempt_count),
-                action.error_summary
-                or action.verification_diagnostic
-                or action.verification_status,
-                action.retry_lineage_text,
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setData(Qt.ItemDataRole.UserRole, action.local_action_id)
-                item.setToolTip(value)
-                self._table.setItem(row, column, item)
-            if action.local_action_id == selected_action_id:
-                selected_row = row
+        with sorting_suspended(self._table):
+            self._table.setRowCount(len(self._actions))
+            for row, action in enumerate(self._actions):
+                values = (
+                    f"#{action.local_action_id}",
+                    str(action.observation_id),
+                    action.account_login,
+                    action.action_type,
+                    action.intended_summary,
+                    action.state_text,
+                    action.created_text,
+                    str(action.attempt_count),
+                    action.error_summary
+                    or action.verification_diagnostic
+                    or action.verification_status,
+                    action.retry_lineage_text,
+                )
+                for column, value in enumerate(values):
+                    item = SortableTableWidgetItem(value)
+                    item.setData(Qt.ItemDataRole.UserRole, action.local_action_id)
+                    item.setToolTip(value)
+                    self._table.setItem(row, column, item)
         self._table.resizeColumnsToContents()
-        if selected_row >= 0:
-            self._table.selectRow(selected_row)
+        self._restore_selection(selected_ids)
         self._update_notice()
         self._update_controls()
 
+    def _restore_selection(self, action_ids: set[int]) -> None:
+        self._table.clearSelection()
+        selection_model = self._table.selectionModel()
+        flags = (
+            QItemSelectionModel.SelectionFlag.Select
+            | QItemSelectionModel.SelectionFlag.Rows
+        )
+        first_row = -1
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            if item is None or int(item.data(Qt.ItemDataRole.UserRole)) not in action_ids:
+                continue
+            selection_model.select(self._table.model().index(row, 0), flags)
+            if first_row < 0:
+                first_row = row
+        if first_row >= 0:
+            self._table.setCurrentCell(
+                first_row,
+                0,
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+
+    def _selected_actions(self) -> list[IdentifyActionPresentation]:
+        selected_ids = {
+            int(index.data(Qt.ItemDataRole.UserRole))
+            for index in self._table.selectionModel().selectedRows(0)
+        }
+        by_id = {action.local_action_id: action for action in self._actions}
+        return [
+            by_id[action_id]
+            for action_id in selected_ids
+            if action_id in by_id
+        ]
+
     def _selected_action(self) -> IdentifyActionPresentation | None:
-        items = self._table.selectedItems()
-        if not items:
-            return None
-        action_id = items[0].data(Qt.ItemDataRole.UserRole)
-        for action in self._actions:
-            if action.local_action_id == action_id:
-                return action
-        return None
+        actions = self._selected_actions()
+        return actions[0] if len(actions) == 1 else None
 
     def _update_notice(self) -> None:
         queue = self._manager.queue_summary()
+        summary = self._manager.action_summary()
         eligible = queue.eligible_for_current_account
         other = queue.queued_for_other_accounts
         account_text = f" for {queue.current_login}" if queue.current_login else ""
@@ -271,7 +314,12 @@ class PendingIdentifyActionsDialog(QDialog):
             owners = ", ".join(queue.other_account_logins)
             owner_text = f" ({owners})" if owners else ""
             details.append(f"{other} queued for other account(s){owner_text}")
-        queue_text = " · ".join(details) or "no queued actions"
+        if not eligible and not other:
+            details.append("no queued actions")
+        if summary.failed_retryable:
+            noun = "failure" if summary.failed_retryable == 1 else "failures"
+            details.append(f"{summary.failed_retryable} retryable {noun}")
+        queue_text = " · ".join(details)
         if self._manager.is_running:
             active_id = self._manager.active_action_id
             self._notice.setText(
@@ -292,7 +340,12 @@ class PendingIdentifyActionsDialog(QDialog):
             )
 
     def _update_controls(self) -> None:
+        selected = self._selected_actions()
         action = self._selected_action()
+        retryable = [item for item in selected if item.can_retry_definite_failure]
+        all_retryable = [
+            item for item in self._actions if item.can_retry_definite_failure
+        ]
         queue = self._manager.queue_summary()
         self._resume_button.setEnabled(bool(queue.eligible_for_current_account))
         can_submit = False
@@ -314,13 +367,40 @@ class PendingIdentifyActionsDialog(QDialog):
             if action and action.can_verify
             else "Verify again"
         )
-        self._retry_button.setEnabled(
-            bool(action and action.can_retry_definite_failure)
+        self._retry_button.setEnabled(bool(retryable))
+        self._retry_button.setText(
+            "Retry"
+            if len(retryable) <= 1
+            else f"Retry selected failures ({len(retryable)})"
+        )
+        self._retry_all_button.setEnabled(bool(all_retryable))
+        self._retry_all_button.setText(
+            f"Retry all failed ({len(all_retryable)})"
+            if all_retryable
+            else "Retry all failed"
         )
         self._retry_anyway_button.setEnabled(bool(action and action.can_retry_anyway))
         self._open_button.setEnabled(bool(action and action.can_open_observation))
         self._details_button.setEnabled(action is not None)
-        self._selection_hint.setText(self._next_step_text(action, can_submit))
+        if len(selected) > 1:
+            if retryable:
+                hint = (
+                    f"{len(selected)} actions selected; {len(retryable)} definite failures "
+                    "can be retried together. They will be re-queued and submitted."
+                )
+            elif all(item.state == "queued" for item in selected):
+                hint = (
+                    f"{len(selected)} queued actions selected. Use Resume queued actions "
+                    "to send the current account's queued rows."
+                )
+            else:
+                hint = (
+                    f"{len(selected)} actions selected. Select one row for its individual "
+                    "controls."
+                )
+            self._selection_hint.setText(hint)
+        else:
+            self._selection_hint.setText(self._next_step_text(action, can_submit))
 
     def _next_step_text(
         self,
@@ -346,7 +426,7 @@ class PendingIdentifyActionsDialog(QDialog):
         if action.state == "failed_retryable":
             return (
                 "iNaturalist definitely rejected this action before applying it. Retry "
-                "(re-queue) makes it queued again; then explicitly submit or resume it."
+                "re-queues it and immediately starts processing the queue."
             )
         if action.state == "submitted_unverified":
             return (
@@ -434,9 +514,67 @@ class PendingIdentifyActionsDialog(QDialog):
             self._manager.verify_again(action.local_action_id)
 
     def _retry_definite_failure(self) -> None:
-        action = self._selected_action()
-        if action is not None:
-            self._manager.retry_definite_failure(action.local_action_id)
+        action_ids = tuple(
+            action.local_action_id
+            for action in self._selected_actions()
+            if action.can_retry_definite_failure
+        )
+        self._retry_action_ids(action_ids)
+
+    def _retry_all_definite_failures(self) -> None:
+        action_ids = tuple(
+            action.local_action_id
+            for action in self._actions
+            if action.can_retry_definite_failure
+        )
+        if not action_ids:
+            return
+        count = len(action_ids)
+        box = QMessageBox(
+            QMessageBox.Icon.Question,
+            "Retry all definite failures?",
+            f"Retry all {count} actions known not to have been applied?\n\n"
+            "They will be re-queued locally and immediately submitted for the "
+            "currently authenticated account.",
+            parent=self,
+        )
+        retry = box.addButton(
+            f"Retry {count} actions", QMessageBox.ButtonRole.AcceptRole
+        )
+        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.exec()
+        if box.clickedButton() is retry:
+            self._retry_action_ids(action_ids)
+
+    def _retry_action_ids(self, action_ids: tuple[int, ...]) -> tuple[int, ...]:
+        if not action_ids:
+            return ()
+        self._refresh_suspended = True
+        try:
+            changed_ids = self._manager.retry_definite_failures(action_ids)
+        finally:
+            self._refresh_suspended = False
+        self.refresh(changed_ids)
+        authorized_ids = self._manager.request_dispatch_actions(changed_ids)
+        if changed_ids and len(authorized_ids) < len(changed_ids):
+            required = self._manager.queued_action_account()
+            suffix = f" as {required}" if required else ""
+            started = len(authorized_ids)
+            remaining = len(changed_ids) - started
+            lead = (
+                f"{started} actions started; {remaining} remain queued."
+                if started
+                else f"{remaining} actions were queued but could not be started."
+            )
+            QMessageBox.information(
+                self,
+                "Some actions remain queued" if started else "Actions queued but not started",
+                f"{lead}\n\nAuthenticate{suffix}, then resume the remaining queue.",
+            )
+        self._update_notice()
+        self._update_controls()
+        return changed_ids
 
     def _retry_anyway(self) -> None:
         action = self._selected_action()
@@ -480,7 +618,8 @@ class PendingIdentifyActionsDialog(QDialog):
         dialog.exec()
 
     def _manager_changed(self, _action: object) -> None:
-        self.refresh()
+        if not self._refresh_suspended:
+            self.refresh()
 
     def _summary_changed(self, _summary: object) -> None:
         self._update_notice()
