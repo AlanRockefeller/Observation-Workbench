@@ -133,6 +133,7 @@ class _ImageRequest:
     started_at: float = 0.0
     # Download to the disk cache only; no decode, no memory-cache entry.
     disk_only: bool = False
+    identify_position: tuple[int, int, int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,7 @@ class _ImageTerminalResult:
     attempts: tuple[ImageAttemptFailure, ...] = ()
     cancelled: bool = False
     source: str = "none"
+    cache_write_failed: bool = False
 
 
 class _ImageWorkerSignals(QObject):
@@ -197,6 +199,7 @@ class _ImageWorker(QRunnable):
             return _ImageTerminalResult(self._request, cancelled=True)
 
         failures: list[ImageAttemptFailure] = []
+        cache_write_failed = False
         if not self._candidates:
             failures.append(
                 ImageAttemptFailure(
@@ -250,9 +253,24 @@ class _ImageWorker(QRunnable):
                         )
                     )
                     continue
-                self._disk_cache.put(
+                stored = self._disk_cache.put(
                     self._request.photo_id, size, data, _detect_extension(data)
                 )
+                if not stored:
+                    cache_write_failed = True
+                    failures.append(
+                        ImageAttemptFailure(
+                            photo_id=self._request.photo_id,
+                            url=url,
+                            size=size,
+                            candidate_number=candidate_number,
+                            exception_type="CacheWriteError",
+                            message="Downloaded image bytes could not be stored in the cache",
+                            status_code=None,
+                            timestamp=_utc_timestamp(),
+                        )
+                    )
+                    continue
                 return _ImageTerminalResult(
                     self._request,
                     loaded_size=size,
@@ -337,7 +355,11 @@ class _ImageWorker(QRunnable):
                 source="network",
             )
 
-        return _ImageTerminalResult(self._request, attempts=tuple(failures))
+        return _ImageTerminalResult(
+            self._request,
+            attempts=tuple(failures),
+            cache_write_failed=cache_write_failed,
+        )
 
 
 class ImagePrefetcher(QObject):
@@ -394,6 +416,12 @@ class ImagePrefetcher(QObject):
         # refill never re-decodes these, so a too-small memory budget cannot
         # turn into an endless evict/re-decode loop.
         self._identify_warmed: set[int] = set()
+        # Photos whose disk-only work has finished for the current Identify
+        # position. Cache residency is deliberately not the source of
+        # truth here: a small disk cache may evict an earlier download while
+        # later radius entries are still filling, and refill must not cycle
+        # back to download that photo again until navigation changes.
+        self._identify_disk_prefetch_done: set[int] = set()
         self._identify_refill_timer = QTimer(self)
         self._identify_refill_timer.setSingleShot(True)
         self._identify_refill_timer.setInterval(0)
@@ -416,6 +444,9 @@ class ImagePrefetcher(QObject):
         self._superseded_tokens.clear()
         self._background_prefetch_in_flight = 0
         self._focused_photo_id = None
+        self._identify_position = None
+        self._identify_warmed.clear()
+        self._identify_disk_prefetch_done.clear()
         self._emit_request_state()
 
     def clear(self) -> None:
@@ -430,6 +461,9 @@ class ImagePrefetcher(QObject):
         self._superseded_tokens.clear()
         self._background_prefetch_in_flight = 0
         self._focused_photo_id = None
+        self._identify_position = None
+        self._identify_warmed.clear()
+        self._identify_disk_prefetch_done.clear()
         self._emit_request_state()
 
     def append_observations(self, observations: list[StudyObservation]) -> None:
@@ -446,6 +480,8 @@ class ImagePrefetcher(QObject):
         """
         self._observations = list(observations)
         self._identify_position = None
+        self._identify_warmed.clear()
+        self._identify_disk_prefetch_done.clear()
 
     def update_position(
         self,
@@ -550,6 +586,7 @@ class ImagePrefetcher(QObject):
             direction,
         )
         self._identify_warmed.clear()
+        self._identify_disk_prefetch_done.clear()
         with self._batched_request_state():
             self._prefetch_identify_position_unbatched(
                 obs_idx, photo_idx, radius, direction
@@ -607,6 +644,8 @@ class ImagePrefetcher(QObject):
         for position, (index, image_index, photo, focused) in enumerate(ordered):
             warm = position < warm_slots
             if warm and photo.photo_id in self._identify_warmed:
+                continue
+            if not warm and photo.photo_id in self._identify_disk_prefetch_done:
                 continue
             started = self.request_photo(
                 photo,
@@ -828,6 +867,9 @@ class ImagePrefetcher(QObject):
         )
         if disk_only:
             if warming_memory_cache:
+                self._record_identify_disk_prefetch_done(
+                    photo.photo_id, self._identify_position
+                )
                 return False  # Already on disk; nothing to download.
             if previous_loaded_size is None and self._disk_cache.has(
                 photo.photo_id, candidates[0][0]
@@ -835,6 +877,9 @@ class ImagePrefetcher(QObject):
                 # Cached by an earlier session: record it so later passes skip
                 # the stat calls, and let a warm request decode it when needed.
                 state.loaded_size = candidates[0][0]
+                self._record_identify_disk_prefetch_done(
+                    photo.photo_id, self._identify_position
+                )
                 return False
         if existing_token is not None and existing_request is not None:
             self._supersede_request(existing_token, existing_request)
@@ -878,6 +923,7 @@ class ImagePrefetcher(QObject):
             focus_exempt=background_cap_exempt,
             started_at=(time.monotonic() if log.isEnabledFor(logging.DEBUG) else 0.0),
             disk_only=disk_only,
+            identify_position=self._identify_position if disk_only else None,
         )
         if counts_against_cap:
             self._background_prefetch_in_flight += 1
@@ -1044,6 +1090,8 @@ class ImagePrefetcher(QObject):
         now = time.monotonic()
         if request.disk_only and result.loaded_size:
             self._accept_disk_only_success(request, result, state, now)
+        elif request.disk_only and result.cache_write_failed:
+            self._accept_disk_only_cache_write_failure(request, result, state, now)
         elif (
             result.image is not None
             and not result.image.isNull()
@@ -1115,6 +1163,9 @@ class ImagePrefetcher(QObject):
         now: float,
     ) -> None:
         assert result.loaded_size is not None
+        self._record_identify_disk_prefetch_done(
+            request.photo_id, request.identify_position
+        )
         state.loaded_size = _better_size(state.loaded_size, result.loaded_size)
         if result.loaded_size == "original":
             _clear_negative_state(state)
@@ -1124,6 +1175,31 @@ class ImagePrefetcher(QObject):
             state.last_failure_time = now
             state.next_original_upgrade_at = now + _ORIGINAL_UPGRADE_COOLDOWN_SECONDS
             self.image_diagnostics_changed.emit(request.photo_id)
+
+    def _record_identify_disk_prefetch_done(
+        self,
+        photo_id: int,
+        position: tuple[int, int, int, int, int] | None,
+    ) -> None:
+        if position is not None and self._identify_position == position:
+            self._identify_disk_prefetch_done.add(photo_id)
+
+    def _accept_disk_only_cache_write_failure(
+        self,
+        request: _ImageRequest,
+        result: _ImageTerminalResult,
+        state: _PhotoLoadState,
+        now: float,
+    ) -> None:
+        """Bound refill attempts without blocking a later foreground download."""
+        self._record_identify_disk_prefetch_done(
+            request.photo_id, request.identify_position
+        )
+        _append_partial_failures(state, result.attempts)
+        state.complete_failure = None
+        state.next_automatic_retry_at = 0.0
+        state.last_failure_time = now
+        self.image_diagnostics_changed.emit(request.photo_id)
 
     def _accept_failure(
         self,

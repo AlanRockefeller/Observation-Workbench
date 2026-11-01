@@ -48,8 +48,8 @@ class ImageCache:
                     log.warning("Cache read error %s: %s", p, exc)
         return None
 
-    def put(self, photo_id: int, size: str, data: bytes, ext: str = "jpg") -> None:
-        """Store image bytes. Triggers LRU eviction if needed."""
+    def put(self, photo_id: int, size: str, data: bytes, ext: str = "jpg") -> bool:
+        """Store image bytes and report whether they remain cached after eviction."""
         key = self._key(photo_id, size)
         p = self._path(photo_id, size, ext)
         try:
@@ -70,8 +70,10 @@ class ImageCache:
                 self._remove_stale_variants(key, keep=p)
                 self._db.log_image_access(key, str(p), len(data))
                 self._maybe_evict()
+                return p.exists()
         except OSError as exc:
             log.warning("Cache write error %s: %s", p, exc)
+            return False
 
     def has(self, photo_id: int, size: str) -> bool:
         key = self._key(photo_id, size)
