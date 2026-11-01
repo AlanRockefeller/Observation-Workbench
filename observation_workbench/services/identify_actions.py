@@ -173,6 +173,15 @@ class IdentifyQueueSummary:
 
 
 @dataclass(frozen=True)
+class IdentifyDispatchRejection:
+    """One row rejected before dispatch, with authentication context if relevant."""
+
+    action_id: int
+    reason: str
+    required_login: str = ""
+
+
+@dataclass(frozen=True)
 class VerificationResult:
     status: VerificationStatus
     diagnostic: str = ""
@@ -719,16 +728,39 @@ class IdentifyActionManager(QObject):
 
     def can_request_dispatch(self, action_id: int) -> tuple[bool, str]:
         """Validate a selected row before granting its one-action permission."""
+        rejection = self._dispatch_rejection(int(action_id))
+        return (True, "") if rejection is None else (False, rejection.reason)
+
+    def _dispatch_rejection(
+        self, action_id: int
+    ) -> IdentifyDispatchRejection | None:
         if self._shutting_down:
-            return False, "Identify action manager is shutting down."
+            return IdentifyDispatchRejection(
+                action_id, "Identify action manager is shutting down."
+            )
         action = self._action(action_id)
         if action is None:
-            return False, "The selected action no longer exists."
+            return IdentifyDispatchRejection(
+                action_id, "The selected action no longer exists."
+            )
         if str(action.get("state") or "") != "queued":
-            return False, "Only an ordinary queued action can be submitted."
+            return IdentifyDispatchRejection(
+                action_id, "Only an ordinary queued action can be submitted."
+            )
         if not _journal_action_is_executable(action):
-            return False, "The selected queued action is invalid and needs correction."
-        return self.can_dispatch_for_account(str(action.get("account_login") or ""))
+            return IdentifyDispatchRejection(
+                action_id,
+                "The selected queued action is invalid and needs correction.",
+            )
+        required_login = str(action.get("account_login") or "").strip()
+        allowed, reason = self.can_dispatch_for_account(required_login)
+        if allowed:
+            return None
+        return IdentifyDispatchRejection(
+            action_id,
+            reason,
+            required_login=required_login if required_login else "",
+        )
 
     def request_dispatch(self, action_id: int) -> bool:
         """Authorize and schedule only one selected queued action.
@@ -742,24 +774,33 @@ class IdentifyActionManager(QObject):
         self, action_ids: Iterable[int]
     ) -> tuple[int, ...]:
         """Authorize and schedule the valid current-account rows in one snapshot."""
-        if self._shutting_down:
-            return ()
+        authorized, _rejections = self.request_dispatch_actions_with_results(
+            action_ids
+        )
+        return authorized
+
+    def request_dispatch_actions_with_results(
+        self, action_ids: Iterable[int]
+    ) -> tuple[tuple[int, ...], tuple[IdentifyDispatchRejection, ...]]:
+        """Authorize valid rows and report each row rejected before dispatch."""
         authorized: list[int] = []
+        rejections: list[IdentifyDispatchRejection] = []
         seen: set[int] = set()
         for raw_action_id in action_ids:
             action_id = int(raw_action_id)
             if action_id in seen:
                 continue
             seen.add(action_id)
-            allowed, _reason = self.can_request_dispatch(action_id)
-            if allowed:
+            rejection = self._dispatch_rejection(action_id)
+            if rejection is None:
                 authorized.append(action_id)
-        if not authorized:
-            return ()
-        self._dispatch_authorized_action_ids.update(authorized)
-        self._paused = False
-        self._dispatch_next()
-        return tuple(authorized)
+            else:
+                rejections.append(rejection)
+        if authorized:
+            self._dispatch_authorized_action_ids.update(authorized)
+            self._paused = False
+            self._dispatch_next()
+        return tuple(authorized), tuple(rejections)
 
     def resume_queued_actions(self) -> bool:
         """Authorize exactly the current login's queued-row snapshot."""

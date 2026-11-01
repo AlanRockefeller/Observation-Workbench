@@ -41,10 +41,11 @@ fullscreen. Pressing an Identify shortcut such as `A` (Agree) or `R`
   `iNaturalist Identify`)
 - `hyprctl configerrors` reported no configuration errors
 
-## Current diagnosis
+## Historical diagnosis (superseded)
 
-The Identify shortcuts do not resize the window. `A` and `R` only start their
-respective application actions, and the Identify window contains no
+Before the label-lifecycle root cause was captured, the investigation established
+that the Identify shortcuts did not resize the window. `A` and `R` only start
+their respective application actions, and the Identify window contains no
 `showNormal()`, `showFullScreen()`, or equivalent action-specific window-state
 change.
 
@@ -60,14 +61,15 @@ internal=0, client=0
 Hyprland documents `internal=0, client=2` as leaving the window in the normal
 compositor layout while reporting fullscreen state to the application. This
 client-only state is intentionally different from compositor-owned fullscreen.
-The leading hypothesis is that Qt later requests or acknowledges a normal
-client state during an interaction, which clears the client-only fullscreen
-state and exposes the original tiled geometry. This is consistent with the
-symptom, but an event-level trace has not yet been captured.
+The leading hypothesis at that stage was that Qt later requested or acknowledged
+a normal client state during an interaction, clearing the client-only fullscreen
+state and exposing the original tiled geometry. The later event-level trace
+superseded this hypothesis by identifying the detached-label window lifecycle
+described under **Root cause**.
 
 Reference: [Hyprland fullscreen-state documentation](https://wiki.hypr.land/Configuring/Basics/Dispatchers/#fullscreenstate)
 
-## Current workarounds
+## Historical workarounds
 
 - `Super+F`: regular fullscreen
 - `Super+Alt+F`: maximized/full-width mode
@@ -77,7 +79,7 @@ client-state change.
 
 ## App-specific workaround (removed)
 
-The user binding for `Ctrl+Super+F` now calls:
+The temporary user binding for `Ctrl+Super+F` called:
 
 ```text
 ~/.local/bin/observation-workbench-fullscreen-toggle
@@ -100,10 +102,10 @@ After installation, `hyprctl reload` succeeded, `hyprctl configerrors`
 reported no errors, and Hyprland reported exactly one live
 `Ctrl+Super+F` binding.
 
-## Options to revisit
+## Options if the issue recurs
 
-1. If the app-specific workaround proves reliable, keep it and recheck its
-   dispatcher syntax after major Hyprland upgrades.
+1. Reintroduce the app-specific workaround if needed, and recheck its dispatcher
+   syntax after major Hyprland upgrades.
 2. Add an application-owned fullscreen shortcut to Identify if consistent
    cross-desktop behavior is preferable to a Hyprland-specific override.
 3. If the issue persists, record `fullscreen` and `fullscreenClient`

@@ -157,7 +157,14 @@ class MetadataPanel(QWidget):
             self._layout.addWidget(_divider())
 
         # Observation taxon (what iNat shows), falling back to the community taxon
-        shown = obs.taxon or obs.community_taxon
+        observation_name = (
+            str(obs.taxon.name or "").strip().casefold() if obs.taxon else ""
+        )
+        shown = (
+            obs.taxon
+            if observation_name and observation_name != "unknown"
+            else obs.community_taxon
+        )
         s2 = _Section("Observation")
         if shown:
             s2.add_row("Taxon", _taxon_html(shown.display_name, shown.name))

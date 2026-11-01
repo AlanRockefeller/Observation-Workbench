@@ -473,9 +473,9 @@ class LocalTaxonomy(QObject):
         self._pool.setMaxThreadCount(1)
         self._running = False
         self._loaded = False
-        self._last_attempt = 0.0
+        self._last_attempt = float("-inf")
         self._full_due = False
-        self._last_idle_attempt = 0.0
+        self._last_idle_attempt = float("-inf")
         self._last_input = time.monotonic()
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(_IDLE_CHECK_INTERVAL_MS)

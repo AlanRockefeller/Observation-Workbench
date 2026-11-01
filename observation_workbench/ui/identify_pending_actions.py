@@ -534,8 +534,9 @@ class PendingIdentifyActionsDialog(QDialog):
             QMessageBox.Icon.Question,
             "Retry all definite failures?",
             f"Retry all {count} actions known not to have been applied?\n\n"
-            "They will be re-queued locally and immediately submitted for the "
-            "currently authenticated account.",
+            "They will be re-queued locally. Eligible rows for the current "
+            "account are submitted immediately; rows for other accounts remain "
+            "queued until you authenticate as their owners.",
             parent=self,
         )
         retry = box.addButton(
@@ -556,21 +557,48 @@ class PendingIdentifyActionsDialog(QDialog):
         finally:
             self._refresh_suspended = False
         self.refresh(changed_ids)
-        authorized_ids = self._manager.request_dispatch_actions(changed_ids)
-        if changed_ids and len(authorized_ids) < len(changed_ids):
-            required = self._manager.queued_action_account()
-            suffix = f" as {required}" if required else ""
+        authorized_ids, rejections = (
+            self._manager.request_dispatch_actions_with_results(changed_ids)
+        )
+        if rejections:
             started = len(authorized_ids)
-            remaining = len(changed_ids) - started
+            remaining = len(rejections)
             lead = (
                 f"{started} actions started; {remaining} remain queued."
                 if started
                 else f"{remaining} actions were queued but could not be started."
             )
+            paragraphs = [lead]
+            required_logins = tuple(
+                dict.fromkeys(
+                    rejection.required_login
+                    for rejection in rejections
+                    if rejection.required_login
+                )
+            )
+            if len(required_logins) == 1:
+                paragraphs.append(
+                    f"Authenticate as {required_logins[0]}, then resume those queued rows."
+                )
+            elif required_logins:
+                owners = ", ".join(required_logins)
+                paragraphs.append(
+                    "Authenticate as each row's owner "
+                    f"({owners}), then resume those queued rows."
+                )
+            other_rejections = [
+                rejection for rejection in rejections if not rejection.required_login
+            ]
+            if other_rejections:
+                details = "\n".join(
+                    f"Action #{rejection.action_id}: {rejection.reason}"
+                    for rejection in other_rejections
+                )
+                paragraphs.append(f"Other rows could not be started:\n{details}")
             QMessageBox.information(
                 self,
                 "Some actions remain queued" if started else "Actions queued but not started",
-                f"{lead}\n\nAuthenticate{suffix}, then resume the remaining queue.",
+                "\n\n".join(paragraphs),
             )
         self._update_notice()
         self._update_controls()

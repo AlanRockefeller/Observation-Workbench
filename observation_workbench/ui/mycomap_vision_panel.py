@@ -135,6 +135,9 @@ class MycomapVisionPanel(QGroupBox):
 
 def _result_html(result: dict[str, Any]) -> str:
     parts: list[str] = []
+    gate_message = _gate_block_message(result)
+    if gate_message:
+        parts.append(f"<p><b>{html.escape(gate_message)}</b></p>")
     answer = result.get("answer")
     if isinstance(answer, dict) and answer.get("name"):
         name = html.escape(str(answer.get("name")))
@@ -240,6 +243,8 @@ def _result_comment_text(result: dict[str, Any]) -> str:
 
 def _top_name_action(result: dict[str, Any]) -> tuple[str, str]:
     """Pick the name to apply: the top species when the answer is coarser."""
+    if _gate_block_message(result):
+        return "", ""
     answer = result.get("answer")
     answer = answer if isinstance(answer, dict) else {}
     chosen = answer
@@ -262,6 +267,19 @@ def _top_name_action(result: dict[str, Any]) -> tuple[str, str]:
     if confidence:
         comment += f" ({confidence} sure)"
     return name, comment
+
+
+def _gate_block_message(result: dict[str, Any]) -> str:
+    """Explain why a present fungus gate blocks applying a suggested name."""
+    gate = result.get("gate")
+    if not isinstance(gate, dict):
+        return ""
+    verdict = str(gate.get("verdict") or "").strip().casefold()
+    if verdict == "fungus":
+        return ""
+    return str(gate.get("message") or "").strip() or (
+        "Vision could not confirm that these photos show a fungus."
+    )
 
 
 def _strip_internal_suffix(name: str) -> str:

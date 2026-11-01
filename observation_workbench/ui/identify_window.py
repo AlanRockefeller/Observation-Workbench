@@ -3112,13 +3112,13 @@ class IdentifyWindow(QMainWindow):
         dialog.destroyed.connect(
             lambda _object=None, tracked=dialog: self._add_id_dialog_destroyed(tracked)
         )
+        self._add_id_dialog = dialog
+        self._refresh_action_entry_availability()
+        dialog.show()
         draft = self._add_id_draft
         if draft is not None and draft[0] == dialog.observation_id:
             dialog.restore_draft(draft[1], draft[2], draft[3])
         self._add_id_draft = None
-        self._add_id_dialog = dialog
-        self._refresh_action_entry_availability()
-        dialog.show()
 
     def _store_add_id_draft(
         self, observation_id: int, taxon: str, body: str, disagree: bool

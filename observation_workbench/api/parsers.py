@@ -58,7 +58,7 @@ def _infrageneric_full_name(name: str, rank: str, ancestors: object) -> str:
     for ancestor in ancestors:
         if isinstance(ancestor, dict) and ancestor.get("rank") == "genus":
             genus = str(ancestor.get("name") or "").strip()
-    if not genus or name.startswith(genus):
+    if not genus or name.startswith(f"{genus} "):
         return ""
     return f"{genus} {rank} {name}"
 
