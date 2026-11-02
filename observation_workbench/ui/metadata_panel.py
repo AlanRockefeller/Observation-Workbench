@@ -160,14 +160,26 @@ class MetadataPanel(QWidget):
         observation_name = (
             str(obs.taxon.name or "").strip().casefold() if obs.taxon else ""
         )
-        shown = (
+        observation_taxon = (
             obs.taxon
             if observation_name and observation_name != "unknown"
-            else obs.community_taxon
+            else None
         )
+        shown = observation_taxon or obs.community_taxon
         s2 = _Section("Observation")
         if shown:
             s2.add_row("Taxon", _taxon_html(shown.display_name, shown.name))
+        if (
+            observation_taxon
+            and obs.community_taxon
+            and obs.community_taxon.taxon_id != observation_taxon.taxon_id
+        ):
+            s2.add_row(
+                "Community taxon",
+                _taxon_html(
+                    obs.community_taxon.display_name, obs.community_taxon.name
+                ),
+            )
         s2.add_row("Observer", _escape(obs.observer_login))
         if obs.observed_on:
             s2.add_row("Observed", _escape(obs.display_date))

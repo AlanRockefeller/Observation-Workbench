@@ -72,8 +72,9 @@ def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
         taxon_id = int(raw.get("id") or 0)
 
         # Fallback chain: each step handles explicit null via `or`
+        scientific_name = raw.get("name")
         name = (
-            raw.get("name")
+            scientific_name
             or raw.get("matched_term")
             or raw.get("preferred_common_name")
             or raw.get("english_common_name")
@@ -91,8 +92,12 @@ def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
             rank=raw.get("rank") or "",
             iconic_taxon_name=raw.get("iconic_taxon_name") or "",
             ancestry=raw.get("ancestry") or "",
-            full_name=_infrageneric_full_name(
-                name, raw.get("rank") or "", raw.get("ancestors")
+            full_name=(
+                _infrageneric_full_name(
+                    name, raw.get("rank") or "", raw.get("ancestors")
+                )
+                if scientific_name
+                else ""
             ),
         )
     except Exception as exc:

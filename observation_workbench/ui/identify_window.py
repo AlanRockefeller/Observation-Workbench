@@ -459,8 +459,8 @@ class IdentifyWindow(QMainWindow):
         self._optimistic_taxa: dict[int, _OptimisticTaxon] = {}
         self._add_id_dialog: IdentifyAddIDDialog | None = None
         self._shortcuts_dialog: IdentifyShortcutsDialog | None = None
-        # Last cancelled Add ID entry: (observation_id, taxon, body, disagree).
-        self._add_id_draft: tuple[int, str, str, bool] | None = None
+        # Last cancelled Add ID entry: (observation_id, login, taxon, body, disagree).
+        self._add_id_draft: tuple[int, str, str, str, bool] | None = None
         self._comment_dialog: IdentifyCommentDialog | None = None
         self._favorite_dialog: IdentifyFavoriteDialog | None = None
         self._captive_dialog: IdentifyCaptiveDialog | None = None
@@ -473,6 +473,7 @@ class IdentifyWindow(QMainWindow):
         self._local_reviewed_action_observations: dict[int, int] = {}
         self._local_reviewed_action_states: dict[int, str] = {}
         self._reviewed_refresh_pending_observation_ids: set[int] = set()
+        self._local_reviewed_action_login: str | None = None
         self._current_user_id: int | None = None
         self._current_user_live_signals: set[_CurrentUserSignals] = set()
         self._vision_results: dict[int, dict] = {}
@@ -2050,10 +2051,19 @@ class IdentifyWindow(QMainWindow):
         """Rebuild current-account unresolved Reviewed overlays from the journal."""
         self._local_reviewed_action_observations.clear()
         self._local_reviewed_action_states.clear()
-        self._reviewed_refresh_pending_observation_ids.clear()
         if self._action_manager is None:
+            self._reviewed_refresh_pending_observation_ids.clear()
+            self._local_reviewed_action_login = None
             return
         snapshot = self._action_manager.current_authentication()
+        login = (
+            str(snapshot.login or "").strip().casefold()
+            if snapshot.authenticated
+            else None
+        )
+        if login != self._local_reviewed_action_login:
+            self._reviewed_refresh_pending_observation_ids.clear()
+        self._local_reviewed_action_login = login
         if not snapshot.authenticated:
             return
         for action in self._action_manager.list_actions():
@@ -3291,7 +3301,13 @@ class IdentifyWindow(QMainWindow):
         )
         dialog.identification_journaled.connect(self._add_id_journaled)
         dialog.pending_actions_requested.connect(self.pending_actions_requested.emit)
-        dialog.draft_discarded.connect(self._store_add_id_draft)
+        dialog.draft_discarded.connect(
+            lambda observation_id, taxon, body, disagree, login=snapshot.login: (
+                self._store_add_id_draft(
+                    observation_id, login, taxon, body, disagree
+                )
+            )
+        )
         dialog.destroyed.connect(
             lambda _object=None, tracked=dialog: self._add_id_dialog_destroyed(tracked)
         )
@@ -3299,14 +3315,23 @@ class IdentifyWindow(QMainWindow):
         self._refresh_action_entry_availability()
         dialog.show()
         draft = self._add_id_draft
-        if draft is not None and draft[0] == dialog.observation_id:
-            dialog.restore_draft(draft[1], draft[2], draft[3])
-        self._add_id_draft = None
+        if (
+            draft is not None
+            and draft[0] == dialog.observation_id
+            and draft[1].casefold() == snapshot.login.strip().casefold()
+        ):
+            dialog.restore_draft(draft[2], draft[3], draft[4])
+            self._add_id_draft = None
 
     def _store_add_id_draft(
-        self, observation_id: int, taxon: str, body: str, disagree: bool
+        self,
+        observation_id: int,
+        login: str,
+        taxon: str,
+        body: str,
+        disagree: bool,
     ) -> None:
-        self._add_id_draft = (observation_id, taxon, body, disagree)
+        self._add_id_draft = (observation_id, login.strip(), taxon, body, disagree)
 
     def _add_id_dialog_destroyed(self, dialog: IdentifyAddIDDialog) -> None:
         if self._add_id_dialog is dialog:

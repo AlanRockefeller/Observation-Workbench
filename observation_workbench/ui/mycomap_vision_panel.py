@@ -200,6 +200,9 @@ def _result_html(result: dict[str, Any]) -> str:
 
 def _result_comment_text(result: dict[str, Any]) -> str:
     lines = ["MycoMap Vision suggestions:"]
+    gate_message = _gate_block_message(result)
+    if gate_message:
+        lines.append(gate_message)
     answer = result.get("answer")
     if isinstance(answer, dict) and answer.get("name"):
         confidence = _percent(answer.get("confidence"))
