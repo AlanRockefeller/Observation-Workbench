@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -149,6 +150,16 @@ class PendingIdentifyActionsDialog(QDialog):
         self._notice.setWordWrap(True)
         layout.addWidget(self._notice)
 
+        self._show_history = QCheckBox(
+            "Show confirmed and cancelled history", self
+        )
+        self._show_history.setToolTip(
+            "Include completed local journal rows in addition to pending and "
+            "attention-required actions."
+        )
+        self._show_history.toggled.connect(lambda _checked: self.refresh())
+        layout.addWidget(self._show_history)
+
         self._table = QTableWidget(0, len(self._COLUMNS), self)
         self._table.setHorizontalHeaderLabels(self._COLUMNS)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -233,9 +244,15 @@ class PendingIdentifyActionsDialog(QDialog):
             selected_ids = {selected_action_ids}
         else:
             selected_ids = {int(action_id) for action_id in selected_action_ids}
-        self._actions = [
-            present_identify_action(action) for action in self._manager.list_actions()
-        ]
+        actions = self._manager.list_actions()
+        if not self._show_history.isChecked():
+            actions = [
+                action
+                for action in actions
+                if str(action.get("state") or "")
+                not in {"confirmed", "cancelled", "tracking_cancelled"}
+            ]
+        self._actions = [present_identify_action(action) for action in actions]
         with sorting_suspended(self._table):
             self._table.setRowCount(len(self._actions))
             for row, action in enumerate(self._actions):

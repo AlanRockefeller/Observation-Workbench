@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QSize, QThreadPool, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QSize, Qt, QThreadPool, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeyEvent, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -43,21 +43,21 @@ from observation_workbench.api.client import INatClient
 from observation_workbench.api.mycomap_vision import MycomapVisionClient
 from observation_workbench.api.parsers import parse_observation
 from observation_workbench.models import StudyTaxon
-from observation_workbench.services.identify_session import (
-    IdentifySession,
-    IdentifySessionItem,
-)
-from observation_workbench.services.image_cache import ImageCache
-from observation_workbench.services.identify_actions import (
-    IdentifyActionManager,
-    ObservationUUIDResolution,
-)
 from observation_workbench.services.identify_action_presentation import (
     compact_observation_action_text,
     describe_cancelled_conflicting_actions,
     describe_cancelled_opposite_actions,
     present_identify_action,
 )
+from observation_workbench.services.identify_actions import (
+    IdentifyActionManager,
+    ObservationUUIDResolution,
+)
+from observation_workbench.services.identify_session import (
+    IdentifySession,
+    IdentifySessionItem,
+)
+from observation_workbench.services.image_cache import ImageCache
 from observation_workbench.services.local_taxonomy import shared_local_taxonomy
 from observation_workbench.services.prefetcher import (
     ImageFailure,
@@ -72,7 +72,6 @@ from observation_workbench.services.vision_taxonomy import (
 )
 from observation_workbench.storage.settings import AppSettings
 from observation_workbench.ui.identify_add_id_dialog import IdentifyAddIDDialog
-from observation_workbench.ui.identify_shortcuts import IdentifyShortcutsDialog
 from observation_workbench.ui.identify_captive_dialog import IdentifyCaptiveDialog
 from observation_workbench.ui.identify_comment_dialog import IdentifyCommentDialog
 from observation_workbench.ui.identify_favorite_dialog import IdentifyFavoriteDialog
@@ -82,6 +81,7 @@ from observation_workbench.ui.identify_read_error import (
     format_read_failure,
     show_safe_read_failure,
 )
+from observation_workbench.ui.identify_shortcuts import IdentifyShortcutsDialog
 from observation_workbench.ui.mycomap_vision_family_dialog import (
     MycomapVisionFamilyDialog,
 )
@@ -104,6 +104,15 @@ _OPTIMISTIC_REVERT_STATES = frozenset(
         "tracking_cancelled",
     }
 )
+
+# Reviewed intent is reflected locally as soon as its journal row exists.  A
+# definite retryable failure stays protected from duplicate entry but becomes
+# visible again; the other unresolved states may still reach (or already have
+# reached) iNaturalist, so they remain hidden until they resolve.
+_REVIEWED_BLOCKING_STATES = frozenset(
+    {"queued", "submitting", "submitted_unverified", "failed_retryable", "ambiguous"}
+)
+_REVIEWED_HIDDEN_STATES = _REVIEWED_BLOCKING_STATES - {"failed_retryable"}
 
 _DETAIL_RETRY_COOLDOWN_SECONDS = 45.0
 _THUMBNAIL_EDGE = 64
@@ -461,6 +470,9 @@ class IdentifyWindow(QMainWindow):
         self._reviewed_operation_generation = 0
         self._reviewed_operation: _ReviewedOperation | None = None
         self._reviewed_resolution_request_id: int | None = None
+        self._local_reviewed_action_observations: dict[int, int] = {}
+        self._local_reviewed_action_states: dict[int, str] = {}
+        self._reviewed_refresh_pending_observation_ids: set[int] = set()
         self._current_user_id: int | None = None
         self._current_user_live_signals: set[_CurrentUserSignals] = set()
         self._vision_results: dict[int, dict] = {}
@@ -509,6 +521,7 @@ class IdentifyWindow(QMainWindow):
             self._action_manager.observation_uuid_resolved.connect(
                 self._reviewed_uuid_resolved
             )
+            self._rebuild_local_reviewed_actions()
         self._restore_window_state()
         self._observation_index = self._initial_observation_index()
         self._show_current_observation()
@@ -1221,12 +1234,38 @@ class IdentifyWindow(QMainWindow):
             and self._current_user_id in observation.reviewed_by
         )
 
+    def _is_observation_locally_reviewed(self, observation_id: int) -> bool:
+        if observation_id in self._reviewed_refresh_pending_observation_ids:
+            return True
+        return any(
+            stored_observation_id == observation_id
+            and self._local_reviewed_action_states.get(action_id)
+            in _REVIEWED_HIDDEN_STATES
+            for action_id, stored_observation_id in (
+                self._local_reviewed_action_observations.items()
+            )
+        )
+
+    def _has_blocking_reviewed_action(self, observation_id: int) -> bool:
+        if observation_id in self._reviewed_refresh_pending_observation_ids:
+            return True
+        return any(
+            stored_observation_id == observation_id
+            for stored_observation_id in (
+                self._local_reviewed_action_observations.values()
+            )
+        )
+
     def _is_index_visible(self, index: int) -> bool:
         if self._session.items[index].observation_id in self._vision_ready_ids:
             return True
         if self._show_reviewed_checkbox.isChecked():
             return True
-        return not self._is_observation_reviewed(self._session.items[index].observation)
+        observation = self._session.items[index].observation
+        return not (
+            self._is_observation_reviewed(observation)
+            or self._is_observation_locally_reviewed(observation.obs_id)
+        )
 
     def _next_visible_index(self, start: int, step: int) -> int | None:
         index = start + step
@@ -1299,6 +1338,11 @@ class IdentifyWindow(QMainWindow):
         if self._closed:
             return
         self._current_user_id = user_id
+        for item in self._session.items:
+            if self._is_observation_reviewed(item.observation):
+                self._reviewed_refresh_pending_observation_ids.discard(
+                    item.observation_id
+                )
         if not self._session.items or self._is_index_visible(self._observation_index):
             return
         candidate = self._next_visible_index(self._observation_index, 1)
@@ -1974,6 +2018,10 @@ class IdentifyWindow(QMainWindow):
             if pending is None:
                 return False
             pending.observation = observation
+        if self._is_observation_reviewed(observation):
+            self._reviewed_refresh_pending_observation_ids.discard(
+                observation.obs_id
+            )
         # The authoritative observation now reflects the confirmed write, so
         # the optimistic placeholder is retired without any further notice.
         self._optimistic_taxa.pop(observation.obs_id, None)
@@ -1994,8 +2042,91 @@ class IdentifyWindow(QMainWindow):
     def _action_manager_changed(self, action: object) -> None:
         if self._closed:
             return
+        self._reconcile_local_reviewed_action(action)
         self._reconcile_optimistic_taxon(action)
         self._update_pending_action_status()
+
+    def _rebuild_local_reviewed_actions(self) -> None:
+        """Rebuild current-account unresolved Reviewed overlays from the journal."""
+        self._local_reviewed_action_observations.clear()
+        self._local_reviewed_action_states.clear()
+        self._reviewed_refresh_pending_observation_ids.clear()
+        if self._action_manager is None:
+            return
+        snapshot = self._action_manager.current_authentication()
+        if not snapshot.authenticated:
+            return
+        for action in self._action_manager.list_actions():
+            if not self._reviewed_action_matches_account(action, snapshot.login):
+                continue
+            state = str(action.get("state") or "")
+            if state not in _REVIEWED_BLOCKING_STATES:
+                continue
+            action_id = _coerce_int(action.get("local_action_id"))
+            observation_id = _coerce_int(action.get("observation_id"))
+            if action_id is None or observation_id is None:
+                continue
+            self._local_reviewed_action_observations[action_id] = observation_id
+            self._local_reviewed_action_states[action_id] = state
+
+    def _reconcile_local_reviewed_action(self, action: object) -> None:
+        """Track one Reviewed row and keep its observation out of the queue."""
+        if not isinstance(action, dict):
+            return
+        action_id = _coerce_int(action.get("local_action_id"))
+        observation_id = _coerce_int(action.get("observation_id"))
+        if action_id is None or observation_id is None:
+            return
+        was_tracked = action_id in self._local_reviewed_action_observations
+        self._local_reviewed_action_observations.pop(action_id, None)
+        self._local_reviewed_action_states.pop(action_id, None)
+        snapshot = (
+            self._action_manager.current_authentication()
+            if self._action_manager is not None
+            else None
+        )
+        if (
+            snapshot is None
+            or not snapshot.authenticated
+            or not self._reviewed_action_matches_account(action, snapshot.login)
+        ):
+            return
+        state = str(action.get("state") or "")
+        if state in _REVIEWED_BLOCKING_STATES:
+            self._local_reviewed_action_observations[action_id] = observation_id
+            self._local_reviewed_action_states[action_id] = state
+        elif state == "confirmed" and was_tracked:
+            self._reviewed_refresh_pending_observation_ids.add(observation_id)
+        if (
+            self._session.items
+            and not self._show_reviewed_checkbox.isChecked()
+            and self._current_observation().obs_id == observation_id
+            and not self._is_index_visible(self._observation_index)
+        ):
+            self._move_to_nearest_visible_observation()
+        self._update_reviewed_availability()
+
+    @staticmethod
+    def _reviewed_action_matches_account(action: dict, login: str) -> bool:
+        return bool(
+            str(action.get("action_type") or "") == "reviewed"
+            and bool(action.get("desired_state"))
+            and str(action.get("account_login") or "").strip().casefold()
+            == str(login or "").strip().casefold()
+        )
+
+    def _move_to_nearest_visible_observation(self) -> None:
+        if not self._session.items:
+            return
+        candidate = self._next_visible_index(self._observation_index, 1)
+        if candidate is None:
+            candidate = self._next_visible_index(self._observation_index, -1)
+        if candidate is None:
+            return
+        self._observation_index = candidate
+        self._photo_index = 0
+        self._selected_photo_id = None
+        self._show_current_observation()
 
     def _reconcile_optimistic_taxon(self, action: object) -> None:
         """Resolve an optimistic header entry when its journaled action changes.
@@ -2077,6 +2208,7 @@ class IdentifyWindow(QMainWindow):
             self._cancel_agree_for_authentication_change()
         if self._reviewed_operation is not None:
             self._cancel_reviewed_for_authentication_change()
+        self._rebuild_local_reviewed_actions()
         self._current_user_id = None
         self._start_current_user_lookup()
         self._invalidate_detail_authentication_context()
@@ -2084,6 +2216,12 @@ class IdentifyWindow(QMainWindow):
             snapshot = self._action_manager.current_authentication()
             self._info_tab.set_login(snapshot.login if snapshot.authenticated else "")
         self._refresh_action_entry_availability()
+        if (
+            self._session.items
+            and not self._show_reviewed_checkbox.isChecked()
+            and not self._is_index_visible(self._observation_index)
+        ):
+            self._move_to_nearest_visible_observation()
         if self._session.items:
             self._update_pending_action_status(render_info=False)
             self._info_tab.set_observation(self._current_observation())
@@ -2371,7 +2509,12 @@ class IdentifyWindow(QMainWindow):
         if not snapshot.authenticated:
             return False
         observation = self._current_observation()
-        return self._positive_numeric_id(observation.obs_id) is not None
+        observation_id = self._positive_numeric_id(observation.obs_id)
+        return bool(
+            observation_id is not None
+            and not self._is_observation_reviewed(observation)
+            and not self._has_blocking_reviewed_action(observation_id)
+        )
 
     def _update_reviewed_availability(self) -> None:
         if not hasattr(self, "_reviewed_action"):
@@ -2415,11 +2558,37 @@ class IdentifyWindow(QMainWindow):
             self._reviewed_action.setToolTip("No observation is displayed.")
             return
         observation = self._current_observation()
-        if self._positive_numeric_id(observation.obs_id) is None:
+        observation_id = self._positive_numeric_id(observation.obs_id)
+        if observation_id is None:
             self._reviewed_action.setEnabled(False)
             self._reviewed_action.setToolTip(
                 "This observation has no stable numeric ID."
             )
+            return
+        if self._is_observation_reviewed(observation):
+            self._reviewed_action.setEnabled(False)
+            self._reviewed_action.setToolTip(
+                "This observation is already marked reviewed for the current account."
+            )
+            return
+        if self._has_blocking_reviewed_action(observation_id):
+            self._reviewed_action.setEnabled(False)
+            if observation_id in self._reviewed_refresh_pending_observation_ids:
+                message = "Reviewed is confirmed and awaiting its observation refresh."
+            else:
+                states = {
+                    self._local_reviewed_action_states[action_id]
+                    for action_id, stored_observation_id in (
+                        self._local_reviewed_action_observations.items()
+                    )
+                    if stored_observation_id == observation_id
+                }
+                message = (
+                    "Reviewed needs attention in Pending Identify Actions."
+                    if "failed_retryable" in states
+                    else "Reviewed is already saved locally and awaiting completion."
+                )
+            self._reviewed_action.setToolTip(message)
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
@@ -2820,8 +2989,8 @@ class IdentifyWindow(QMainWindow):
 
         Reviewed is one-way (``desired_state=True``, empty payload). When
         reviewed observations are hidden, advance as soon as the immutable
-        intent is captured and UUID resolution has started, without waiting
-        for local journaling or network submission.
+        intent has been durably journaled, without waiting for network
+        submission or verification.
         """
         if self._closed or self._action_manager is None or not self._session.items:
             self._update_reviewed_availability()
@@ -2842,6 +3011,22 @@ class IdentifyWindow(QMainWindow):
             self._update_reviewed_availability()
             self.statusBar().showMessage(
                 "This observation has no stable numeric ID. No local Reviewed action was created.",
+                6000,
+            )
+            return
+        if self._is_observation_reviewed(observation):
+            self._update_reviewed_availability()
+            self.statusBar().showMessage(
+                "This observation is already marked reviewed. "
+                "No duplicate action was created.",
+                6000,
+            )
+            return
+        if self._has_blocking_reviewed_action(observation_id):
+            self._update_reviewed_availability()
+            self.statusBar().showMessage(
+                "Reviewed is already saved locally for this observation. "
+                "No duplicate action was created.",
                 6000,
             )
             return
@@ -2879,8 +3064,6 @@ class IdentifyWindow(QMainWindow):
             return
         if self._is_active_reviewed_operation(operation):
             self._reviewed_resolution_request_id = int(request_id)
-            if not self._show_reviewed_checkbox.isChecked():
-                self.move_observation(1)
 
     def _reviewed_uuid_resolved(self, resolution: object) -> None:
         """Journal the immutable Reviewed intent only for its exact UUID result."""
@@ -2989,7 +3172,7 @@ class IdentifyWindow(QMainWindow):
         action_id: int,
         cancelled_action_ids: tuple[int, ...] = (),
     ) -> None:
-        """Authorize only this exact new row; navigation occurred at capture."""
+        """Authorize only this row after its local overlay advances the window."""
         if self._closed or self._action_manager is None:
             return
         cancelled_note = describe_cancelled_opposite_actions(
