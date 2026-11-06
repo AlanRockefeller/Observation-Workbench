@@ -47,10 +47,22 @@ class IdentifyInfoTab(QScrollArea):
         if self._observation is not None:
             self._render()
 
-    def set_pending_actions(self, actions: list["IdentifyActionPresentation"]) -> None:
-        """Display local journal intent separately from server-confirmed history."""
-        self._pending_actions = tuple(actions)
-        if self._observation is not None:
+    def set_pending_actions(
+        self,
+        actions: list["IdentifyActionPresentation"],
+        *,
+        render: bool = True,
+    ) -> None:
+        """Display local journal intent separately from server-confirmed history.
+
+        ``render=False`` only stores the actions, for a caller that is about to
+        call set_observation(), which renders once with both.
+        """
+        pending_actions = tuple(actions)
+        if pending_actions == self._pending_actions:
+            return
+        self._pending_actions = pending_actions
+        if render and self._observation is not None:
             self._render()
 
     def _render(self) -> None:
@@ -77,7 +89,6 @@ class IdentifyInfoTab(QScrollArea):
         self._add_value("Captive/Cultivated", _captive_status(observation.captive))
         self._add_value("Quality grade", observation.quality_grade)
         self._add_value("Observation taxon", _taxon_name(observation.taxon))
-        self._add_value("Community taxon", _taxon_name(observation.community_taxon))
         self._add_value("Description", observation.description)
         self._add_value("Provisional species", observation.provisional_species_name)
         self._add_value(
@@ -153,7 +164,10 @@ class IdentifyInfoTab(QScrollArea):
             item = self._layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.setParent(None)
+                # Hide, don't setParent(None): a label added moments ago still has
+                # a queued show, which would map it as a stray top-level window
+                # (and knock a fullscreen Identify window out of fullscreen).
+                widget.hide()
                 widget.deleteLater()
 
     def _add_heading(self, text: str) -> None:
@@ -242,9 +256,6 @@ def _dna_barcode_summary(value: object) -> str:
 
 def _identification_context(identification: object) -> str:
     labels: list[str] = []
-    category = str(getattr(identification, "category", "") or "").strip()
-    if category:
-        labels.append(category)
     if bool(getattr(identification, "disagreement", False)):
         labels.append("disagrees")
     return " · ".join(labels)

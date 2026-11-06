@@ -419,8 +419,8 @@ class BulkAgreePreviewDialog(QDialog):
             "This will write identifications to iNaturalist. Only proceed if you can "
             "independently verify each proposed ID. Items needing human review pause "
             "for you; the rest post automatically. An observation is re-read before "
-            "posting only if it was checked more than a day ago or you opened or "
-            "copied it. You can skip or cancel during execution."
+            "every post so changes made after planning are checked. You can skip or "
+            "cancel during execution."
         )
         if dry_run:
             warning.setText(
@@ -968,6 +968,17 @@ class BulkAgreeProgressDialog(QDialog):
                         f"({candidate.expected_source})"
                         if candidate.expected_name
                         else "DNA-backed name: none recorded"
+                    ),
+                    *(
+                        [
+                            "Human review reasons:",
+                            *(
+                                f"- {reason.text}"
+                                for reason in candidate.review_reasons
+                            ),
+                        ]
+                        if candidate.review_reasons
+                        else []
                     ),
                     (
                         f"AI review:\n{candidate.ai_review.details_text()}"

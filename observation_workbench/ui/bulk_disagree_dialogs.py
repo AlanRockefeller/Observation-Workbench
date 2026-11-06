@@ -2979,7 +2979,7 @@ class BulkDisagreePhotoBrowserDialog(QDialog):
                 if widget in old_buttons:
                     row.removeWidget(widget)
         for button in old_buttons:
-            button.setParent(None)
+            button.hide()
             button.deleteLater()
         self._quick_alt_buttons[obs_id] = []
         if self._dry_run or not self._recent_alternate_taxa:

@@ -29,6 +29,7 @@ from observation_workbench.services.identify_actions import (
 from observation_workbench.ui.clipboard_shortcuts import (
     handle_super_clipboard_shortcut,
 )
+from observation_workbench.services.local_taxonomy import LocalTaxonomy
 from observation_workbench.ui.taxon_autocomplete import TaxonAutocompleteField
 
 log = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ class IdentifyAddIDDialog(QDialog):
     # confirmed refresh round-trip completes.
     identification_journaled = Signal(int, int, object)
     pending_actions_requested = Signal()
+    draft_discarded = Signal(int, str, str, bool)
 
     def __init__(
         self,
@@ -59,6 +61,7 @@ class IdentifyAddIDDialog(QDialog):
         observation_uuid: str,
         opened_login: str,
         parent: QWidget | None = None,
+        local_taxonomy: LocalTaxonomy | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -66,6 +69,7 @@ class IdentifyAddIDDialog(QDialog):
         self.setWindowTitle(f"Add identification — observation #{int(observation_id)}")
         self.setMinimumWidth(480)
         self._client = client
+        self._local_taxonomy = local_taxonomy
         self._action_manager = action_manager
         self._observation_id = int(observation_id)
         self._observation_uuid = _valid_uuid(observation_uuid)
@@ -118,7 +122,9 @@ class IdentifyAddIDDialog(QDialog):
         outer.addWidget(self._auth_status)
 
         form = QFormLayout()
-        self._taxon_field = TaxonAutocompleteField(self._client, self)
+        self._taxon_field = TaxonAutocompleteField(
+            self._client, self, local_taxonomy=self._local_taxonomy
+        )
         self._taxon_field.selection_changed.connect(self._taxon_selection_changed)
         self._taxon_field.search_status_changed.connect(
             self._taxon_search_status_changed
@@ -164,6 +170,11 @@ class IdentifyAddIDDialog(QDialog):
         self._submit_button.setAutoDefault(False)
         self._submit_button.clicked.connect(self._submit)
         buttons.rejected.connect(self.reject)
+        # Keep Cancel out of the Tab chain so it is only reachable by mouse
+        # (or Escape); a stray Tab+Enter must not discard the entry.
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        cancel_button.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        cancel_button.setAutoDefault(False)
         # Keep the disagree checkbox anchored to the lower-left, with the
         # Cancel/Submit buttons on the right of the same row.
         button_row = QHBoxLayout()
@@ -560,7 +571,32 @@ class IdentifyAddIDDialog(QDialog):
         except (RuntimeError, TypeError):
             pass
 
+    def restore_draft(self, taxon_text: str, body: str, disagree: bool) -> None:
+        """Refill a previously cancelled entry; the taxon is re-resolved."""
+        if self._closed:
+            return
+        if body:
+            self._body_edit.setPlainText(body)
+        self._disagree_check.setChecked(bool(disagree))
+        if taxon_text:
+            self._taxon_field.search_exact_name(taxon_text)
+
     def done(self, result: int) -> None:
+        if not self._closed and result == int(QDialog.DialogCode.Rejected):
+            selected = self._taxon_field.selected_item
+            taxon_text = (
+                selected.scientific_name
+                if selected is not None
+                else self._taxon_field.line_edit.text().strip()
+            )
+            body = self._body_edit.toPlainText().strip()
+            if taxon_text or body:
+                self.draft_discarded.emit(
+                    self._observation_id,
+                    taxon_text,
+                    body,
+                    self._disagree_check.isChecked(),
+                )
         self._deactivate()
         super().done(result)
 

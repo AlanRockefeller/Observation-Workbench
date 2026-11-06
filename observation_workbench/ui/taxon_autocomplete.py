@@ -2,13 +2,16 @@
 
 Both the study filter and Identify action entry use this small control so a
 taxon is always selected from an API result carrying its numeric iNaturalist
-ID.  Network work stays in a QRunnable and results are correlated with the
-text generation that started them.
+ID.  When a :class:`LocalTaxonomy` is supplied, suggestions come from the
+local name index synchronously and the network is only asked on a local miss.
+Network work stays in a QRunnable and results are correlated with the text
+generation that started them.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from PySide6.QtCore import (
@@ -34,6 +37,10 @@ from PySide6.QtWidgets import (
 )
 
 from observation_workbench.api.client import INatClient
+from observation_workbench.services.local_taxonomy import (
+    LocalTaxonMatch,
+    LocalTaxonomy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +53,8 @@ class TaxonAutocompleteItem:
     scientific_name: str
     preferred_common_name: str = ""
     rank: str = ""
+    # Synonym the query matched (local index) when it is not the current name.
+    matched_name: str = ""
 
     def display_name(self, include_common_name: bool = True) -> str:
         if include_common_name and self.preferred_common_name:
@@ -152,9 +161,13 @@ class TaxonAutocompleteField(QWidget):
         parent: QWidget | None = None,
         *,
         include_common_names: bool = True,
+        local_taxonomy: LocalTaxonomy | None = None,
     ) -> None:
         super().__init__(parent)
         self._client = client
+        self._local_taxonomy = local_taxonomy
+        # Taxon IDs offered by the network fallback rather than the local index.
+        self._remote_taxon_ids: set[int] = set()
         self._include_common_names = include_common_names
         self._pool = QThreadPool.globalInstance()
         self._generation = 0
@@ -289,7 +302,7 @@ class TaxonAutocompleteField(QWidget):
         self._hide_suggestions()
         self._clear_selection()
         self.search_status_changed.emit("")
-        if len(text.strip()) >= 2:
+        if len(text.strip()) >= 2 and not self._search_local(text.strip()):
             self._timer.start(300)
 
     def _clear_selection(self) -> None:
@@ -303,7 +316,7 @@ class TaxonAutocompleteField(QWidget):
         if self._closed:
             return
         query = self.line_edit.text().strip()
-        if len(query) < 2:
+        if len(query) < 2 or self._search_local(query):
             return
         generation = self._generation
         worker = TaxonAutocompleteWorker(self._client, query, generation)
@@ -315,11 +328,46 @@ class TaxonAutocompleteField(QWidget):
         signals.finished.connect(self._search_finished)
         self._pool.start(worker)
 
+    def _search_local(self, query: str) -> bool:
+        """Answer from the local name index; False means ask the network."""
+        local = self._local_taxonomy
+        if self._closed or local is None or not local.ready:
+            return False
+        started = time.perf_counter()
+        items = tuple(
+            TaxonAutocompleteItem(
+                taxon_id=match.taxon_id,
+                scientific_name=match.scientific_name,
+                preferred_common_name=match.preferred_common_name,
+                rank=match.rank,
+                matched_name=match.matched_name,
+            )
+            for match in local.search(query, limit=7)
+        )
+        log.debug(
+            "Local taxon search %r -> %d result(s) in %.1fms",
+            query,
+            len(items),
+            (time.perf_counter() - started) * 1000,
+        )
+        if not items:
+            return False
+        self._timer.stop()
+        self._apply_result(
+            TaxonAutocompleteResult(self._generation, items, query=query)
+        )
+        return True
+
     @Slot(object)
     def _search_finished(self, result: object) -> None:
         signals = self.sender()
         if isinstance(signals, _TaxonAutocompleteSignals):
             self._live_signals.discard(signals)
+        if isinstance(result, TaxonAutocompleteResult) and not result.diagnostic:
+            self._remote_taxon_ids.update(item.taxon_id for item in result.items)
+        self._apply_result(result)
+
+    def _apply_result(self, result: object) -> None:
         if self._closed or not isinstance(result, TaxonAutocompleteResult):
             log.debug(
                 "Ignoring taxon autocomplete callback for a closed or invalid field"
@@ -422,6 +470,7 @@ class TaxonAutocompleteField(QWidget):
         self.search_status_changed.emit("")
         if changed:
             self.selection_changed.emit(item)
+            self._remember_remote_selection(item)
         if changed:
             log.debug(
                 "Selected taxon autocomplete result %s (%s)",
@@ -429,8 +478,23 @@ class TaxonAutocompleteField(QWidget):
                 item.taxon_id,
             )
 
+    def _remember_remote_selection(self, item: TaxonAutocompleteItem) -> None:
+        local = self._local_taxonomy
+        if local is None or item.taxon_id not in self._remote_taxon_ids:
+            return
+        local.remember(
+            LocalTaxonMatch(
+                taxon_id=item.taxon_id,
+                scientific_name=item.scientific_name,
+                preferred_common_name=item.preferred_common_name,
+                rank=item.rank,
+            )
+        )
+
     def _completion_text(self, item: TaxonAutocompleteItem) -> str:
         name = item.display_name(self._include_common_names)
+        if item.matched_name:
+            name = f"{name} (syn. {item.matched_name})"
         if item.rank:
             return f"{name} · {item.rank} · #{item.taxon_id}"
         return f"{name} · #{item.taxon_id}"

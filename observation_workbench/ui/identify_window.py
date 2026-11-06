@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import html
 import logging
+import queue
+import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QSize, QThreadPool, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QSize, Qt, QThreadPool, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeyEvent, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStyle,
     QTabWidget,
@@ -40,21 +43,22 @@ from observation_workbench.api.client import INatClient
 from observation_workbench.api.mycomap_vision import MycomapVisionClient
 from observation_workbench.api.parsers import parse_observation
 from observation_workbench.models import StudyTaxon
-from observation_workbench.services.identify_session import (
-    IdentifySession,
-    IdentifySessionItem,
-)
-from observation_workbench.services.image_cache import ImageCache
-from observation_workbench.services.identify_actions import (
-    IdentifyActionManager,
-    ObservationUUIDResolution,
-)
 from observation_workbench.services.identify_action_presentation import (
     compact_observation_action_text,
     describe_cancelled_conflicting_actions,
     describe_cancelled_opposite_actions,
     present_identify_action,
 )
+from observation_workbench.services.identify_actions import (
+    IdentifyActionManager,
+    ObservationUUIDResolution,
+)
+from observation_workbench.services.identify_session import (
+    IdentifySession,
+    IdentifySessionItem,
+)
+from observation_workbench.services.image_cache import ImageCache
+from observation_workbench.services.local_taxonomy import shared_local_taxonomy
 from observation_workbench.services.prefetcher import (
     ImageFailure,
     ImageLoadDiagnostics,
@@ -77,6 +81,7 @@ from observation_workbench.ui.identify_read_error import (
     format_read_failure,
     show_safe_read_failure,
 )
+from observation_workbench.ui.identify_shortcuts import IdentifyShortcutsDialog
 from observation_workbench.ui.mycomap_vision_family_dialog import (
     MycomapVisionFamilyDialog,
 )
@@ -100,9 +105,94 @@ _OPTIMISTIC_REVERT_STATES = frozenset(
     }
 )
 
+# Reviewed intent is reflected locally as soon as its journal row exists.  A
+# definite retryable failure stays protected from duplicate entry but becomes
+# visible again; the other unresolved states may still reach (or already have
+# reached) iNaturalist, so they remain hidden until they resolve.
+_REVIEWED_BLOCKING_STATES = frozenset(
+    {"queued", "submitting", "submitted_unverified", "failed_retryable", "ambiguous"}
+)
+_REVIEWED_HIDDEN_STATES = _REVIEWED_BLOCKING_STATES - {"failed_retryable"}
+
 _DETAIL_RETRY_COOLDOWN_SECONDS = 45.0
+_THUMBNAIL_EDGE = 64
+_MAX_THUMBNAIL_ICONS = 600
 _MISSING_DETAIL_RETRY_COOLDOWN_SECONDS = 90.0
 _MAX_AUTOMATIC_DETAIL_ATTEMPTS = 2
+
+
+class _PhaseTimer:
+    """Per-phase wall-clock timer for ``--debug`` Identify profiling.
+
+    Every method is a no-op when disabled, so navigation pays nothing for it
+    outside DEBUG logging.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = log.isEnabledFor(logging.DEBUG)
+        self._started = time.perf_counter() if self.enabled else 0.0
+        self._last = self._started
+        self._phases: list[str] = []
+
+    def mark(self, phase: str) -> None:
+        if not self.enabled:
+            return
+        now = time.perf_counter()
+        self._phases.append(f"{phase}={(now - self._last) * 1000.0:.1f}")
+        self._last = now
+
+    def summary(self) -> str:
+        total = (time.perf_counter() - self._started) * 1000.0
+        return f"total={total:.1f}ms " + " ".join(self._phases)
+
+
+class _DaemonTaskPool:
+    """Small bounded daemon pool for long calls that must not delay shutdown."""
+
+    def __init__(self, max_workers: int) -> None:
+        self._tasks: queue.Queue[QRunnable] = queue.Queue()
+        self._threads = [
+            threading.Thread(
+                target=self._run,
+                name=f"mycomap-vision-{index + 1}",
+                daemon=True,
+            )
+            for index in range(max_workers)
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def start(self, task: QRunnable) -> None:
+        self._tasks.put(task)
+
+    def clear(self) -> None:
+        while True:
+            try:
+                self._tasks.get_nowait()
+            except queue.Empty:
+                return
+            else:
+                self._tasks.task_done()
+
+    def _run(self) -> None:
+        while True:
+            task = self._tasks.get()
+            try:
+                task.run()
+            finally:
+                self._tasks.task_done()
+
+
+# Vision calls can block for up to two minutes. Keep them off Qt's shared pool
+# so image loading, detail refreshes, autocomplete, and application shutdown do
+# not queue behind a burst of Vision requests. Daemon workers let an in-flight
+# HTTP call finish without holding process shutdown open.
+_MYCOMAP_VISION_POOL = _DaemonTaskPool(max_workers=2)
+
+
+def clear_pending_mycomap_vision_requests() -> None:
+    """Discard Vision requests that have not started during application shutdown."""
+    _MYCOMAP_VISION_POOL.clear()
 
 
 class _DetailsSignals(QObject):
@@ -228,6 +318,7 @@ class _DetailRequest:
     observation_versions: tuple[tuple[int, int], ...]
     explicit: bool
     operation: str
+    started_at: float = 0.0
 
     def version_for(self, observation_id: int) -> int:
         for candidate_id, version in self.observation_versions:
@@ -357,8 +448,19 @@ class IdentifyWindow(QMainWindow):
         self._active_image_photo_ids: frozenset[int] = frozenset()
         self._thumbnail_buttons: dict[int, QPushButton] = {}
         self._thumbnail_photo_ids: tuple[int, ...] = ()
+        # photo_id -> (source pixmap cacheKey, scaled icon); avoids re-scaling
+        # multi-megapixel originals on the GUI thread on every revisit.
+        self._thumbnail_icons: OrderedDict[int, tuple[int, QIcon, QSize]] = (
+            OrderedDict()
+        )
+        # (photo_id, perf_counter start) while DEBUG timing a visible photo
+        # that was not already in memory when it was selected.
+        self._pending_image_timing: tuple[int, float] | None = None
         self._optimistic_taxa: dict[int, _OptimisticTaxon] = {}
         self._add_id_dialog: IdentifyAddIDDialog | None = None
+        self._shortcuts_dialog: IdentifyShortcutsDialog | None = None
+        # Last cancelled Add ID entry: (observation_id, login, taxon, body, disagree).
+        self._add_id_draft: tuple[int, str, str, str, bool] | None = None
         self._comment_dialog: IdentifyCommentDialog | None = None
         self._favorite_dialog: IdentifyFavoriteDialog | None = None
         self._captive_dialog: IdentifyCaptiveDialog | None = None
@@ -368,6 +470,10 @@ class IdentifyWindow(QMainWindow):
         self._reviewed_operation_generation = 0
         self._reviewed_operation: _ReviewedOperation | None = None
         self._reviewed_resolution_request_id: int | None = None
+        self._local_reviewed_action_observations: dict[int, int] = {}
+        self._local_reviewed_action_states: dict[int, str] = {}
+        self._reviewed_refresh_pending_observation_ids: set[int] = set()
+        self._local_reviewed_action_login: str | None = None
         self._current_user_id: int | None = None
         self._current_user_live_signals: set[_CurrentUserSignals] = set()
         self._vision_results: dict[int, dict] = {}
@@ -383,6 +489,9 @@ class IdentifyWindow(QMainWindow):
         self._vision_family_live_signals: set[_VisionTaxonomySignals] = set()
 
         self.setWindowTitle("iNaturalist Identify")
+        # Fungal names for instant Add ID suggestions; loads/refreshes off-thread.
+        self._local_taxonomy = shared_local_taxonomy(settings.cache_dir)
+        self._local_taxonomy.ensure_started()
         self._prefetch = ImagePrefetcher(
             client,
             cache,
@@ -413,6 +522,7 @@ class IdentifyWindow(QMainWindow):
             self._action_manager.observation_uuid_resolved.connect(
                 self._reviewed_uuid_resolved
             )
+            self._rebuild_local_reviewed_actions()
         self._restore_window_state()
         self._observation_index = self._initial_observation_index()
         self._show_current_observation()
@@ -439,7 +549,6 @@ class IdentifyWindow(QMainWindow):
         self._header.setFont(header_font)
         header_row.addWidget(self._header, 1)
         self._show_reviewed_checkbox = QCheckBox("Show reviewed", self)
-        self._show_reviewed_checkbox.setChecked(self._settings.identify_show_reviewed)
         self._show_reviewed_checkbox.toggled.connect(self._on_show_reviewed_toggled)
         header_row.addWidget(self._show_reviewed_checkbox, 0, Qt.AlignmentFlag.AlignTop)
         image_layout.addLayout(header_row)
@@ -478,6 +587,9 @@ class IdentifyWindow(QMainWindow):
 
         captive_controls = QHBoxLayout()
         self._captive_button = QPushButton("Captive/Cultivated", self)
+        self._captive_button.setToolTip(
+            "Change your Captive/Cultivated Data Quality vote (X)"
+        )
         self._captive_button.clicked.connect(self._open_captive)
         captive_controls.addWidget(self._captive_button)
         captive_controls.addStretch()
@@ -541,9 +653,11 @@ class IdentifyWindow(QMainWindow):
         self._comment_action.triggered.connect(self._open_comment)
         toolbar.addAction(self._comment_action)
         self._reviewed_action = QAction("Reviewed", self)
+        self._reviewed_action.setToolTip("Mark the observation reviewed (R)")
         self._reviewed_action.triggered.connect(self._mark_reviewed)
         toolbar.addAction(self._reviewed_action)
         self._favorite_action = QAction("Favorite", self)
+        self._favorite_action.setToolTip("Add or remove favorite (F)")
         self._favorite_action.triggered.connect(self._open_favorite)
         toolbar.addAction(self._favorite_action)
         self._vision_action = QAction("Vision", self)
@@ -552,6 +666,15 @@ class IdentifyWindow(QMainWindow):
         )
         self._vision_action.triggered.connect(self._request_mycomap_vision)
         toolbar.addAction(self._vision_action)
+        toolbar_spacer = QWidget(toolbar)
+        toolbar_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        toolbar.addWidget(toolbar_spacer)
+        self._shortcuts_action = QAction("Keyboard shortcuts", self)
+        self._shortcuts_action.setToolTip("Show all Identify keyboard shortcuts (?)")
+        self._shortcuts_action.triggered.connect(self._show_shortcuts)
+        toolbar.addAction(self._shortcuts_action)
         self._refresh_action_entry_availability()
 
         self._network_label = QLabel("Network: normal", self)
@@ -582,6 +705,7 @@ class IdentifyWindow(QMainWindow):
     def _show_current_observation(self, direction: int = 0) -> None:
         if self._closed or not self._session.items:
             return
+        timer = _PhaseTimer()
         self._navigation_direction = direction
         self._observation_index = max(
             0,
@@ -596,17 +720,25 @@ class IdentifyWindow(QMainWindow):
         )
         self._brightness = 0
         self._update_header()
+        # Pending actions first, without rendering, so the Info tab is built
+        # once below instead of once per call.
+        self._update_pending_action_status(render_info=False)
+        timer.mark("journal")
         self._info_tab.set_observation(observation)
+        timer.mark("info")
         self._update_vision_panel(observation.obs_id)
         self._vision_ready_ids.discard(observation.obs_id)
         self._vision_action.setEnabled(
             observation.obs_id not in self._vision_pending_items
         )
+        timer.mark("vision")
         self._refresh_action_entry_availability()
-        self._update_pending_action_status()
+        timer.mark("availability")
         self._ensure_thumbnail_strip(observation)
         self._update_thumbnail_selection(scroll_selected=True)
-        self._display_selected_photo(preserve_view=False)
+        timer.mark("thumbs")
+        image_state = self._display_selected_photo(preserve_view=False)
+        timer.mark("photo")
         self._prefetch.prefetch_identify_position(
             self._observation_index,
             self._photo_index,
@@ -614,20 +746,36 @@ class IdentifyWindow(QMainWindow):
             direction=direction,
         )
         self._update_selected_loading_state()
+        timer.mark("prefetch")
         self._load_nearby_details()
         self._derive_network_status()
+        timer.mark("details")
+        if timer.enabled:
+            log.debug(
+                "Identify timing: show obs=%d index=%d photos=%d image=%s %s",
+                observation.obs_id,
+                self._observation_index,
+                len(observation.photos),
+                image_state,
+                timer.summary(),
+            )
 
-    def _display_selected_photo(self, *, preserve_view: bool) -> None:
+    def _display_selected_photo(self, *, preserve_view: bool) -> str:
+        """Show the selected photo; return its cache state for debug timing."""
+        self._pending_image_timing = None
         observation = self._current_observation()
         if not observation.photos or self._selected_photo_id is None:
             self._photo_panel.show_no_photo()
-            return
+            return "none"
         photo = self._current_photo()
         if photo is None:
             self._photo_panel.show_no_photo()
-            return
+            return "none"
         self._photo_panel.begin_photo(photo.photo_id)
-        cached = self._prefetch.get_best_cached(photo.photo_id)
+        # Memory only: a disk-cached original takes tens to hundreds of ms to
+        # read and decode, which would stall key handling. The focused-photo
+        # prefetch request decodes it on a worker instead.
+        cached = self._prefetch.get_best_memory_cached(photo.photo_id)
         if cached is not None:
             pixmap, size = cached
             self._photo_panel.set_photo(
@@ -644,6 +792,13 @@ class IdentifyWindow(QMainWindow):
         diagnostics = self._prefetch.diagnostics_for_photo(photo.photo_id)
         if diagnostics is not None and diagnostics.partial_failures:
             self._photo_panel.show_partial_details(photo.photo_id)
+        if cached is not None:
+            return f"memory:{cached[1]}"
+        if failure is not None:
+            return "failed"
+        if log.isEnabledFor(logging.DEBUG):
+            self._pending_image_timing = (photo.photo_id, time.perf_counter())
+        return "pending"
 
     def _update_selected_loading_state(self) -> None:
         photo = self._current_photo()
@@ -697,10 +852,14 @@ class IdentifyWindow(QMainWindow):
                 )
             )
             self._thumbnail_buttons[photo.photo_id] = button
-            cached = self._prefetch.get_best_cached(photo.photo_id)
+            cached = self._prefetch.get_best_memory_cached(photo.photo_id)
             if cached is not None:
                 self._set_thumbnail_pixmap(photo.photo_id, cached[0])
             self._thumbnail_layout.addWidget(button)
+            # Children added to a visible parent are shown via a queued call;
+            # until then they are excluded from sizeHint() and adjustSize()
+            # would collapse the (non-resizable) strip to a few pixels.
+            button.show()
         self._thumbnail_body.adjustSize()
         self._thumbnail_body.setMinimumWidth(self._thumbnail_body.sizeHint().width())
         self._thumbnail_scroll.horizontalScrollBar().setValue(horizontal_scroll)
@@ -718,14 +877,34 @@ class IdentifyWindow(QMainWindow):
         button = self._thumbnail_buttons.get(photo_id)
         if button is None or pixmap.isNull():
             return
-        icon_pixmap = pixmap.scaled(
-            64,
-            64,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        button.setIcon(QIcon(icon_pixmap))
-        button.setIconSize(icon_pixmap.size())
+        cached_icon = self._thumbnail_icons.get(photo_id)
+        if cached_icon is not None and cached_icon[0] == pixmap.cacheKey():
+            self._thumbnail_icons.move_to_end(photo_id)
+            _key, icon, icon_size = cached_icon
+        else:
+            source = pixmap
+            if max(pixmap.width(), pixmap.height()) > _THUMBNAIL_EDGE * 4:
+                # A cheap first pass makes the smooth pass operate on ~256px
+                # instead of a full original, with no visible quality loss.
+                source = pixmap.scaled(
+                    _THUMBNAIL_EDGE * 4,
+                    _THUMBNAIL_EDGE * 4,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                )
+            icon_pixmap = source.scaled(
+                _THUMBNAIL_EDGE,
+                _THUMBNAIL_EDGE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            icon = QIcon(icon_pixmap)
+            icon_size = icon_pixmap.size()
+            self._thumbnail_icons[photo_id] = (pixmap.cacheKey(), icon, icon_size)
+            while len(self._thumbnail_icons) > _MAX_THUMBNAIL_ICONS:
+                self._thumbnail_icons.popitem(last=False)
+        button.setIcon(icon)
+        button.setIconSize(icon_size)
 
     def _select_photo_id(self, photo_id: int) -> None:
         observation = self._current_observation()
@@ -734,7 +913,8 @@ class IdentifyWindow(QMainWindow):
                 self._photo_index = index
                 self._selected_photo_id = photo_id
                 self._brightness = 0
-                self._display_selected_photo(preserve_view=False)
+                timer = _PhaseTimer()
+                image_state = self._display_selected_photo(preserve_view=False)
                 self._prefetch.prefetch_identify_position(
                     self._observation_index,
                     self._photo_index,
@@ -744,6 +924,14 @@ class IdentifyWindow(QMainWindow):
                 self._update_selected_loading_state()
                 self._update_thumbnail_selection(scroll_selected=True)
                 self._derive_network_status()
+                if timer.enabled:
+                    log.debug(
+                        "Identify timing: photo obs=%d photo=%d image=%s %s",
+                        observation.obs_id,
+                        photo_id,
+                        image_state,
+                        timer.summary(),
+                    )
                 return
 
     def move_observation(self, delta: int) -> None:
@@ -818,7 +1006,7 @@ class IdentifyWindow(QMainWindow):
             self._vision_action.setEnabled(False)
             self._vision_panel.clear_result()
 
-        QThreadPool.globalInstance().start(worker)
+        _MYCOMAP_VISION_POOL.start(worker)
         self.statusBar().showMessage(
             f"MycoMap Vision is analyzing observation #{observation_id}; "
             f"{len(self._vision_pending_items)} lookup(s) running in the background.",
@@ -1047,12 +1235,38 @@ class IdentifyWindow(QMainWindow):
             and self._current_user_id in observation.reviewed_by
         )
 
+    def _is_observation_locally_reviewed(self, observation_id: int) -> bool:
+        if observation_id in self._reviewed_refresh_pending_observation_ids:
+            return True
+        return any(
+            stored_observation_id == observation_id
+            and self._local_reviewed_action_states.get(action_id)
+            in _REVIEWED_HIDDEN_STATES
+            for action_id, stored_observation_id in (
+                self._local_reviewed_action_observations.items()
+            )
+        )
+
+    def _has_blocking_reviewed_action(self, observation_id: int) -> bool:
+        if observation_id in self._reviewed_refresh_pending_observation_ids:
+            return True
+        return any(
+            stored_observation_id == observation_id
+            for stored_observation_id in (
+                self._local_reviewed_action_observations.values()
+            )
+        )
+
     def _is_index_visible(self, index: int) -> bool:
         if self._session.items[index].observation_id in self._vision_ready_ids:
             return True
         if self._show_reviewed_checkbox.isChecked():
             return True
-        return not self._is_observation_reviewed(self._session.items[index].observation)
+        observation = self._session.items[index].observation
+        return not (
+            self._is_observation_reviewed(observation)
+            or self._is_observation_locally_reviewed(observation.obs_id)
+        )
 
     def _next_visible_index(self, start: int, step: int) -> int | None:
         index = start + step
@@ -1073,8 +1287,6 @@ class IdentifyWindow(QMainWindow):
         return candidate if candidate is not None else 0
 
     def _on_show_reviewed_toggled(self, checked: bool) -> None:
-        self._settings.identify_show_reviewed = checked
-        self._settings.sync()
         self._update_reviewed_availability()
         if (
             checked
@@ -1127,6 +1339,11 @@ class IdentifyWindow(QMainWindow):
         if self._closed:
             return
         self._current_user_id = user_id
+        for item in self._session.items:
+            if self._is_observation_reviewed(item.observation):
+                self._reviewed_refresh_pending_observation_ids.discard(
+                    item.observation_id
+                )
         if not self._session.items or self._is_index_visible(self._observation_index):
             return
         candidate = self._next_visible_index(self._observation_index, 1)
@@ -1164,6 +1381,16 @@ class IdentifyWindow(QMainWindow):
         if photo_id != self._selected_photo_id:
             self._derive_network_status()
             return
+        timing = self._pending_image_timing
+        if timing is not None and timing[0] == photo_id:
+            self._pending_image_timing = None
+            log.debug(
+                "Identify timing: image obs=%d photo=%d size=%s visible after %.1fms",
+                observation_id,
+                photo_id,
+                size,
+                (time.perf_counter() - timing[1]) * 1000.0,
+            )
         self._photo_panel.set_photo(
             photo_id,
             pixmap,
@@ -1306,6 +1533,7 @@ class IdentifyWindow(QMainWindow):
             ),
             explicit=explicit,
             operation=operation,
+            started_at=time.perf_counter() if log.isEnabledFor(logging.DEBUG) else 0.0,
         )
         worker = _DetailsWorker(self._client, tuple(sorted(requested_ids)), token)
         signals = worker.signals
@@ -1330,6 +1558,7 @@ class IdentifyWindow(QMainWindow):
     def _details_loaded(self, request: _DetailRequest, raw: object) -> None:
         if not self._is_current_detail_request(request):
             return
+        timer = _PhaseTimer()
         records = raw.get("results") if isinstance(raw, dict) else []
         returned_ids: set[int] = set()
         current_id = self._current_observation().obs_id
@@ -1381,9 +1610,22 @@ class IdentifyWindow(QMainWindow):
             )
             self._recent_failures.append(("Observation details", state.diagnostic))
 
+        timer.mark("parse")
         if current_id in returned_ids:
             self._reconcile_current_after_detail(previous_photo_id)
+            timer.mark("refresh_current")
         self._derive_network_status()
+        if timer.enabled:
+            log.debug(
+                "Identify timing: details ids=%d returned=%d round_trip=%.1fms "
+                "handler %s",
+                len(request.requested_ids),
+                len(returned_ids),
+                (time.perf_counter() - request.started_at) * 1000.0
+                if request.started_at
+                else 0.0,
+                timer.summary(),
+            )
 
     def _details_failed(self, request: _DetailRequest, exc: Exception) -> None:
         if not self._is_current_detail_request(request):
@@ -1450,9 +1692,9 @@ class IdentifyWindow(QMainWindow):
             selected_photo_changed = previous_photo_id is not None
 
         self._update_header()
+        self._update_pending_action_status(render_info=False)
         self._info_tab.set_observation(observation)
         self._refresh_action_entry_availability()
-        self._update_pending_action_status()
         self._ensure_thumbnail_strip(observation)
         self._update_thumbnail_selection(scroll_selected=selected_photo_changed)
         if selected_photo_changed:
@@ -1597,7 +1839,11 @@ class IdentifyWindow(QMainWindow):
         QMessageBox.information(self, "Recent network failures", text)
 
     def _handle_identify_shortcut(self, event: QKeyEvent, *, execute: bool) -> bool:
-        """Recognize one Identify shortcut for ShortcutOverride or KeyPress."""
+        """Recognize one Identify shortcut for ShortcutOverride or KeyPress.
+
+        Keep ``identify_shortcut_sections()`` in ``ui/identify_shortcuts.py`` in step
+        with any binding added, removed or changed here.
+        """
         key = event.key()
         modifiers = event.modifiers()
         has_alt_or_meta = bool(
@@ -1746,25 +1992,17 @@ class IdentifyWindow(QMainWindow):
         self.statusBar().showMessage(f"Brightness: {sign}{self._brightness}", 1500)
 
     def _show_shortcuts(self) -> None:
-        QMessageBox.information(
-            self,
-            "Identify shortcuts",
-            "Left / Right: previous / next observation\n"
-            "Up / Down: previous / next photo\n"
-            "Alt or Cmd + Left / Right: previous / next photo\n"
-            "Shift + Left / Right: previous / next tab\n"
-            "I: add an identification\n"
-            "A: agree with the observation taxon\n"
-            "C: add a comment\n"
-            "R: mark the observation reviewed; go to the next observation when "
-            "reviewed observations are hidden\n"
-            "F: add or remove favorite\n"
-            "X: change your Captive/Cultivated Data Quality vote\n"
-            "V: ask MycoMap Vision and immediately advance; the result returns next\n"
-            "Z: toggle fit / 1:1\n"
-            "Alt or Cmd + Up / Down: adjust brightness\n"
-            "?: show this help",
-        )
+        dialog = self._shortcuts_dialog
+        if dialog is None:
+            dialog = IdentifyShortcutsDialog(self)
+            dialog.destroyed.connect(self._shortcuts_dialog_destroyed)
+            self._shortcuts_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _shortcuts_dialog_destroyed(self) -> None:
+        self._shortcuts_dialog = None
 
     def apply_confirmed_observation_refresh(self, observation) -> bool:
         """Apply MainWindow's one centralized safe refresh by stable ID.
@@ -1781,6 +2019,10 @@ class IdentifyWindow(QMainWindow):
             if pending is None:
                 return False
             pending.observation = observation
+        if self._is_observation_reviewed(observation):
+            self._reviewed_refresh_pending_observation_ids.discard(
+                observation.obs_id
+            )
         # The authoritative observation now reflects the confirmed write, so
         # the optimistic placeholder is retired without any further notice.
         self._optimistic_taxa.pop(observation.obs_id, None)
@@ -1801,8 +2043,100 @@ class IdentifyWindow(QMainWindow):
     def _action_manager_changed(self, action: object) -> None:
         if self._closed:
             return
+        self._reconcile_local_reviewed_action(action)
         self._reconcile_optimistic_taxon(action)
         self._update_pending_action_status()
+
+    def _rebuild_local_reviewed_actions(self) -> None:
+        """Rebuild current-account unresolved Reviewed overlays from the journal."""
+        self._local_reviewed_action_observations.clear()
+        self._local_reviewed_action_states.clear()
+        if self._action_manager is None:
+            self._reviewed_refresh_pending_observation_ids.clear()
+            self._local_reviewed_action_login = None
+            return
+        snapshot = self._action_manager.current_authentication()
+        login = (
+            str(snapshot.login or "").strip().casefold()
+            if snapshot.authenticated
+            else None
+        )
+        if login != self._local_reviewed_action_login:
+            self._reviewed_refresh_pending_observation_ids.clear()
+        self._local_reviewed_action_login = login
+        if not snapshot.authenticated:
+            return
+        for action in self._action_manager.list_actions():
+            if not self._reviewed_action_matches_account(action, snapshot.login):
+                continue
+            state = str(action.get("state") or "")
+            if state not in _REVIEWED_BLOCKING_STATES:
+                continue
+            action_id = _coerce_int(action.get("local_action_id"))
+            observation_id = _coerce_int(action.get("observation_id"))
+            if action_id is None or observation_id is None:
+                continue
+            self._local_reviewed_action_observations[action_id] = observation_id
+            self._local_reviewed_action_states[action_id] = state
+
+    def _reconcile_local_reviewed_action(self, action: object) -> None:
+        """Track one Reviewed row and keep its observation out of the queue."""
+        if not isinstance(action, dict):
+            return
+        action_id = _coerce_int(action.get("local_action_id"))
+        observation_id = _coerce_int(action.get("observation_id"))
+        if action_id is None or observation_id is None:
+            return
+        was_tracked = action_id in self._local_reviewed_action_observations
+        self._local_reviewed_action_observations.pop(action_id, None)
+        self._local_reviewed_action_states.pop(action_id, None)
+        snapshot = (
+            self._action_manager.current_authentication()
+            if self._action_manager is not None
+            else None
+        )
+        if (
+            snapshot is None
+            or not snapshot.authenticated
+            or not self._reviewed_action_matches_account(action, snapshot.login)
+        ):
+            return
+        state = str(action.get("state") or "")
+        if state in _REVIEWED_BLOCKING_STATES:
+            self._local_reviewed_action_observations[action_id] = observation_id
+            self._local_reviewed_action_states[action_id] = state
+        elif state == "confirmed" and was_tracked:
+            self._reviewed_refresh_pending_observation_ids.add(observation_id)
+        if (
+            self._session.items
+            and not self._show_reviewed_checkbox.isChecked()
+            and self._current_observation().obs_id == observation_id
+            and not self._is_index_visible(self._observation_index)
+        ):
+            self._move_to_nearest_visible_observation()
+        self._update_reviewed_availability()
+
+    @staticmethod
+    def _reviewed_action_matches_account(action: dict, login: str) -> bool:
+        return bool(
+            str(action.get("action_type") or "") == "reviewed"
+            and bool(action.get("desired_state"))
+            and str(action.get("account_login") or "").strip().casefold()
+            == str(login or "").strip().casefold()
+        )
+
+    def _move_to_nearest_visible_observation(self) -> None:
+        if not self._session.items:
+            return
+        candidate = self._next_visible_index(self._observation_index, 1)
+        if candidate is None:
+            candidate = self._next_visible_index(self._observation_index, -1)
+        if candidate is None:
+            return
+        self._observation_index = candidate
+        self._photo_index = 0
+        self._selected_photo_id = None
+        self._show_current_observation()
 
     def _reconcile_optimistic_taxon(self, action: object) -> None:
         """Resolve an optimistic header entry when its journaled action changes.
@@ -1884,6 +2218,7 @@ class IdentifyWindow(QMainWindow):
             self._cancel_agree_for_authentication_change()
         if self._reviewed_operation is not None:
             self._cancel_reviewed_for_authentication_change()
+        self._rebuild_local_reviewed_actions()
         self._current_user_id = None
         self._start_current_user_lookup()
         self._invalidate_detail_authentication_context()
@@ -1891,9 +2226,17 @@ class IdentifyWindow(QMainWindow):
             snapshot = self._action_manager.current_authentication()
             self._info_tab.set_login(snapshot.login if snapshot.authenticated else "")
         self._refresh_action_entry_availability()
+        if (
+            self._session.items
+            and not self._show_reviewed_checkbox.isChecked()
+            and not self._is_index_visible(self._observation_index)
+        ):
+            self._move_to_nearest_visible_observation()
         if self._session.items:
+            self._update_pending_action_status(render_info=False)
             self._info_tab.set_observation(self._current_observation())
-        self._update_pending_action_status()
+        else:
+            self._update_pending_action_status()
         # Any invalidated details in the current prefetch range restart under
         # the current account, or unauthenticated after logout.
         self._load_nearby_details()
@@ -2176,7 +2519,12 @@ class IdentifyWindow(QMainWindow):
         if not snapshot.authenticated:
             return False
         observation = self._current_observation()
-        return self._positive_numeric_id(observation.obs_id) is not None
+        observation_id = self._positive_numeric_id(observation.obs_id)
+        return bool(
+            observation_id is not None
+            and not self._is_observation_reviewed(observation)
+            and not self._has_blocking_reviewed_action(observation_id)
+        )
 
     def _update_reviewed_availability(self) -> None:
         if not hasattr(self, "_reviewed_action"):
@@ -2220,11 +2568,37 @@ class IdentifyWindow(QMainWindow):
             self._reviewed_action.setToolTip("No observation is displayed.")
             return
         observation = self._current_observation()
-        if self._positive_numeric_id(observation.obs_id) is None:
+        observation_id = self._positive_numeric_id(observation.obs_id)
+        if observation_id is None:
             self._reviewed_action.setEnabled(False)
             self._reviewed_action.setToolTip(
                 "This observation has no stable numeric ID."
             )
+            return
+        if self._is_observation_reviewed(observation):
+            self._reviewed_action.setEnabled(False)
+            self._reviewed_action.setToolTip(
+                "This observation is already marked reviewed for the current account."
+            )
+            return
+        if self._has_blocking_reviewed_action(observation_id):
+            self._reviewed_action.setEnabled(False)
+            if observation_id in self._reviewed_refresh_pending_observation_ids:
+                message = "Reviewed is confirmed and awaiting its observation refresh."
+            else:
+                states = {
+                    self._local_reviewed_action_states[action_id]
+                    for action_id, stored_observation_id in (
+                        self._local_reviewed_action_observations.items()
+                    )
+                    if stored_observation_id == observation_id
+                }
+                message = (
+                    "Reviewed needs attention in Pending Identify Actions."
+                    if "failed_retryable" in states
+                    else "Reviewed is already saved locally and awaiting completion."
+                )
+            self._reviewed_action.setToolTip(message)
             return
         snapshot = self._action_manager.current_authentication()
         if not snapshot.authenticated:
@@ -2625,8 +2999,8 @@ class IdentifyWindow(QMainWindow):
 
         Reviewed is one-way (``desired_state=True``, empty payload). When
         reviewed observations are hidden, advance as soon as the immutable
-        intent is captured and UUID resolution has started, without waiting
-        for local journaling or network submission.
+        intent has been durably journaled, without waiting for network
+        submission or verification.
         """
         if self._closed or self._action_manager is None or not self._session.items:
             self._update_reviewed_availability()
@@ -2647,6 +3021,22 @@ class IdentifyWindow(QMainWindow):
             self._update_reviewed_availability()
             self.statusBar().showMessage(
                 "This observation has no stable numeric ID. No local Reviewed action was created.",
+                6000,
+            )
+            return
+        if self._is_observation_reviewed(observation):
+            self._update_reviewed_availability()
+            self.statusBar().showMessage(
+                "This observation is already marked reviewed. "
+                "No duplicate action was created.",
+                6000,
+            )
+            return
+        if self._has_blocking_reviewed_action(observation_id):
+            self._update_reviewed_availability()
+            self.statusBar().showMessage(
+                "Reviewed is already saved locally for this observation. "
+                "No duplicate action was created.",
                 6000,
             )
             return
@@ -2684,8 +3074,6 @@ class IdentifyWindow(QMainWindow):
             return
         if self._is_active_reviewed_operation(operation):
             self._reviewed_resolution_request_id = int(request_id)
-            if not self._show_reviewed_checkbox.isChecked():
-                self.move_observation(1)
 
     def _reviewed_uuid_resolved(self, resolution: object) -> None:
         """Journal the immutable Reviewed intent only for its exact UUID result."""
@@ -2794,7 +3182,7 @@ class IdentifyWindow(QMainWindow):
         action_id: int,
         cancelled_action_ids: tuple[int, ...] = (),
     ) -> None:
-        """Authorize only this exact new row; navigation occurred at capture."""
+        """Authorize only this row after its local overlay advances the window."""
         if self._closed or self._action_manager is None:
             return
         cancelled_note = describe_cancelled_opposite_actions(
@@ -2909,15 +3297,41 @@ class IdentifyWindow(QMainWindow):
             observation_uuid=observation.uuid,
             opened_login=snapshot.login,
             parent=self,
+            local_taxonomy=self._local_taxonomy,
         )
         dialog.identification_journaled.connect(self._add_id_journaled)
         dialog.pending_actions_requested.connect(self.pending_actions_requested.emit)
+        dialog.draft_discarded.connect(
+            lambda observation_id, taxon, body, disagree, login=snapshot.login: (
+                self._store_add_id_draft(
+                    observation_id, login, taxon, body, disagree
+                )
+            )
+        )
         dialog.destroyed.connect(
             lambda _object=None, tracked=dialog: self._add_id_dialog_destroyed(tracked)
         )
         self._add_id_dialog = dialog
         self._refresh_action_entry_availability()
         dialog.show()
+        draft = self._add_id_draft
+        if (
+            draft is not None
+            and draft[0] == dialog.observation_id
+            and draft[1].casefold() == snapshot.login.strip().casefold()
+        ):
+            dialog.restore_draft(draft[2], draft[3], draft[4])
+            self._add_id_draft = None
+
+    def _store_add_id_draft(
+        self,
+        observation_id: int,
+        login: str,
+        taxon: str,
+        body: str,
+        disagree: bool,
+    ) -> None:
+        self._add_id_draft = (observation_id, login.strip(), taxon, body, disagree)
 
     def _add_id_dialog_destroyed(self, dialog: IdentifyAddIDDialog) -> None:
         if self._add_id_dialog is dialog:
@@ -3301,7 +3715,7 @@ class IdentifyWindow(QMainWindow):
             state.automatic_attempts = 0
             state.diagnostic = ""
 
-    def _update_pending_action_status(self) -> None:
+    def _update_pending_action_status(self, *, render_info: bool = True) -> None:
         if self._closed or self._action_manager is None or not self._session.items:
             self._pending_actions_panel.hide()
             return
@@ -3315,7 +3729,8 @@ class IdentifyWindow(QMainWindow):
                 action
                 for action in actions
                 if action.is_active or action.requires_attention
-            ]
+            ],
+            render=render_info,
         )
         text = compact_observation_action_text(actions)
         if text:

@@ -45,6 +45,24 @@ def _parse_optional_bool(value: Any) -> Optional[bool]:
     return None
 
 
+INFRAGENERIC_RANKS = frozenset(
+    {"subgenus", "section", "subsection", "series", "subseries"}
+)
+
+
+def _infrageneric_full_name(name: str, rank: str, ancestors: object) -> str:
+    """Prefix a bare infrageneric epithet with its genus, e.g. "Hygrophorus section X"."""
+    if rank not in INFRAGENERIC_RANKS or not isinstance(ancestors, list):
+        return ""
+    genus = ""
+    for ancestor in ancestors:
+        if isinstance(ancestor, dict) and ancestor.get("rank") == "genus":
+            genus = str(ancestor.get("name") or "").strip()
+    if not genus or name.startswith(f"{genus} "):
+        return ""
+    return f"{genus} {rank} {name}"
+
+
 def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
     """Parse a taxon object from API JSON. Returns None if raw is None/empty."""
     if not raw:
@@ -54,8 +72,9 @@ def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
         taxon_id = int(raw.get("id") or 0)
 
         # Fallback chain: each step handles explicit null via `or`
+        scientific_name = raw.get("name")
         name = (
-            raw.get("name")
+            scientific_name
             or raw.get("matched_term")
             or raw.get("preferred_common_name")
             or raw.get("english_common_name")
@@ -73,6 +92,13 @@ def parse_taxon(raw: Optional[Dict]) -> Optional[StudyTaxon]:
             rank=raw.get("rank") or "",
             iconic_taxon_name=raw.get("iconic_taxon_name") or "",
             ancestry=raw.get("ancestry") or "",
+            full_name=(
+                _infrageneric_full_name(
+                    name, raw.get("rank") or "", raw.get("ancestors")
+                )
+                if scientific_name
+                else ""
+            ),
         )
     except Exception as exc:
         log.debug("parse_taxon error: %s | raw=%s", exc, raw)

@@ -156,17 +156,29 @@ class MetadataPanel(QWidget):
             self._layout.addWidget(s)
             self._layout.addWidget(_divider())
 
-        # Community taxon
-        community = obs.community_taxon
-        obs_taxon = obs.taxon
+        # Observation taxon (what iNat shows), falling back to the community taxon
+        observation_name = (
+            str(obs.taxon.name or "").strip().casefold() if obs.taxon else ""
+        )
+        observation_taxon = (
+            obs.taxon
+            if observation_name and observation_name != "unknown"
+            else None
+        )
+        shown = observation_taxon or obs.community_taxon
         s2 = _Section("Observation")
-        if community:
+        if shown:
+            s2.add_row("Taxon", _taxon_html(shown.display_name, shown.name))
+        if (
+            observation_taxon
+            and obs.community_taxon
+            and obs.community_taxon.taxon_id != observation_taxon.taxon_id
+        ):
             s2.add_row(
-                "Community ID", _taxon_html(community.display_name, community.name)
-            )
-        elif obs_taxon:
-            s2.add_row(
-                "Obs. taxon", _taxon_html(obs_taxon.display_name, obs_taxon.name)
+                "Community taxon",
+                _taxon_html(
+                    obs.community_taxon.display_name, obs.community_taxon.name
+                ),
             )
         s2.add_row("Observer", _escape(obs.observer_login))
         if obs.observed_on:
@@ -257,10 +269,6 @@ def _ident_html(ident, most_recent: bool, authenticated_login: str) -> str:
     if most_recent:
         bits.append("<b>Most recent</b>")
     bits.append("current" if ident.current else "withdrawn/previous")
-    if ident.category:
-        bits.append(_escape(ident.category))
-    if ident.is_leading:
-        bits.append("leading")
     if ident.is_disagreement:
         bits.append("disagreement")
     if ident.is_provisional:

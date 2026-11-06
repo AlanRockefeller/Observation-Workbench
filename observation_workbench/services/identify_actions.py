@@ -12,10 +12,11 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
@@ -169,6 +170,15 @@ class IdentifyQueueSummary:
     eligible_for_current_account: int = 0
     queued_for_other_accounts: int = 0
     other_account_logins: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class IdentifyDispatchRejection:
+    """One row rejected before dispatch, with authentication context if relevant."""
+
+    action_id: int
+    reason: str
+    required_login: str = ""
 
 
 @dataclass(frozen=True)
@@ -617,6 +627,22 @@ class IdentifyActionManager(QObject):
             "failed_terminal": summary.failed_terminal,
         }
 
+    def retryable_authentication_failure_count(self) -> int:
+        """Return definite failures caused by rejected/expired authentication."""
+        count = 0
+        for action in self._db.get_identify_actions(("failed_retryable",)):
+            try:
+                diagnostic = json.loads(str(action.get("last_error_json") or ""))
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(diagnostic, dict)
+                and diagnostic.get("diagnostic")
+                == "authentication_expired_or_rejected"
+            ):
+                count += 1
+        return count
+
     def history_summary(self) -> dict[str, int]:
         summary = self.action_summary()
         return {
@@ -702,16 +728,39 @@ class IdentifyActionManager(QObject):
 
     def can_request_dispatch(self, action_id: int) -> tuple[bool, str]:
         """Validate a selected row before granting its one-action permission."""
+        rejection = self._dispatch_rejection(int(action_id))
+        return (True, "") if rejection is None else (False, rejection.reason)
+
+    def _dispatch_rejection(
+        self, action_id: int
+    ) -> IdentifyDispatchRejection | None:
         if self._shutting_down:
-            return False, "Identify action manager is shutting down."
+            return IdentifyDispatchRejection(
+                action_id, "Identify action manager is shutting down."
+            )
         action = self._action(action_id)
         if action is None:
-            return False, "The selected action no longer exists."
+            return IdentifyDispatchRejection(
+                action_id, "The selected action no longer exists."
+            )
         if str(action.get("state") or "") != "queued":
-            return False, "Only an ordinary queued action can be submitted."
+            return IdentifyDispatchRejection(
+                action_id, "Only an ordinary queued action can be submitted."
+            )
         if not _journal_action_is_executable(action):
-            return False, "The selected queued action is invalid and needs correction."
-        return self.can_dispatch_for_account(str(action.get("account_login") or ""))
+            return IdentifyDispatchRejection(
+                action_id,
+                "The selected queued action is invalid and needs correction.",
+            )
+        required_login = str(action.get("account_login") or "").strip()
+        allowed, reason = self.can_dispatch_for_account(required_login)
+        if allowed:
+            return None
+        return IdentifyDispatchRejection(
+            action_id,
+            reason,
+            required_login=required_login if required_login else "",
+        )
 
     def request_dispatch(self, action_id: int) -> bool:
         """Authorize and schedule only one selected queued action.
@@ -719,13 +768,39 @@ class IdentifyActionManager(QObject):
         Authorization is deliberately in-memory and is removed before the
         action leaves ``queued``.  It is never inherited by later enqueues.
         """
-        allowed, _reason = self.can_request_dispatch(int(action_id))
-        if not allowed:
-            return False
-        self._dispatch_authorized_action_ids.add(int(action_id))
-        self._paused = False
-        self._dispatch_next()
-        return True
+        return bool(self.request_dispatch_actions((int(action_id),)))
+
+    def request_dispatch_actions(
+        self, action_ids: Iterable[int]
+    ) -> tuple[int, ...]:
+        """Authorize and schedule the valid current-account rows in one snapshot."""
+        authorized, _rejections = self.request_dispatch_actions_with_results(
+            action_ids
+        )
+        return authorized
+
+    def request_dispatch_actions_with_results(
+        self, action_ids: Iterable[int]
+    ) -> tuple[tuple[int, ...], tuple[IdentifyDispatchRejection, ...]]:
+        """Authorize valid rows and report each row rejected before dispatch."""
+        authorized: list[int] = []
+        rejections: list[IdentifyDispatchRejection] = []
+        seen: set[int] = set()
+        for raw_action_id in action_ids:
+            action_id = int(raw_action_id)
+            if action_id in seen:
+                continue
+            seen.add(action_id)
+            rejection = self._dispatch_rejection(action_id)
+            if rejection is None:
+                authorized.append(action_id)
+            else:
+                rejections.append(rejection)
+        if authorized:
+            self._dispatch_authorized_action_ids.update(authorized)
+            self._paused = False
+            self._dispatch_next()
+        return tuple(authorized), tuple(rejections)
 
     def resume_queued_actions(self) -> bool:
         """Authorize exactly the current login's queued-row snapshot."""
@@ -798,26 +873,42 @@ class IdentifyActionManager(QObject):
 
     def retry_definite_failure(self, action_id: int) -> bool:
         """Explicitly make a known-not-applied action eligible for a later resume."""
-        action = self._action(action_id)
-        if action is None or int(action.get("outcome_unknown") or 0):
-            return False
-        # Terminal validation/resource failures need a corrected future action,
-        # not an unchanged blind resubmission. Authentication and temporary
-        # account-state failures are classified as failed_retryable instead.
-        if action["state"] != "failed_retryable":
-            return False
-        changed = self._db.transition_identify_action(
-            int(action_id),
-            (str(action["state"]),),
-            "queued",
-            last_error_json="",
-            last_operation_phase="",
-        )
-        if changed:
-            self._dispatch_authorized_action_ids.discard(int(action_id))
+        return bool(self.retry_definite_failures((int(action_id),)))
+
+    def retry_definite_failures(
+        self, action_ids: Iterable[int]
+    ) -> tuple[int, ...]:
+        """Re-queue selected known failures without authorizing or dispatching them."""
+        changed_ids: list[int] = []
+        seen: set[int] = set()
+        for raw_action_id in action_ids:
+            action_id = int(raw_action_id)
+            if action_id in seen:
+                continue
+            seen.add(action_id)
+            action = self._action(action_id)
+            if action is None or int(action.get("outcome_unknown") or 0):
+                continue
+            # Terminal validation/resource failures need a corrected future action,
+            # not an unchanged blind resubmission. Authentication and temporary
+            # account-state failures are classified as failed_retryable instead.
+            if action["state"] != "failed_retryable":
+                continue
+            changed = self._db.transition_identify_action(
+                action_id,
+                (str(action["state"]),),
+                "queued",
+                last_error_json="",
+                last_operation_phase="",
+            )
+            if changed:
+                self._dispatch_authorized_action_ids.discard(action_id)
+                changed_ids.append(action_id)
+        for action_id in changed_ids:
             self._emit_action_changed(action_id)
+        if changed_ids:
             self._emit_summary()
-        return changed
+        return tuple(changed_ids)
 
     def retry_anyway(
         self, action_id: int, duplicate_risk_confirmed: bool

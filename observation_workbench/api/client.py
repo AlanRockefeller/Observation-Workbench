@@ -89,6 +89,11 @@ V2_OBSERVATION_VERIFICATION_FIELDS = (
     "quality_metrics:(id:!t,metric:!t,agree:!t,"
     "user:(id:!t,login:!t)))"
 )
+# Only what the local Identify name index needs (~200 bytes per taxon).
+V2_LOCAL_TAXONOMY_FIELDS = (
+    "id,name,rank,rank_level,is_active,preferred_common_name,"
+    "observations_count,current_synonymous_taxon_ids"
+)
 V2_DNA_LINKING_DISCOVERY_FIELDS = (
     "(id:!t,uuid:!t,time_observed_at:!t,positional_accuracy:!t,geojson:!t,"
     "obscured:!t,geoprivacy:!t,taxon_geoprivacy:!t,"
@@ -269,6 +274,7 @@ class INatClient:
         else:
             self._rate = SHARED_RATE_LIMITER
             self._rate.require_at_most(calls_per_second)
+        self._genus_cache: Dict[int, Dict] = {}
         self.on_rate_limited = on_rate_limited
         self._call_count = 0
         self._call_count_lock = threading.Lock()
@@ -762,7 +768,52 @@ class INatClient:
                 else self._get(path)
             )
             results.extend(raw.get("results") or [])
+        self.add_infrageneric_genus(results)
         return {"total_results": len(results), "results": results}
+
+    def add_infrageneric_genus(self, results: Sequence[Dict]) -> None:
+        """Attach genus ``ancestors`` to bare infrageneric taxa in raw observations.
+
+        iNat names a section just "Picearum"; parse_taxon needs the genus to
+        render "Hygrophorus section Picearum". Failures leave the bare name.
+        """
+        ranks = {"subgenus", "section", "subsection", "series", "subseries"}
+        targets: List[Dict] = []
+        for record in results:
+            if not isinstance(record, dict):
+                continue
+            candidates = [record.get("taxon"), record.get("community_taxon")]
+            for ident in record.get("identifications") or []:
+                if isinstance(ident, dict):
+                    candidates.append(ident.get("taxon"))
+            for taxon in candidates:
+                if (
+                    isinstance(taxon, dict)
+                    and taxon.get("rank") in ranks
+                    and not taxon.get("ancestors")
+                    and taxon.get("ancestry")
+                ):
+                    targets.append(taxon)
+        if not targets:
+            return
+        try:
+            ids: List[int] = []
+            for taxon in targets:
+                for part in str(taxon["ancestry"]).split("/"):
+                    if part.isdigit() and int(part) not in self._genus_cache:
+                        ids.append(int(part))
+            fetched = self.get_taxa_by_ids(sorted(set(ids)))["results"] if ids else []
+            for item in fetched:
+                if isinstance(item, dict) and item.get("id"):
+                    self._genus_cache[int(item["id"])] = item
+            for taxon in targets:
+                taxon["ancestors"] = [
+                    self._genus_cache[int(part)]
+                    for part in str(taxon["ancestry"]).split("/")
+                    if part.isdigit() and int(part) in self._genus_cache
+                ]
+        except Exception as exc:
+            log.debug("add_infrageneric_genus failed: %s", exc)
 
     def get_current_user(self, api_token: str) -> Dict:
         """Fetch the currently authenticated iNaturalist user."""
@@ -1489,6 +1540,31 @@ class INatClient:
     def get_taxa_autocomplete(self, q: str, per_page: int = 10) -> Dict:
         """Autocomplete taxa by name. Returns raw API JSON."""
         return self._get("/taxa/autocomplete", {"q": q, "per_page": per_page})
+
+    def get_taxa_page_v2(
+        self,
+        *,
+        taxon_id: int,
+        is_active: bool,
+        id_above: int = 0,
+        per_page: int = 500,
+    ) -> V2Response:
+        """One id-ordered page of a taxon's descendants for the local name index.
+
+        Paging by ``id_above`` (not ``page``) avoids the 10k-result window and
+        lets a later pass fetch only taxa created since the last one.
+        """
+        params: Dict[str, Any] = {
+            "taxon_id": int(taxon_id),
+            "is_active": "true" if is_active else "false",
+            "order_by": "id",
+            "order": "asc",
+            "per_page": int(per_page),
+            "fields": V2_LOCAL_TAXONOMY_FIELDS,
+        }
+        if id_above > 0:
+            params["id_above"] = int(id_above)
+        return self._request_v2("GET", "/taxa", params=params)
 
     def get_places_autocomplete(self, q: str, per_page: int = 10) -> Dict:
         """Autocomplete places by name. Returns raw API JSON."""
