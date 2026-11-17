@@ -5,6 +5,7 @@ Settings dialog: cache size, memory limit, prefetch radius, cache directory.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Optional
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,11 +28,20 @@ from observation_workbench.storage.settings import AppSettings
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: AppSettings, parent=None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        parent=None,
+        *,
+        on_show_cache_info: Optional[Callable[[], None]] = None,
+        on_clear_caches: Optional[Callable[[], None]] = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(420)
         self._settings = settings
+        self._on_show_cache_info = on_show_cache_info
+        self._on_clear_caches = on_clear_caches
         self._build_ui()
         self._load()
 
@@ -53,11 +63,16 @@ class SettingsDialog(QDialog):
         browse_btn.clicked.connect(self._browse_cache_dir)
         dir_layout.addWidget(browse_btn)
         cache_form.addRow("Cache directory:", dir_row)
+        # One short line with a pinned height: the dialog opens at its minimum
+        # size, where a longer word-wrapped note here was squeezed and clipped.
         cache_restart_label = QLabel(
+            "Applies after a restart; old files stay in place."
+        )
+        cache_restart_label.setToolTip(
             "Directory changes take effect after Observation Workbench is restarted. "
             "Existing files in the previous images subfolder are not moved or deleted."
         )
-        cache_restart_label.setWordWrap(True)
+        cache_restart_label.setMinimumHeight(cache_restart_label.sizeHint().height())
         cache_form.addRow("", cache_restart_label)
 
         self._max_gb_spin = QDoubleSpinBox()
@@ -66,6 +81,29 @@ class SettingsDialog(QDialog):
         self._max_gb_spin.setSuffix(" GB")
         self._max_gb_spin.setDecimals(1)
         cache_form.addRow("Max cache size:", self._max_gb_spin)
+
+        if self._on_show_cache_info is not None or self._on_clear_caches is not None:
+            cache_buttons = QWidget()
+            cache_buttons_layout = QHBoxLayout(cache_buttons)
+            cache_buttons_layout.setContentsMargins(0, 0, 0, 0)
+            if self._on_show_cache_info is not None:
+                usage_btn = QPushButton("Show cache usage…")
+                usage_btn.clicked.connect(
+                    lambda _checked=False: self._on_show_cache_info()
+                )
+                cache_buttons_layout.addWidget(usage_btn)
+            if self._on_clear_caches is not None:
+                clear_btn = QPushButton("Clear all caches now…")
+                clear_btn.setToolTip(
+                    "Delete cached images and metadata immediately (asks first). "
+                    "This does not wait for OK."
+                )
+                clear_btn.clicked.connect(
+                    lambda _checked=False: self._on_clear_caches()
+                )
+                cache_buttons_layout.addWidget(clear_btn)
+            cache_buttons_layout.addStretch(1)
+            cache_form.addRow("", cache_buttons)
 
         layout.addWidget(cache_group)
 

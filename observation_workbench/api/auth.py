@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
 import re
 from typing import Optional
 
@@ -29,6 +32,16 @@ class AuthState:
     @property
     def is_authenticated(self) -> bool:
         return bool(self.api_token and self.login)
+
+    @property
+    def expires_at(self) -> Optional[datetime]:
+        return token_expiry(self.api_token)
+
+    @property
+    def is_expired(self) -> bool:
+        """True only when the token carries an expiry that has already passed."""
+        expiry = self.expires_at
+        return expiry is not None and expiry <= datetime.now(timezone.utc)
 
 
 class AuthService:
@@ -80,3 +93,30 @@ def normalise_token(token: Optional[str]) -> str:
     # Preserve support for non-JWT values while removing harmless wrapping
     # quotes from manually entered credentials.
     return value.strip().strip("\"'").strip()
+
+
+def token_expiry(token: Optional[str]) -> Optional[datetime]:
+    """Return the ``exp`` claim of a JWT as an aware UTC datetime, if present.
+
+    The signature is not verified: this is only a local hint used to tell the
+    user their saved sign-in has lapsed. iNaturalist remains the authority on
+    whether a token is accepted.
+    """
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1]
+    try:
+        decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        claims = json.loads(decoded)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(claims, dict):
+        return None
+    exp = claims.get("exp")
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(exp, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None

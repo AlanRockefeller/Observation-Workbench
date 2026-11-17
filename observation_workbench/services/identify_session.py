@@ -13,6 +13,10 @@ _USER_SPECIFIC_PARAM_KEYS = frozenset({"reviewed", "viewer_id"})
 _REVIEWED_PARAM_KEY = "reviewed"
 _VIEWER_ID_PARAM_KEY = "viewer_id"
 MAX_OBSERVATION_SCAN = 999_999
+# The observations index returns at most 200 rows per request, so an explicit
+# `id=` list is fetched in chunks of this size.
+ID_LIST_CHUNK = 200
+_ID_PARAM_KEY = "id"
 
 # One entry, keyed by the exact token it was resolved with, so a different
 # login (or a refreshed token) can never reuse the previous account's ID.
@@ -27,6 +31,36 @@ def query_requires_authentication(params: Iterable[tuple[str, str]]) -> bool:
     authenticated identical query.
     """
     return any(key.strip().casefold() in _USER_SPECIFIC_PARAM_KEYS for key, _ in params)
+
+
+def split_id_list(
+    params: Iterable[tuple[str, str]],
+) -> tuple[list[int] | None, tuple[tuple[str, str], ...]]:
+    """Separate an explicit ``id=`` observation list from the other filters.
+
+    Returns ``(None, params)`` when the query has no usable ``id`` list. The
+    list keeps its given order and drops duplicates and non-numeric entries.
+    """
+    params = tuple((str(key), str(value)) for key, value in params)
+    id_values = [
+        value for key, value in params if key.strip().casefold() == _ID_PARAM_KEY
+    ]
+    if not id_values:
+        return None, params
+    ids: list[int] = []
+    seen: set[int] = set()
+    for value in id_values:
+        for part in value.split(","):
+            part = part.strip()
+            if part.isdigit() and int(part) not in seen:
+                seen.add(int(part))
+                ids.append(int(part))
+    if not ids:
+        return None, params
+    others = tuple(
+        (key, value) for key, value in params if key.strip().casefold() != _ID_PARAM_KEY
+    )
+    return ids, others
 
 
 def _param_keys(params: Iterable[tuple[str, str]]) -> set[str]:
@@ -175,6 +209,12 @@ def load_identify_session(
     _raise_if_cancelled(is_cancelled)
     query_params = resolve_viewer_scoped_params(client, plan.params, api_token)
 
+    id_list, other_params = split_id_list(query_params)
+    if id_list is not None:
+        return _load_id_list_session(
+            client, plan, id_list, other_params, api_token, is_cancelled
+        )
+
     items: list[IdentifySessionItem] = []
     seen_ids: set[int] = set()
     page = 1
@@ -224,6 +264,54 @@ def load_identify_session(
 
     _raise_if_cancelled(is_cancelled)
     return IdentifySession(plan=plan, items=items, total_results=total_results)
+
+
+def _load_id_list_session(
+    client: INatClient,
+    plan: IdentifyQueryPlan,
+    id_list: list[int],
+    other_params: tuple[tuple[str, str], ...],
+    api_token: str,
+    is_cancelled: Callable[[], bool] | None,
+) -> IdentifySession:
+    """Build a session from an explicit observation list, in the list's order.
+
+    A long ``id=`` value would exceed URL limits and the index would return
+    it in its own default order, so the list is fetched in chunks and the
+    caller's order (for example "most worth a second look first") is kept.
+    Any other filters still apply to every chunk.
+    """
+    limit = min(plan.session_limit, MAX_OBSERVATION_SCAN)
+    by_id: dict[int, StudyObservation] = {}
+    wanted = id_list
+    for start in range(0, len(wanted), ID_LIST_CHUNK):
+        if len(by_id) >= limit:
+            break
+        _raise_if_cancelled(is_cancelled)
+        chunk = wanted[start : start + ID_LIST_CHUNK]
+        raw = client.get_observations(
+            (*other_params, (_ID_PARAM_KEY, ",".join(str(i) for i in chunk))),
+            page=1,
+            per_page=ID_LIST_CHUNK,
+            api_token=api_token,
+        )
+        _raise_if_cancelled(is_cancelled)
+        results = raw.get("results") or []
+        client.add_infrageneric_genus(results)
+        for record in results:
+            observation = (
+                parse_observation(record) if isinstance(record, dict) else None
+            )
+            if observation is not None:
+                by_id.setdefault(observation.obs_id, observation)
+
+    items = [
+        IdentifySessionItem(obs_id, by_id[obs_id])
+        for obs_id in id_list
+        if obs_id in by_id
+    ][:limit]
+    _raise_if_cancelled(is_cancelled)
+    return IdentifySession(plan=plan, items=items, total_results=len(by_id))
 
 
 def _raise_if_cancelled(is_cancelled: Callable[[], bool] | None) -> None:

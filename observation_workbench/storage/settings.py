@@ -625,6 +625,14 @@ class AppSettings:
         self.sync()
 
     @property
+    def show_welcome_at_startup(self) -> bool:
+        return self._s.value("ui/show_welcome_at_startup", True, type=bool)
+
+    @show_welcome_at_startup.setter
+    def show_welcome_at_startup(self, v: bool) -> None:
+        self._s.setValue("ui/show_welcome_at_startup", bool(v))
+
+    @property
     def mycomap_vision_token(self) -> str:
         """Return the saved MycoMap Vision API token.
 
@@ -780,6 +788,95 @@ class AppSettings:
     @identify_prefetch_radius.setter
     def identify_prefetch_radius(self, value: int) -> None:
         self._s.setValue("identify/prefetch_radius", max(0, int(value)))
+
+    # Recent Identify searches: newest first, each {"kind", "url", "label"}.
+    # kind is "url" for an ordinary search, or the name of a dynamic preset
+    # ("maverick", "dna_disagree") whose observation list is looked up afresh.
+    IDENTIFY_HISTORY_MAX = 12
+
+    @property
+    def identify_history(self) -> list[dict]:
+        raw = self._s.value("identify/history", "", type=str)
+        entries: list[dict] = []
+        try:
+            parsed = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            parsed = []
+        if isinstance(parsed, list):
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                kind = str(item.get("kind") or "url")
+                url = str(item.get("url") or "").strip()
+                label = str(item.get("label") or "").strip()
+                if kind == "url" and not url:
+                    continue
+                entries.append({"kind": kind, "url": url, "label": label})
+        if not entries and self.identify_last_url:
+            # Seed from the single remembered URL of earlier versions.
+            entries.append({"kind": "url", "url": self.identify_last_url, "label": ""})
+        return entries[: self.IDENTIFY_HISTORY_MAX]
+
+    def remember_identify_search(self, kind: str, url: str, label: str) -> None:
+        """Move (kind, url) to the front of the history with a fresh label."""
+        url = url.strip()
+        entries = [
+            entry
+            for entry in self.identify_history
+            if not (
+                entry["kind"] == kind
+                and (kind != "url" or entry["url"] == url)
+            )
+        ]
+        entries.insert(0, {"kind": kind, "url": url, "label": label.strip()})
+        self._s.setValue(
+            "identify/history", json.dumps(entries[: self.IDENTIFY_HISTORY_MAX])
+        )
+
+    def forget_identify_search(self, kind: str, url: str) -> None:
+        entries = [
+            entry
+            for entry in self.identify_history
+            if not (entry["kind"] == kind and entry["url"] == url.strip())
+        ]
+        self._s.setValue("identify/history", json.dumps(entries))
+        if kind == "url" and url.strip() == self.identify_last_url:
+            # Otherwise the legacy seed would bring it straight back.
+            self.identify_last_url = entries[0]["url"] if entries else ""
+
+    @property
+    def identify_home_place(self) -> tuple[Optional[int], str]:
+        """The area used by the "fungi near me" Identify buttons."""
+        try:
+            place_id = int(self._s.value("identify/home_place_id", 0) or 0)
+        except (TypeError, ValueError):
+            place_id = 0
+        name = self._s.value("identify/home_place_name", "", type=str)
+        return (place_id or None, name if place_id else "")
+
+    def set_identify_home_place(self, place_id: int, name: str) -> None:
+        self._s.setValue("identify/home_place_id", int(place_id))
+        self._s.setValue("identify/home_place_name", name.strip())
+
+    # Taxon and place display names rarely change; remembering them makes the
+    # Identify setup table fill in instantly instead of one request per name.
+    NAME_CACHE_MAX = 2_000
+
+    @property
+    def identify_name_cache(self) -> dict[str, str]:
+        raw = self._s.value("identify/name_cache", "", type=str)
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str) and v}
+
+    @identify_name_cache.setter
+    def identify_name_cache(self, value: dict[str, str]) -> None:
+        items = list(value.items())[-self.NAME_CACHE_MAX :]
+        self._s.setValue("identify/name_cache", json.dumps(dict(items)))
 
     @property
     def identify_resume_actions_automatically(self) -> bool:

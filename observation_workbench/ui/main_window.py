@@ -19,6 +19,7 @@ keys even when autocomplete or list widgets have focus.
 
 from __future__ import annotations
 
+import html
 import logging
 import random
 import sys
@@ -41,6 +42,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QCursor,
     QFont,
     QFontMetrics,
     QKeySequence,
@@ -52,7 +54,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGridLayout,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
@@ -60,7 +61,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QMenu,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -1145,6 +1148,11 @@ class _NavFilter(QObject):
             return False
         if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return False
+        # On the start page the observation viewer is hidden: letters like
+        # "a" must never post an agreement on an observation the user can't
+        # see, and arrows/Space belong to the page's buttons and scrolling.
+        if self._mw.start_page_visible():
+            return False
         from PySide6.QtGui import QKeyEvent
 
         ke: QKeyEvent = event  # type: ignore[assignment]
@@ -1607,7 +1615,7 @@ class MainWindow(QMainWindow):
                 self._on_screen_changed(handle.screen())
         if not self._startup_recovery_prompt_scheduled:
             self._startup_recovery_prompt_scheduled = True
-            QTimer.singleShot(0, self._show_startup_identify_recovery_prompt)
+            QTimer.singleShot(0, self._run_startup_prompts)
 
     def _on_screen_changed(self, screen: Optional[QScreen]) -> None:
         if self._watched_screen is not None:
@@ -1726,7 +1734,27 @@ class MainWindow(QMainWindow):
         self._splitter.addWidget(right_panel)
 
         self._splitter.setSizes([240, 860, 380])
-        root.addWidget(self._splitter, 1)  # splitter gets all remaining vertical space
+
+        # Until the first search loads, a start page with big entry points to
+        # every workflow fills the space instead of an empty viewer.
+        from observation_workbench.ui.home_page import HomePage
+
+        features = self._welcome_features()
+        self._home_page = HomePage(
+            study=features[0], identify=features[1], others=features[2:]
+        )
+        self._home_page.study_requested.connect(self._filter_bar.focus_username)
+        self._home_page.sign_in_requested.connect(
+            lambda: self._authenticate_to_inaturalist()
+        )
+        self._home_page.getting_started_requested.connect(self._show_welcome)
+        self._home_page.shortcuts_requested.connect(self._show_shortcuts)
+        self._home_page.back_to_results_requested.connect(self._show_results_view)
+        self._central_stack = QStackedWidget()
+        self._central_stack.addWidget(self._home_page)
+        self._central_stack.addWidget(self._splitter)
+        self._central_stack.setCurrentWidget(self._home_page)
+        root.addWidget(self._central_stack, 1)  # gets all remaining vertical space
 
         # Status bar
         self._status_bar = QStatusBar()
@@ -1739,6 +1767,10 @@ class MainWindow(QMainWindow):
         self._status_bar.addWidget(self._status_label, 1)
         self._status_bar.addPermanentWidget(self._progress)
         self._auth_label = QLabel("")
+        self._auth_label.setTextFormat(Qt.TextFormat.RichText)
+        self._auth_label.linkActivated.connect(
+            lambda _link: self._authenticate_to_inaturalist()
+        )
         self._status_bar.addPermanentWidget(self._auth_label)
         self._identify_actions_status_label = QLabel(
             "Identify actions: no pending work"
@@ -1780,17 +1812,94 @@ class MainWindow(QMainWindow):
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
 
-        # Action
+        # Action — ordered roughly by how often each workflow is used, with
+        # recovery tools last.
         action_menu = mb.addMenu("&Action")
-        self._act_auth = QAction("Authenticate to iNaturalist…", self)
+        self._act_auth = QAction("Sign in to iNaturalist…", self)
         self._act_auth.triggered.connect(
             lambda _checked=False: self._authenticate_to_inaturalist()
         )
         action_menu.addAction(self._act_auth)
+        action_menu.addSeparator()
         act_identify = QAction("Identify observations…", self)
         act_identify.setToolTip("Open a read-only local iNaturalist Identify session")
         act_identify.triggered.connect(self._open_identify_setup)
         action_menu.addAction(act_identify)
+        act_bulk_provisional = QAction("Agree to DNA-backed IDs…", self)
+        act_bulk_provisional.setToolTip(
+            "Preview and supervise agreements with DNA-backed identifications "
+            "(provisional or published names) from an observations URL"
+        )
+        act_bulk_provisional.triggered.connect(self._start_bulk_agree_setup)
+        action_menu.addAction(act_bulk_provisional)
+        act_autovalidated = QAction("Apply autovalidated identifications…", self)
+        act_autovalidated.setToolTip(
+            "Find DNA-barcoded observations that MycoMap autovalidated but whose "
+            "consensus is not yet the autovalidated name, then review and post them"
+        )
+        act_autovalidated.triggered.connect(self._start_autovalidated_ids_setup)
+        action_menu.addAction(act_autovalidated)
+        act_propose_name = QAction("Propose a name to observation numbers…", self)
+        act_propose_name.setToolTip(
+            "Propose an identification on a typed list of observation numbers"
+        )
+        act_propose_name.triggered.connect(self._start_propose_name_setup)
+        action_menu.addAction(act_propose_name)
+        action_menu.addSeparator()
+        act_provisional_update = QAction("Update Provisional Species Name…", self)
+        act_provisional_update.setToolTip(
+            "Find observations by provisional name or pasted IDs and set Provisional Species Name"
+        )
+        act_provisional_update.triggered.connect(
+            lambda _checked=False: self._start_species_override_update(
+                PROVISIONAL_SPECIES_FIELD_NAME
+            )
+        )
+        action_menu.addAction(act_provisional_update)
+        act_species_override = QAction("Update Species Name Override…", self)
+        act_species_override.setToolTip(
+            "Find observations by provisional name or pasted IDs and set Species Name Override"
+        )
+        act_species_override.triggered.connect(
+            lambda _checked=False: self._start_species_override_update(
+                SPECIES_NAME_OVERRIDE_FIELD_NAME
+            )
+        )
+        action_menu.addAction(act_species_override)
+        act_provisional_swap = QAction("Provisional Name Swap…", self)
+        act_provisional_swap.setToolTip(
+            "Search for a Provisional Species Name field value and swap matching values"
+        )
+        act_provisional_swap.triggered.connect(self._start_provisional_name_swap)
+        action_menu.addAction(act_provisional_swap)
+        act_bulk_disagree = QAction("Bulk disagree to taxon from URL…", self)
+        act_bulk_disagree.setToolTip(
+            "Preview and supervise coarser corrective identifications from an observations URL"
+        )
+        act_bulk_disagree.triggered.connect(self._start_bulk_disagree_setup)
+        action_menu.addAction(act_bulk_disagree)
+        action_menu.addSeparator()
+        act_dna_vote_review = QAction("Review DNA-contested identifications…", self)
+        act_dna_vote_review.setToolTip(
+            "Find DNA-barcoded observations where your vote (or the community "
+            "consensus) looks worth revisiting; read-only"
+        )
+        act_dna_vote_review.triggered.connect(self._open_dna_vote_review)
+        action_menu.addAction(act_dna_vote_review)
+        act_dna_linking = QAction("Link observations to DNA barcodes…", self)
+        act_dna_linking.setToolTip(
+            "Discover public nearby observation pairs and explicitly review durable DNA links"
+        )
+        act_dna_linking.triggered.connect(self._open_dna_linking)
+        action_menu.addAction(act_dna_linking)
+        act_reconcile = QAction("Reconcile Mushroom Observer ↔ iNaturalist…", self)
+        act_reconcile.setToolTip(
+            "Open the Gate 1A reconciliation dashboard with explicitly confirmed Gate 1B link "
+            "repairs, Gate 1C ITS synchronization, and Gate 1D coordinate/name reconciliation"
+        )
+        act_reconcile.triggered.connect(self._open_reconciliation)
+        action_menu.addAction(act_reconcile)
+        action_menu.addSeparator()
         self._act_pending_identify_actions = QAction("Pending Identify actions…", self)
         self._act_pending_identify_actions.setToolTip(
             "Review durable local Identify actions; opening this never resumes them"
@@ -1812,120 +1921,27 @@ class MainWindow(QMainWindow):
             self._retry_confirmed_refresh_warning
         )
         action_menu.addAction(self._act_retry_identify_refresh)
-        act_reconcile = QAction("Reconcile Mushroom Observer ↔ iNaturalist…", self)
-        act_reconcile.setToolTip(
-            "Open the Gate 1A reconciliation dashboard with explicitly confirmed Gate 1B link "
-            "repairs, Gate 1C ITS synchronization, and Gate 1D coordinate/name reconciliation"
-        )
-        act_reconcile.triggered.connect(self._open_reconciliation)
-        action_menu.addAction(act_reconcile)
-        act_dna_linking = QAction("Link observations to DNA barcodes…", self)
-        act_dna_linking.setToolTip(
-            "Discover public nearby observation pairs and explicitly review durable DNA links"
-        )
-        act_dna_linking.triggered.connect(self._open_dna_linking)
-        action_menu.addAction(act_dna_linking)
-        act_dna_recovery = QAction("Recover uncertain DNA-link writes…", self)
-        act_dna_recovery.triggered.connect(self._open_dna_recovery)
-        action_menu.addAction(act_dna_recovery)
-        act_dna_vote_review = QAction("Review DNA-contested identifications…", self)
-        act_dna_vote_review.setToolTip(
-            "Find DNA-barcoded observations where your vote (or the community "
-            "consensus) looks worth revisiting; read-only"
-        )
-        act_dna_vote_review.triggered.connect(self._open_dna_vote_review)
-        action_menu.addAction(act_dna_vote_review)
-        action_menu.addSeparator()
-
-        act_bulk_provisional = QAction("Agree to DNA-backed IDs…", self)
-        act_bulk_provisional.setToolTip(
-            "Preview and supervise agreements with DNA-backed identifications "
-            "(provisional or published names) from an observations URL"
-        )
-        act_bulk_provisional.triggered.connect(self._start_bulk_agree_setup)
-        action_menu.addAction(act_bulk_provisional)
-
-        act_bulk_disagree = QAction("Bulk disagree to taxon from URL…", self)
-        act_bulk_disagree.setToolTip(
-            "Preview and supervise coarser corrective identifications from an observations URL"
-        )
-        act_bulk_disagree.triggered.connect(self._start_bulk_disagree_setup)
-        action_menu.addAction(act_bulk_disagree)
-
-        act_autovalidated = QAction("Apply autovalidated identifications…", self)
-        act_autovalidated.setToolTip(
-            "Find DNA-barcoded observations that MycoMap autovalidated but whose "
-            "consensus is not yet the autovalidated name, then review and post them"
-        )
-        act_autovalidated.triggered.connect(self._start_autovalidated_ids_setup)
-        action_menu.addAction(act_autovalidated)
-
-        act_propose_name = QAction("Propose a name to observation numbers…", self)
-        act_propose_name.setToolTip(
-            "Propose an identification on a typed list of observation numbers"
-        )
-        act_propose_name.triggered.connect(self._start_propose_name_setup)
-        action_menu.addAction(act_propose_name)
-
-        act_provisional_swap = QAction("Provisional Name Swap…", self)
-        act_provisional_swap.setToolTip(
-            "Search for a Provisional Species Name field value and swap matching values"
-        )
-        act_provisional_swap.triggered.connect(self._start_provisional_name_swap)
-        action_menu.addAction(act_provisional_swap)
-
-        act_species_override = QAction("Update Species Name Override…", self)
-        act_species_override.setToolTip(
-            "Find observations by provisional name or pasted IDs and set Species Name Override"
-        )
-        act_species_override.triggered.connect(
-            lambda _checked=False: self._start_species_override_update(
-                SPECIES_NAME_OVERRIDE_FIELD_NAME
-            )
-        )
-        action_menu.addAction(act_species_override)
-
-        act_provisional_update = QAction("Update Provisional Species Name…", self)
-        act_provisional_update.setToolTip(
-            "Find observations by provisional name or pasted IDs and set Provisional Species Name"
-        )
-        act_provisional_update.triggered.connect(
-            lambda _checked=False: self._start_species_override_update(
-                PROVISIONAL_SPECIES_FIELD_NAME
-            )
-        )
-        action_menu.addAction(act_provisional_update)
-
-        # Debug
-        debug_menu = mb.addMenu("&Debug")
-        self._act_show_log = QAction("Show &Log Panel", self, checkable=True)
-        self._act_show_log.setShortcut("Ctrl+Shift+L")
-        self._act_show_log.triggered.connect(self._toggle_log_panel)
-        debug_menu.addAction(self._act_show_log)
-
-        act_debug_level = QAction("Verbose (&DEBUG) logging", self, checkable=True)
-        act_debug_level.setObjectName("act_debug_level")
-        act_debug_level.triggered.connect(self._toggle_debug_logging)
-        debug_menu.addAction(act_debug_level)
-
-        act_open_logs = QAction("Open Log &Folder", self)
-        act_open_logs.setToolTip(
-            "Open the folder holding the rotating log file (kept for two days)."
-        )
-        act_open_logs.triggered.connect(self._open_log_folder)
-        debug_menu.addAction(act_open_logs)
-
-        debug_menu.addSeparator()
-        act_cache_info = QAction("Cache &info…", self)
-        act_cache_info.triggered.connect(self._show_cache_info)
-        debug_menu.addAction(act_cache_info)
-
-        act_clear_cache = QAction("&Clear all caches…", self)
-        act_clear_cache.triggered.connect(self._clear_caches)
-        debug_menu.addAction(act_clear_cache)
+        self._act_dna_recovery = QAction("Recover uncertain DNA-link writes…", self)
+        self._act_dna_recovery.triggered.connect(self._open_dna_recovery)
+        # Like the Identify recovery items, shown only when there is something
+        # to recover; checked each time the menu opens (a local SQLite read).
+        self._act_dna_recovery.setVisible(False)
+        action_menu.addAction(self._act_dna_recovery)
+        action_menu.aboutToShow.connect(self._refresh_dna_recovery_visibility)
 
         # Help
         help_menu = mb.addMenu("&Help")
+        act_welcome = QAction("&Getting started…", self)
+        act_welcome.triggered.connect(lambda _checked=False: self._show_welcome())
+        help_menu.addAction(act_welcome)
+
+        act_start_page = QAction("&Start page", self)
+        act_start_page.setToolTip(
+            "Show the start page with a button for every workflow"
+        )
+        act_start_page.triggered.connect(lambda _checked=False: self._show_start_page())
+        help_menu.addAction(act_start_page)
+
         act_shortcuts = QAction("&Keyboard shortcuts", self)
         act_shortcuts.triggered.connect(self._show_shortcuts)
         help_menu.addAction(act_shortcuts)
@@ -1933,6 +1949,25 @@ class MainWindow(QMainWindow):
         act_readme = QAction("View &Readme", self)
         act_readme.triggered.connect(self._show_readme)
         help_menu.addAction(act_readme)
+
+        help_menu.addSeparator()
+        troubleshooting_menu = help_menu.addMenu("&Troubleshooting")
+        self._act_show_log = QAction("Show &Log Panel", self, checkable=True)
+        self._act_show_log.setShortcut("Ctrl+Shift+L")
+        self._act_show_log.triggered.connect(self._toggle_log_panel)
+        troubleshooting_menu.addAction(self._act_show_log)
+
+        act_debug_level = QAction("Verbose (&DEBUG) logging", self, checkable=True)
+        act_debug_level.setObjectName("act_debug_level")
+        act_debug_level.triggered.connect(self._toggle_debug_logging)
+        troubleshooting_menu.addAction(act_debug_level)
+
+        act_open_logs = QAction("Open Log &Folder", self)
+        act_open_logs.setToolTip(
+            "Open the folder holding the rotating log file (kept for two days)."
+        )
+        act_open_logs.triggered.connect(self._open_log_folder)
+        troubleshooting_menu.addAction(act_open_logs)
 
     def _open_identify_setup(self) -> None:
         """Open planning separately so this window remains the study browser."""
@@ -1944,6 +1979,8 @@ class MainWindow(QMainWindow):
             self._auth_state.api_token,
             self,
             metadata_client=self._summary_client,
+            login=self._auth_state.login if self._auth_state.is_authenticated else "",
+            user_id=self._auth_state.user_id,
         )
         dialog.session_ready.connect(self._open_identify_window)
         dialog.exec()
@@ -2001,6 +2038,152 @@ class MainWindow(QMainWindow):
     def _pending_identify_actions_destroyed(self, dialog: object) -> None:
         if self._pending_identify_actions_dialog is dialog:
             self._pending_identify_actions_dialog = None
+
+    def _run_startup_prompts(self) -> None:
+        """Recovery comes first: unresolved Identify writes outrank orientation."""
+        self._show_startup_identify_recovery_prompt()
+        if self._closing:
+            return
+        if self._settings.show_welcome_at_startup:
+            self._show_welcome()
+
+    def _welcome_features(self) -> list:
+        from observation_workbench.ui.welcome_dialog import WelcomeFeature
+
+        return [
+            WelcomeFeature(
+                "Study an identifier or any iNaturalist search",
+                "Learn how an expert tells look-alikes apart by paging through their "
+                "identifications with large photos, or browse any iNaturalist search "
+                "or project quickly with keyboard shortcuts.",
+                "Main window: the Identifier / URL box at the top, then Load.",
+                "No sign-in needed",
+            ),
+            WelcomeFeature(
+                "Identify observations",
+                "A better iNaturalist Identify page: faster, with full-size photos "
+                "loaded in advance so the next observation appears instantly, and "
+                "one-key Agree, Add ID, Comment, and Reviewed.",
+                "Action → Identify observations…",
+                "Sign-in needed only to post",
+                self._open_identify_setup,
+            ),
+            WelcomeFeature(
+                "Agree to DNA-backed IDs",
+                "Help sequenced observations reach the right community ID by agreeing "
+                "with DNA-backed identifications, one at a time with a preview and "
+                "pause / skip controls.",
+                "Action → Agree to DNA-backed IDs…",
+                "Needs sign-in",
+                self._start_bulk_agree_setup,
+            ),
+            WelcomeFeature(
+                "Apply autovalidated identifications",
+                "Post the names MycoMap has already validated from DNA sequences on "
+                "observations whose community ID has not caught up yet.",
+                "Action → Apply autovalidated identifications…",
+                "Needs sign-in",
+                self._start_autovalidated_ids_setup,
+            ),
+            WelcomeFeature(
+                "Propose a name for a list of observations",
+                "Paste a list of observation numbers and add the same identification "
+                "to all of them.",
+                "Action → Propose a name to observation numbers…",
+                "Needs sign-in",
+                self._start_propose_name_setup,
+            ),
+            WelcomeFeature(
+                "Edit provisional / override species names",
+                "Rename or set the Provisional Species Name and Species Name Override "
+                "fields across many observations at once.",
+                "Action → Provisional Name Swap…, Update Species Name Override…, "
+                "Update Provisional Species Name…",
+                "Needs sign-in",
+                self._show_field_editor_chooser,
+            ),
+            WelcomeFeature(
+                "Bulk disagree to a broader taxon",
+                "Correct a batch of observations that were all identified too "
+                "specifically (or wrongly) by adding a broader, safer identification.",
+                "Action → Bulk disagree to taxon from URL…",
+                "Needs sign-in",
+                self._start_bulk_disagree_setup,
+            ),
+            WelcomeFeature(
+                "Review DNA-contested identifications",
+                "Find DNA-barcoded observations where your identification, or the "
+                "community's, may disagree with the sequence and deserves a second look.",
+                "Action → Review DNA-contested identifications…",
+                "Read-only",
+                self._open_dna_vote_review,
+            ),
+            WelcomeFeature(
+                "Link observations to DNA barcodes",
+                "Find nearby observations of the same collection where one has a DNA "
+                "sequence and the other does not, and record the link.",
+                "Action → Link observations to DNA barcodes…",
+                "Needs sign-in",
+                self._open_dna_linking,
+            ),
+            WelcomeFeature(
+                "Reconcile Mushroom Observer ↔ iNaturalist (beta)",
+                "If you post the same finds to both sites, spot missing cross-links, "
+                "DNA sequences, and mismatched names or locations between your two "
+                "accounts.",
+                "Action → Reconcile Mushroom Observer ↔ iNaturalist…",
+                "Needs sign-in + Mushroom Observer API key",
+                self._open_reconciliation,
+            ),
+        ]
+
+    def _show_field_editor_chooser(self) -> None:
+        """Let a start-page or Getting started click pick one of the field editors."""
+        menu = QMenu(self)
+        menu.addAction(
+            "Update Provisional Species Name…",
+            lambda: self._start_species_override_update(PROVISIONAL_SPECIES_FIELD_NAME),
+        )
+        menu.addAction(
+            "Update Species Name Override…",
+            lambda: self._start_species_override_update(
+                SPECIES_NAME_OVERRIDE_FIELD_NAME
+            ),
+        )
+        menu.addAction("Provisional Name Swap…", self._start_provisional_name_swap)
+        menu.exec(QCursor.pos())
+        menu.deleteLater()
+
+    def _show_results_view(self) -> None:
+        if self._central_stack.currentWidget() is not self._splitter:
+            self._central_stack.setCurrentWidget(self._splitter)
+
+    def start_page_visible(self) -> bool:
+        stack = getattr(self, "_central_stack", None)
+        return stack is not None and stack.currentWidget() is self._home_page
+
+    def _show_start_page(self) -> None:
+        self.stop_arrow_navigation("start page shown")
+        self._home_page.set_results_available(bool(self._observations))
+        self._central_stack.setCurrentWidget(self._home_page)
+
+    def _show_welcome(self) -> None:
+        from observation_workbench.ui.welcome_dialog import WelcomeDialog
+
+        state = self._auth_state
+        dlg = WelcomeDialog(
+            login=state.login,
+            signed_in=state.is_authenticated,
+            token_expired=state.is_authenticated and state.is_expired,
+            features=self._welcome_features(),
+            on_sign_in=self._authenticate_to_inaturalist,
+            on_show_readme=self._show_readme,
+            show_at_startup=self._settings.show_welcome_at_startup,
+            parent=self,
+        )
+        dlg.exec()
+        self._settings.show_welcome_at_startup = dlg.show_at_startup
+        self._settings.sync()
 
     def _show_startup_identify_recovery_prompt(self) -> None:
         """Offer recovery only after the visible MainWindow has entered its event loop."""
@@ -2082,7 +2265,7 @@ class MainWindow(QMainWindow):
         authenticate = None
         if auth_failure_count:
             authenticate = box.addButton(
-                "Authenticate to iNaturalist…", QMessageBox.ButtonRole.ActionRole
+                "Sign in to iNaturalist…", QMessageBox.ButtonRole.ActionRole
             )
         resume = box.addButton(
             "Resume queued actions", QMessageBox.ButtonRole.AcceptRole
@@ -2370,14 +2553,27 @@ class MainWindow(QMainWindow):
 
     def _update_auth_ui(self) -> None:
         login = self._auth_state.login
-        if login:
-            self._auth_label.setText(f"iNat: {login}")
+        if hasattr(self, "_home_page"):
+            self._home_page.set_auth_status(
+                login, self._auth_state.is_authenticated, self._auth_state.is_expired
+            )
+        if login and self._auth_state.is_expired:
+            self._auth_label.setText(
+                f"iNat: {html.escape(login)} (sign-in expired) — "
+                "<a href='sign-in'>Sign in again…</a>"
+            )
             if hasattr(self, "_act_auth"):
-                self._act_auth.setText(f"Authenticated as {login}…")
+                self._act_auth.setText(f"Sign in again (expired for {login})…")
+        elif login:
+            self._auth_label.setText(f"iNat: {html.escape(login)}")
+            if hasattr(self, "_act_auth"):
+                self._act_auth.setText(f"Signed in as {login}…")
         else:
-            self._auth_label.setText("iNat: not authenticated")
+            self._auth_label.setText(
+                "iNat: not signed in — <a href='sign-in'>Sign in…</a>"
+            )
             if hasattr(self, "_act_auth"):
-                self._act_auth.setText("Authenticate to iNaturalist…")
+                self._act_auth.setText("Sign in to iNaturalist…")
 
     def _toggle_debug_logging(self, checked: bool) -> None:
         level = logging.DEBUG if checked else logging.INFO
@@ -2493,7 +2689,7 @@ class MainWindow(QMainWindow):
 
         self._log_panel = LogPanel(handler, parent=self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_panel)
-        self._log_panel.hide()  # hidden by default; show via Debug menu or --debug flag
+        self._log_panel.hide()  # hidden by default; show via Help → Troubleshooting or --debug flag
 
     def install_nav_filter(self) -> None:
         self._install_nav_filter()
@@ -2722,6 +2918,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._page_size = per_page
         self._rows_requested = max(self._rows_requested, page * per_page)
+        if page == 1:
+            self._show_results_view()
         worker = _LoadWorker(
             loader=self._loader,
             filters=filters,
@@ -6557,7 +6755,12 @@ class MainWindow(QMainWindow):
     def _show_settings(self) -> None:
         from observation_workbench.ui.settings_dialog import SettingsDialog
 
-        dlg = SettingsDialog(self._settings, self)
+        dlg = SettingsDialog(
+            self._settings,
+            self,
+            on_show_cache_info=self._show_cache_info,
+            on_clear_caches=self._clear_caches,
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             # Apply new settings
             new_max_bytes = int(self._settings.cache_max_gb * 1024**3)
@@ -6607,7 +6810,7 @@ class MainWindow(QMainWindow):
             else ""
         )
         QMessageBox.information(
-            self,
+            QApplication.activeModalWidget() or self,
             "Cache Info",
             f"Image cache: {total_mb:.1f} MB / {limit_gb:.1f} GB limit\n"
             f"Location: {cache_dir}{restart_note}",
@@ -6615,7 +6818,7 @@ class MainWindow(QMainWindow):
 
     def _clear_caches(self) -> None:
         reply = QMessageBox.question(
-            self,
+            QApplication.activeModalWidget() or self,
             "Clear Caches",
             "This will delete all cached images and metadata.\nContinue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -6819,6 +7022,16 @@ class MainWindow(QMainWindow):
             "but the numeric account identity is part of durable scan state.",
             lambda: self._dna_linking.start() if self._dna_linking is not None else None,
         )
+
+    def _refresh_dna_recovery_visibility(self) -> None:
+        visible = False
+        if self._dna_linking is not None:
+            try:
+                visible = bool(self._dna_linking.db.uncertain_operations())
+            except Exception:
+                log.exception("Could not check for uncertain DNA-link writes")
+                visible = True  # fail open: never hide a recovery path on error
+        self._act_dna_recovery.setVisible(visible)
 
     def _open_dna_recovery(self) -> None:
         if self._dna_linking is None:
