@@ -1851,6 +1851,11 @@ class IdentifyWindow(QMainWindow):
             or (has_shift and key == Qt.Key.Key_Slash)
         ):
             action = self._show_shortcuts
+        elif has_shift and key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            # Deliberately unbound, but consumed: otherwise a focused button
+            # (e.g. the Show reviewed checkbox) would move focus on Shift+arrow.
+            # Text inputs never reach here (see _shortcut_should_be_suppressed).
+            action = lambda: None
         elif has_alt_or_meta and key == Qt.Key.Key_Left:
             action = lambda: self.move_photo(-1)
         elif has_alt_or_meta and key == Qt.Key.Key_Right:
@@ -1859,9 +1864,9 @@ class IdentifyWindow(QMainWindow):
             action = lambda: self._adjust_brightness(1)
         elif has_alt_or_meta and key == Qt.Key.Key_Down:
             action = lambda: self._adjust_brightness(-1)
-        elif key == Qt.Key.Key_Left and not has_shift:
+        elif key == Qt.Key.Key_Left:
             action = lambda: self.move_observation(-1)
-        elif key == Qt.Key.Key_Right and not has_shift:
+        elif key == Qt.Key.Key_Right:
             action = lambda: self.move_observation(1)
         elif key == Qt.Key.Key_Up:
             action = lambda: self.move_photo(-1)
