@@ -576,6 +576,15 @@ class IdentifySetupDialog(QDialog):
 
         self._start_read(title, read, success, failure)
 
+    def _recent_available(self, button: QPushButton) -> bool:
+        """Whether a recent-search entry can run, ignoring the busy state."""
+        kind = button.property("presetKind")
+        if kind == PRESET_MAVERICK:
+            return bool(self._login)
+        if kind == PRESET_DNA_DISAGREE:
+            return bool(self._login) and self._user_id > 0
+        return True
+
     def _preset_available(self, button: QPushButton) -> bool:
         if button is self._maverick_button:
             return bool(self._login)
@@ -597,7 +606,7 @@ class IdentifySetupDialog(QDialog):
         for button in self._quick_buttons:
             button.setEnabled(not busy and self._preset_available(button))
         for button in self._recent_container.findChildren(QPushButton):
-            button.setEnabled(not busy)
+            button.setEnabled(not busy and self._recent_available(button))
         self._update_execute_enabled()
 
     def _rebuild_recent(self) -> None:
@@ -633,10 +642,15 @@ class IdentifySetupDialog(QDialog):
                 button.clicked.connect(
                     lambda _checked=False, k=kind: self._run_dynamic_preset(k)
                 )
-                button.setEnabled(
-                    bool(self._login)
-                    and (kind != PRESET_DNA_DISAGREE or self._user_id > 0)
-                )
+                button.setProperty("presetKind", kind)
+                button.setEnabled(self._recent_available(button))
+                if not button.isEnabled():
+                    button.setToolTip(
+                        "Sign in from the main window first."
+                        if not self._login
+                        else "Sign in again from the main window so the program "
+                        "learns your account number."
+                    )
             row_layout.addWidget(button, 1)
             forget = QToolButton(row)
             forget.setText("✕")
@@ -862,6 +876,9 @@ class IdentifySetupDialog(QDialog):
         """A typed URL must never silently reuse an older parsed table."""
         del text
         self._active_preset = None
+        # Typing a link supersedes a running preset lookup even when nothing
+        # has been parsed yet, so its late result cannot overwrite the text.
+        self._supersede_pending_preset()
         if self._has_parsed_query or self._parsed_url_text:
             self._mark_url_stale()
 

@@ -3166,6 +3166,9 @@ class MainWindow(QMainWindow):
             else None
         )
         self._apply_observation_view_filter(preferred_obs_id=preferred_obs_id)
+        # The filter changes which observations exist; keep the start page's
+        # "Back to your results" link in step if it is showing.
+        self._sync_home_results_link()
         if (
             checked
             and not self._observations
