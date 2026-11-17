@@ -46,6 +46,7 @@ from observation_workbench.services.identify_presets import (
     find_maverick_observation_ids,
     fungi_near_url,
     id_list_url,
+    query_params_url,
     static_meaning,
 )
 from observation_workbench.services.identify_session import (
@@ -169,6 +170,9 @@ class IdentifySetupDialog(QDialog):
         # (kind, title) when the current table came from a dynamic preset, so
         # history replays the lookup rather than a frozen observation list.
         self._active_preset: tuple[str, str] | None = None
+        # Parameters exactly as parsed from the URL field, to tell whether the
+        # table was edited before execution (history must replay what ran).
+        self._parsed_params: tuple[tuple[str, str], ...] = ()
         self._quick_buttons: list[QPushButton] = []
         # Friendly-name (taxon/place) resolution is read-only metadata that
         # shouldn't compete with the count preview / session build for the
@@ -283,9 +287,14 @@ class IdentifySetupDialog(QDialog):
             lambda _checked=False: self._run_dynamic_preset(PRESET_DNA_DISAGREE)
         )
         for button in (self._maverick_button, self._dna_button):
-            if not self._login:
+            if not self._preset_available(button):
                 button.setEnabled(False)
-                button.setToolTip("Sign in from the main window first.")
+                button.setToolTip(
+                    "Sign in from the main window first."
+                    if not self._login
+                    else "Sign in again from the main window so the program "
+                    "learns your account number."
+                )
         quick.addWidget(self._fungi_button, 0, 0)
         quick.addWidget(self._fungi_kingdom_button, 0, 1)
         quick.addWidget(self._maverick_button, 1, 0)
@@ -493,6 +502,15 @@ class IdentifySetupDialog(QDialog):
     def _run_dynamic_preset(self, kind: str) -> None:
         if not self._is_open() or self._execution_active or self._preset_busy:
             return
+        if kind == PRESET_DNA_DISAGREE and self._login and self._user_id <= 0:
+            QMessageBox.information(
+                self,
+                "Sign in again",
+                "This scan needs your numeric iNaturalist account number, which "
+                "this sign-in did not record. Sign in again from the main window, "
+                "then open Identify again.",
+            )
+            return
         if not self._login:
             QMessageBox.information(
                 self,
@@ -558,16 +576,26 @@ class IdentifySetupDialog(QDialog):
 
         self._start_read(title, read, success, failure)
 
+    def _preset_available(self, button: QPushButton) -> bool:
+        if button is self._maverick_button:
+            return bool(self._login)
+        if button is self._dna_button:
+            # The DNA scan filters by numeric account id; sign-ins saved by
+            # older builds have a login but no id.
+            return bool(self._login) and self._user_id > 0
+        return True
+
+    def _supersede_pending_preset(self) -> None:
+        """A newer selection or edit makes any running preset lookup stale."""
+        if self._preset_busy:
+            self._preset_generation += 1
+            self._set_preset_busy(False)
+            self._count_label.setText("Not loaded")
+
     def _set_preset_busy(self, busy: bool) -> None:
         self._preset_busy = busy
         for button in self._quick_buttons:
-            button.setEnabled(
-                not busy
-                and (
-                    button not in (self._maverick_button, self._dna_button)
-                    or bool(self._login)
-                )
-            )
+            button.setEnabled(not busy and self._preset_available(button))
         for button in self._recent_container.findChildren(QPushButton):
             button.setEnabled(not busy)
         self._update_execute_enabled()
@@ -605,7 +633,10 @@ class IdentifySetupDialog(QDialog):
                 button.clicked.connect(
                     lambda _checked=False, k=kind: self._run_dynamic_preset(k)
                 )
-                button.setEnabled(bool(self._login))
+                button.setEnabled(
+                    bool(self._login)
+                    and (kind != PRESET_DNA_DISAGREE or self._user_id > 0)
+                )
             row_layout.addWidget(button, 1)
             forget = QToolButton(row)
             forget.setText("✕")
@@ -652,8 +683,11 @@ class IdentifySetupDialog(QDialog):
     def add_parameter(self) -> None:
         if not self._is_open() or self._execution_active:
             return
+        self._supersede_pending_preset()
+        self._active_preset = None
         self._add_row("", "", "", "User edit")
         self._schedule_count_preview()
+        self._refresh_summary()
 
     def parse_url(self) -> None:
         if not self._is_open() or self._execution_active:
@@ -668,6 +702,7 @@ class IdentifySetupDialog(QDialog):
             QMessageBox.warning(self, "Invalid URL", str(exc))
             return
 
+        self._supersede_pending_preset()
         self._parse_generation += 1
         self._count_generation += 1
         self._execution_generation += 1
@@ -676,6 +711,7 @@ class IdentifySetupDialog(QDialog):
         self._source_kind = query.source_kind
         self._display_url = query.display_url
         self._parsed_url_text = self._url_edit.text().strip()
+        self._parsed_params = tuple((str(k), str(v)) for k, v in query.params)
         self._has_parsed_query = True
 
         sources = list(query.parameter_sources)
@@ -724,8 +760,15 @@ class IdentifySetupDialog(QDialog):
             kind, title = self._active_preset
             self._settings.remember_identify_search(kind, "", title)
         else:
+            # An edited table no longer matches the link it came from; save a
+            # link built from the parameters that run, so replay matches.
+            replay_url = (
+                self._url_edit.text()
+                if params == self._parsed_params
+                else query_params_url(params)
+            )
             self._settings.remember_identify_search(
-                "url", self._url_edit.text(), self._current_description()
+                "url", replay_url, self._current_description()
             )
         self._settings.identify_session_limit = plan.session_limit
         self._settings.identify_prefetch_radius = plan.prefetch_radius
@@ -753,7 +796,10 @@ class IdentifySetupDialog(QDialog):
             return
         self._table.removeRow(row)
         self._resolution_generation += 1
+        self._supersede_pending_preset()
+        self._active_preset = None
         self._schedule_count_preview()
+        self._refresh_summary()
 
     def _add_row(self, name: str, value: str, meaning: str, source: str) -> None:
         self._row_token_counter += 1
@@ -795,6 +841,7 @@ class IdentifySetupDialog(QDialog):
         finally:
             self._table_updates = False
         self._resolution_generation += 1
+        self._supersede_pending_preset()
         self._active_preset = None
         self._start_row_resolution(row)
         self._schedule_count_preview()
@@ -821,6 +868,7 @@ class IdentifySetupDialog(QDialog):
     def _mark_url_stale(self) -> None:
         if not self._is_open() or self._execution_active:
             return
+        self._supersede_pending_preset()
         self._parse_generation += 1
         self._count_generation += 1
         self._execution_generation += 1
@@ -878,8 +926,13 @@ class IdentifySetupDialog(QDialog):
 
         id_list, _others = split_id_list(params)
         if id_list is not None and len(id_list) > ID_LIST_CHUNK:
-            # Too long for one count request; the list itself is the answer.
-            self._count_label.setText(f"{len(id_list):,} observations")
+            # Too long for one count request. Other filters may exclude some,
+            # so this is an upper bound, not a count of matches.
+            others = len(_others)
+            self._count_label.setText(
+                f"Up to {len(id_list):,} observations"
+                + (" (other filters not yet applied)" if others else "")
+            )
             return
 
         cache_key = (params, bool(self._api_token))
@@ -1268,13 +1321,7 @@ class IdentifySetupDialog(QDialog):
 
     def _set_query_controls_enabled(self, enabled: bool) -> None:
         for button in self._quick_buttons:
-            button.setEnabled(
-                enabled
-                and (
-                    button not in (self._maverick_button, self._dna_button)
-                    or bool(self._login)
-                )
-            )
+            button.setEnabled(enabled and self._preset_available(button))
         self._recent_container.setEnabled(enabled)
         self._change_area_button.setEnabled(enabled)
         self._url_edit.setEnabled(enabled)
@@ -1452,6 +1499,12 @@ class _PlacePickerDialog(QDialog):
             self._results.setCurrentItem(item)
 
     def _schedule_search(self, _text: str) -> None:
+        # Any edit makes in-flight results stale, even if no new search starts.
+        self._generation += 1
+        self._results.clear()
+        self.place = None
+        self._ok.setEnabled(False)
+        self._status.setText("")
         self._timer.start()
 
     def _start_search(self) -> None:

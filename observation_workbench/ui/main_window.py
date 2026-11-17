@@ -2164,8 +2164,12 @@ class MainWindow(QMainWindow):
 
     def _show_start_page(self) -> None:
         self.stop_arrow_navigation("start page shown")
-        self._home_page.set_results_available(bool(self._observations))
+        self._sync_home_results_link()
         self._central_stack.setCurrentWidget(self._home_page)
+
+    def _sync_home_results_link(self) -> None:
+        if hasattr(self, "_home_page"):
+            self._home_page.set_results_available(bool(self._observations))
 
     def _show_welcome(self) -> None:
         from observation_workbench.ui.welcome_dialog import WelcomeDialog
@@ -2553,6 +2557,7 @@ class MainWindow(QMainWindow):
 
     def _update_auth_ui(self) -> None:
         login = self._auth_state.login
+        self._schedule_auth_expiry_refresh()
         if hasattr(self, "_home_page"):
             self._home_page.set_auth_status(
                 login, self._auth_state.is_authenticated, self._auth_state.is_expired
@@ -2574,6 +2579,24 @@ class MainWindow(QMainWindow):
             )
             if hasattr(self, "_act_auth"):
                 self._act_auth.setText("Sign in to iNaturalist…")
+
+    def _schedule_auth_expiry_refresh(self) -> None:
+        """Re-run _update_auth_ui when the saved token expires, while idle."""
+        timer = getattr(self, "_auth_expiry_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._update_auth_ui)
+            self._auth_expiry_timer = timer
+        timer.stop()
+        expiry = self._auth_state.expires_at if self._auth_state.login else None
+        if expiry is None or self._auth_state.is_expired:
+            return
+        from datetime import datetime, timezone
+
+        remaining_ms = (expiry - datetime.now(timezone.utc)).total_seconds() * 1000
+        # QTimer takes a 32-bit int; longer waits just re-arm when they fire.
+        timer.start(int(min(max(remaining_ms + 1_000, 1_000), 2**31 - 1)))
 
     def _toggle_debug_logging(self, checked: bool) -> None:
         level = logging.DEBUG if checked else logging.INFO
@@ -3034,6 +3057,9 @@ class MainWindow(QMainWindow):
         # and a page-size change restarts the page numbering.
         is_first_page = not self._loaded_observations
         self._suppress_auto_load = True
+        # Results may arrive while the start page is showing; once this
+        # handler has updated the list, offer the way back to them.
+        QTimer.singleShot(0, self._sync_home_results_link)
         if is_first_page:
             self._loaded_observations = list(observations)
             self._apply_observation_view_filter()
@@ -4290,6 +4316,9 @@ class MainWindow(QMainWindow):
         return " and ".join(reasons)
 
     def _show_workflow_observation(self, obs: StudyObservation) -> None:
+        # Supervised bulk runs must display the observation they are about to
+        # act on, even when started from the start page with nothing loaded.
+        self._show_results_view()
         for idx, existing in enumerate(self._observations):
             if existing.obs_id == obs.obs_id:
                 self._show_observation(idx)

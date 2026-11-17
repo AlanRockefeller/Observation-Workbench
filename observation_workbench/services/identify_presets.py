@@ -57,6 +57,11 @@ def id_list_url(observation_ids: Sequence[int]) -> str:
     return f"{OBSERVATIONS_URL}?{urlencode([('id', ids)], safe=',')}"
 
 
+def query_params_url(params: Sequence[tuple[str, str]]) -> str:
+    """An observations URL that parses back to exactly these parameters."""
+    return f"{OBSERVATIONS_URL}?{urlencode(list(params), safe=',')}"
+
+
 def find_maverick_observation_ids(
     client: INatClient,
     login: str,
