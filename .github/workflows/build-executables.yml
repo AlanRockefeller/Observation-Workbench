@@ -18,7 +18,7 @@ jobs:
           - os: macos-15-intel
             asset_name: ObservationWorkbench-macos-x64
             artifact_path: dist/ObservationWorkbench.app
-          - os: macos-14
+          - os: macos-15
             asset_name: ObservationWorkbench-macos-arm64
             artifact_path: dist/ObservationWorkbench.app
           - os: ubuntu-latest
