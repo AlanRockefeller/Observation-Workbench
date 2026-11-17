@@ -7,6 +7,7 @@ unauthenticated reads: they only need to know *which* account to look at.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 from urllib.parse import urlencode
 
 from observation_workbench.api.client import INatClient
@@ -27,6 +28,19 @@ DNA_SCAN_MAX_OBSERVATIONS = 1_000
 
 class PresetCancelled(RuntimeError):
     """A preset lookup was abandoned because its dialog moved on."""
+
+
+@dataclass(frozen=True)
+class PresetResult:
+    """Observation IDs from a preset lookup, and whether the search was partial.
+
+    ``coverage_note`` is empty when every candidate was checked; otherwise it
+    says what was left out, so an empty or short list is never presented as
+    a complete answer.
+    """
+
+    ids: list[int] = field(default_factory=list)
+    coverage_note: str = ""
 
 
 def fungi_near_url(
@@ -68,7 +82,7 @@ def find_maverick_observation_ids(
     *,
     limit: int,
     is_cancelled: Callable[[], bool] = lambda: False,
-) -> list[int]:
+) -> PresetResult:
     """Observations where ``login``'s current identification is a maverick.
 
     Maverick means the identification disagrees with the community taxon.
@@ -78,6 +92,8 @@ def find_maverick_observation_ids(
     seen: set[int] = set()
     page = 1
     limit = max(1, int(limit))
+    total: object = None
+    more_available = False
     while len(ids) < limit:
         if is_cancelled():
             raise PresetCancelled()
@@ -91,20 +107,30 @@ def find_maverick_observation_ids(
         results = raw.get("results") if isinstance(raw, dict) else None
         if not isinstance(results, list) or not results:
             break
-        for record in results:
+        total = raw.get("total_results") if isinstance(raw, dict) else None
+        for index, record in enumerate(results):
             obs_id = _identification_observation_id(record)
             if obs_id and obs_id not in seen:
                 seen.add(obs_id)
                 ids.append(obs_id)
                 if len(ids) >= limit:
+                    more_available = index < len(results) - 1 or (
+                        isinstance(total, int) and page * MAVERICK_PAGE_SIZE < total
+                    )
                     break
-        total = raw.get("total_results") if isinstance(raw, dict) else None
         if len(results) < MAVERICK_PAGE_SIZE:
             break
         if isinstance(total, int) and page * MAVERICK_PAGE_SIZE >= total:
             break
         page += 1
-    return ids
+    note = ""
+    if more_available:
+        of_total = f" of {total:,}" if isinstance(total, int) else ""
+        note = (
+            f"Showing your newest {len(ids):,} maverick identifications{of_total}; "
+            "raise the session limit to include older ones."
+        )
+    return PresetResult(ids, note)
 
 
 def find_dna_disagreement_ids(
@@ -113,7 +139,7 @@ def find_dna_disagreement_ids(
     user_id: int,
     *,
     is_cancelled: Callable[[], bool] = lambda: False,
-) -> list[int]:
+) -> PresetResult:
     """DNA-barcoded observations where others' identifications oppose yours.
 
     Uses the same scan as "Review DNA-contested identifications", keeping
@@ -132,11 +158,20 @@ def find_dna_disagreement_ids(
         result = DNAVoteReview(client).scan(config, is_cancelled=is_cancelled)
     except VoteReviewCancelled as exc:
         raise PresetCancelled() from exc
-    return [
+    ids = [
         finding.observation_id
         for finding in result.findings
         if finding.kind in (KIND_OUTVOTED, KIND_CONTESTED) and finding.observation_id
     ]
+    note = ""
+    if result.truncated:
+        note = (
+            f"Checked your newest {result.observations_scanned:,} of "
+            f"{result.observations_available:,} DNA-barcoded observations; older "
+            "ones were not checked. Use Action → Review DNA-contested "
+            "identifications to scan a narrower search."
+        )
+    return PresetResult(ids, note)
 
 
 def _identification_observation_id(record: object) -> int:

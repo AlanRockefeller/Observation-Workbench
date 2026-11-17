@@ -41,6 +41,7 @@ from observation_workbench.api.observation_url import (
 )
 from observation_workbench.services.identify_presets import (
     PresetCancelled,
+    PresetResult,
     describe_query,
     find_dna_disagreement_ids,
     find_maverick_observation_ids,
@@ -170,6 +171,8 @@ class IdentifySetupDialog(QDialog):
         # (kind, title) when the current table came from a dynamic preset, so
         # history replays the lookup rather than a frozen observation list.
         self._active_preset: tuple[str, str] | None = None
+        # What a partial preset lookup left out; shown with its selection.
+        self._preset_note = ""
         # Parameters exactly as parsed from the URL field, to tell whether the
         # table was edited before execution (history must replay what ran).
         self._parsed_params: tuple[tuple[str, str], ...] = ()
@@ -493,6 +496,7 @@ class IdentifySetupDialog(QDialog):
         )
 
     def _load_url(self, url: str, preset: tuple[str, str] | None = None) -> None:
+        self._preset_note = ""
         self._url_edit.setText(url)
         self.parse_url()
         if self._has_parsed_query and self._parsed_url_text == url.strip():
@@ -551,17 +555,27 @@ class IdentifySetupDialog(QDialog):
         self._set_preset_busy(True)
         self._count_label.setText(message)
 
-        def success(ids: object) -> None:
+        def success(result: object) -> None:
             if cancelled():
                 return
             self._set_preset_busy(False)
-            if not isinstance(ids, list) or not ids:
+            ids = result.ids if isinstance(result, PresetResult) else []
+            note = result.coverage_note if isinstance(result, PresetResult) else ""
+            if not ids:
                 self._count_label.setText("Nothing found")
                 QMessageBox.information(
-                    self, title, "No matching observations were found. Nice work!"
+                    self,
+                    title,
+                    (
+                        f"No matching observations were found.\n\n{note}"
+                        if note
+                        else "No matching observations were found. Nice work!"
+                    ),
                 )
                 return
             self._load_url(id_list_url(ids), preset=(kind, title))
+            self._preset_note = note
+            self._refresh_summary()
 
         def failure(exc: Exception) -> None:
             if cancelled():
@@ -688,11 +702,16 @@ class IdentifySetupDialog(QDialog):
     def _refresh_summary(self) -> None:
         if not self._has_parsed_query:
             return
+        note = ""
         if self._active_preset is not None:
             title = self._active_preset[1]
+            note = self._preset_note
         else:
             title = self._current_description()
-        self._summary.setText(f"Selected: <b>{html.escape(title)}</b>")
+        text = f"Selected: <b>{html.escape(title)}</b>"
+        if note:
+            text += f"<br><i>{html.escape(note)}</i>"
+        self._summary.setText(text)
 
     def add_parameter(self) -> None:
         if not self._is_open() or self._execution_active:
