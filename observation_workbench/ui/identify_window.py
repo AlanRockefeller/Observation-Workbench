@@ -606,13 +606,6 @@ class IdentifyWindow(QMainWindow):
             current_login = snapshot.login if snapshot.authenticated else ""
         self._info_tab = IdentifyInfoTab(current_login, self._tabs)
         self._tabs.addTab(self._info_tab, "Info")
-        for title in ("Suggestions", "Annotations", "Data Quality"):
-            placeholder = QWidget(self._tabs)
-            placeholder_layout = QVBoxLayout(placeholder)
-            placeholder_layout.addWidget(
-                QLabel("Not implemented in this gate.", placeholder)
-            )
-            self._tabs.addTab(placeholder, title)
         self._refresh_button = QToolButton(self._tabs)
         self._refresh_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
@@ -1858,14 +1851,6 @@ class IdentifyWindow(QMainWindow):
             or (has_shift and key == Qt.Key.Key_Slash)
         ):
             action = self._show_shortcuts
-        elif has_shift and key == Qt.Key.Key_Left:
-            action = lambda: self._tabs.setCurrentIndex(
-                (self._tabs.currentIndex() - 1) % self._tabs.count()
-            )
-        elif has_shift and key == Qt.Key.Key_Right:
-            action = lambda: self._tabs.setCurrentIndex(
-                (self._tabs.currentIndex() + 1) % self._tabs.count()
-            )
         elif has_alt_or_meta and key == Qt.Key.Key_Left:
             action = lambda: self.move_photo(-1)
         elif has_alt_or_meta and key == Qt.Key.Key_Right:
@@ -1874,9 +1859,9 @@ class IdentifyWindow(QMainWindow):
             action = lambda: self._adjust_brightness(1)
         elif has_alt_or_meta and key == Qt.Key.Key_Down:
             action = lambda: self._adjust_brightness(-1)
-        elif key == Qt.Key.Key_Left:
+        elif key == Qt.Key.Key_Left and not has_shift:
             action = lambda: self.move_observation(-1)
-        elif key == Qt.Key.Key_Right:
+        elif key == Qt.Key.Key_Right and not has_shift:
             action = lambda: self.move_observation(1)
         elif key == Qt.Key.Key_Up:
             action = lambda: self.move_photo(-1)

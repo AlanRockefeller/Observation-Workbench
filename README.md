@@ -159,7 +159,6 @@ The status bar shows network health, a **Details...** button for recent failures
 | `←` / `→`                  | Previous / next observation                                                  |
 | `↑` / `↓`                  | Previous / next photo                                                        |
 | `Alt`/`Cmd` + `←` / `→`    | Previous / next photo                                                        |
-| `Shift` + `←` / `→`        | Previous / next tab                                                          |
 | `I`                        | Add an identification                                                        |
 | `A`                        | Agree with the observation taxon                                             |
 | `C`                        | Add a comment                                                                |

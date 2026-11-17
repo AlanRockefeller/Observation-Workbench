@@ -48,7 +48,6 @@ def identify_shortcut_sections() -> tuple[ShortcutSection, ...]:
                 ("Left / Right", "Previous / next observation"),
                 ("Up / Down", "Previous / next photo"),
                 (f"{alt_or_meta} + Left / Right", "Previous / next photo"),
-                ("Shift + Left / Right", "Previous / next tab"),
             ),
         ),
         (
