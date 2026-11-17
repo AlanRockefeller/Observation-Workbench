@@ -219,8 +219,10 @@ _USER_PARAMS = {
 }
 _SIMPLE_LABELS = {
     "rank": "Identified only to {value}",
-    "hrank": "Identified at {value} or broader",
-    "lrank": "Identified at {value} or finer",
+    # Per the API reference: hrank is the highest rank included ("this rank
+    # or lower"), lrank the lowest ("this rank or higher").
+    "hrank": "Identified at {value} or finer",
+    "lrank": "Identified at {value} or broader",
     "d1": "Observed on or after {value}",
     "d2": "Observed on or before {value}",
     "created_d1": "Uploaded on or after {value}",
