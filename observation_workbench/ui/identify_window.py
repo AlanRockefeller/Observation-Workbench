@@ -606,13 +606,6 @@ class IdentifyWindow(QMainWindow):
             current_login = snapshot.login if snapshot.authenticated else ""
         self._info_tab = IdentifyInfoTab(current_login, self._tabs)
         self._tabs.addTab(self._info_tab, "Info")
-        for title in ("Suggestions", "Annotations", "Data Quality"):
-            placeholder = QWidget(self._tabs)
-            placeholder_layout = QVBoxLayout(placeholder)
-            placeholder_layout.addWidget(
-                QLabel("Not implemented in this gate.", placeholder)
-            )
-            self._tabs.addTab(placeholder, title)
         self._refresh_button = QToolButton(self._tabs)
         self._refresh_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
@@ -1858,14 +1851,11 @@ class IdentifyWindow(QMainWindow):
             or (has_shift and key == Qt.Key.Key_Slash)
         ):
             action = self._show_shortcuts
-        elif has_shift and key == Qt.Key.Key_Left:
-            action = lambda: self._tabs.setCurrentIndex(
-                (self._tabs.currentIndex() - 1) % self._tabs.count()
-            )
-        elif has_shift and key == Qt.Key.Key_Right:
-            action = lambda: self._tabs.setCurrentIndex(
-                (self._tabs.currentIndex() + 1) % self._tabs.count()
-            )
+        elif has_shift and key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            # Deliberately unbound, but consumed: otherwise a focused button
+            # (e.g. the Show reviewed checkbox) would move focus on Shift+arrow.
+            # Text inputs never reach here (see _shortcut_should_be_suppressed).
+            action = lambda: None
         elif has_alt_or_meta and key == Qt.Key.Key_Left:
             action = lambda: self.move_photo(-1)
         elif has_alt_or_meta and key == Qt.Key.Key_Right:
