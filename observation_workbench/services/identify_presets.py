@@ -201,7 +201,7 @@ _BOOLEAN_MEANINGS = {
     "photos": ("Has photos", "No photos"),
     "sounds": ("Has sounds", "No sounds"),
     "verifiable": ("Verifiable", "Not verifiable"),
-    "identified": ("Has an identification", "No identification yet"),
+    "identified": ("Has a community ID", "No community ID yet"),
     "geo": ("Has coordinates", "No coordinates"),
     "popular": ("Has favorites", "No favorites"),
     "mappable": ("Mappable", "Not mappable"),
