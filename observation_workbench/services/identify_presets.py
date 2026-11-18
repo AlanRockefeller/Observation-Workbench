@@ -127,8 +127,9 @@ def find_maverick_observation_ids(
     if more_available:
         of_total = f" of {total:,}" if isinstance(total, int) else ""
         note = (
-            f"Showing your newest {len(ids):,} maverick identifications{of_total}; "
-            "raise the session limit to include older ones."
+            f"Showing your newest {len(ids):,} maverick identifications{of_total}. "
+            "To include older ones, raise the session limit under “Show query "
+            "details and options”, then click “My maverick identifications” again."
         )
     return PresetResult(ids, note)
 
