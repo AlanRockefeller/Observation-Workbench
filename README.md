@@ -12,7 +12,7 @@ Use `./start.sh` from the repo root to launch it. That is the recommended entry 
 - Browse results with keyboard navigation, image prefetching, and disk caching
 - Open the current observation or image in the browser
 - Inspect a live taxon summary panel for the current query
-- Authenticate to iNaturalist and post agreements from inside the app
+- Sign in to iNaturalist and post agreements from inside the app
 - Supervise bulk provisional-name agreements with pause, skip, and review controls
 - Work through an iNaturalist Identify query in a dedicated window with large photos
 - Bulk-disagree to a coarser taxon, or apply MycoMap's autovalidated sequence IDs
@@ -57,6 +57,9 @@ observation-workbench
 ```
 
 ## Working With It
+
+Until you load a search, the main window shows a start page with a large button for each workflow, led by the Identify window. On startup a **Getting started** window explains whether you need to sign in, walks through a first session, and summarizes each feature with an **Open** button. Turn it off with its checkbox; reopen it from **Help -> Getting started...**.
+
 
 - Enter an identifier username, such as `deniszabin`, in the Identifier / URL field.
 - Or paste an iNaturalist `/observations` URL or `/projects/<id-or-slug>` URL. The app uses that query as the base search, including the aggregated observations of umbrella projects.
@@ -110,22 +113,45 @@ Use **Action -> Identify observations...** to open a separate window modelled on
 iNaturalist's Identify page, but showing full-resolution photos with the same prefetching
 and disk caching as the main window.
 
-The setup dialog takes an iNaturalist observations or Identify URL and breaks it into a
-table of **Parameter / API value / Resolved meaning / Source**, so you can see what the
-query will actually ask for. Taxon and place IDs are resolved to names. You can edit values
-in place, **Add advanced parameter** for anything the URL did not carry, and **Remove
-selected** to drop one. **Parse / reload** re-reads the URL and shows the result count
-before you commit.
+The setup dialog starts with **Quick start** buttons:
+
+- **Fungi near *your area* that need ID**, and **Fungi near *your area* identified only as
+  "Fungi"**. The first click asks you to pick your area (any iNaturalist place); **Change
+  area...** picks another. Signed in, these behave like iNaturalist's Identify page and hide
+  observations you have already reviewed.
+- **My maverick identifications**: observations where your current ID disagrees with the
+  community taxon, newest first.
+- **DNA-barcoded observations where others disagree with me**: the "Outvoted" and
+  "Contested" results of the DNA-contested scan (see below), most worth a look first. It
+  compares your ID with other identifiers' on sequenced observations; it does not read the
+  sequence itself.
+
+The two "My..." buttons need you to be signed in, so they know whose identifications to
+look up. They use public, read-only requests and look the list up afresh each time.
+
+**Recent searches** remembers your last dozen searches as buttons labelled in plain words,
+for example *Fungi · In Mendocino County · Needs ID · Not yet reviewed by you* (hover for
+the link; **✕** forgets one). You can still paste any iNaturalist observations or Identify
+link underneath.
+
+**Show query details and options** reveals a table of **Parameter / API value / Meaning /
+Source**, so you can see exactly what the query asks for. Taxon and place IDs are resolved
+to names, and common parameters such as `quality_grade` and `reviewed` are explained. You
+can edit values in place, **Add advanced parameter** for anything the link did not carry,
+and **Remove selected** to drop one. Taxon and place names are remembered between sessions,
+and the several taxa of one parameter are looked up in a single request, so the table
+usually fills in instantly.
 
 - **Session limit** caps how many observations the session will hold.
-- **Prefetch radius** is how many neighbouring observations to preload images for.
+- **Load photos ahead** (prefetch radius) is how many neighbouring observations to preload
+  images for.
 - Queries using `reviewed` (or any other viewer-scoped filter) require authentication,
   because unauthenticated they would quietly return different results. The dialog says so
   and pairs `reviewed` with the `viewer_id` the API requires.
 
-**Execute** builds a fixed-order session; the order never changes underneath you while you
-work through it. **Show reviewed** toggles whether already-reviewed observations stay
-visible.
+**Start identifying** builds a fixed-order session; the order never changes underneath you
+while you work through it. A list of specific observations (`id=...`) keeps the list's own
+order. **Show reviewed** toggles whether already-reviewed observations stay visible.
 
 The right-hand pane has an **Info** tab with the observation's identifications, comments,
 and fields. The **Suggestions**, **Annotations**, and **Data Quality** tabs are placeholders
@@ -171,7 +197,7 @@ The status bar shows network health, a **Details...** button for recent failures
 
 ## Authenticated Identification
 
-Use **Action -> Authenticate to iNaturalist...** to open iNaturalist's API token page, paste the browser token into the app, and validate the login. Authenticated actions refresh the observation before posting, and the app avoids duplicate or self agreements.
+Use **Action -> Sign in to iNaturalist...** (or the **Sign in...** link in the status bar) to open iNaturalist's API token page, paste the browser token into the app, and validate the login. Tokens expire after about 24 hours; the status bar shows when the saved sign-in has expired. Authenticated actions refresh the observation before posting, and the app avoids duplicate or self agreements.
 
 Single-observation agreements are keyboard-only: press `a` to agree with the most recent non-self ID, or `A` to agree with the consensus/community ID.
 
@@ -460,18 +486,17 @@ not allowed to do.
 
 Open **File -> Settings** to configure:
 
-- **Disk image cache** directory and max size (default: `~/.cache/observation_workbench`, 2 GB). Directory changes take effect after a restart, and files already in the previous images subfolder are not moved or deleted.
+- **Disk image cache** directory and max size (default: `~/.cache/observation_workbench`, 2 GB). Directory changes take effect after a restart, and files already in the previous images subfolder are not moved or deleted. The same section has **Show cache usage...** and **Clear all caches now...** buttons.
 - **In-memory image cache** limit (default: 256 MB)
 - **Prefetch radius** - how many nearby observations to pre-load images for
 - **UI scale** and **result list text scale** (change this if the text is too small or large on your screen)
 - **Scroll speed** - multiplies in-app mouse-wheel scrolling, useful when WSL does not use the Windows wheel-lines setting
 - Whether to include common names alongside scientific names
 
-The **Debug** menu can show the log panel (`Ctrl+Shift+L`), switch verbose logging on and
-off, show **Cache info...** (current disk usage) and **Clear all caches...**.
-
-The **Help** menu has a **Keyboard shortcuts** reference and **View Readme**, which opens
-this file from inside the app.
+The **Help** menu has **Getting started...**, a **Keyboard shortcuts** reference, and
+**View Readme**, which opens this file from inside the app. **Help -> Troubleshooting** can
+show the log panel (`Ctrl+Shift+L`), switch verbose logging on and off, and open the log
+folder.
 
 ## Architecture
 

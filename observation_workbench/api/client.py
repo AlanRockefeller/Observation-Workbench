@@ -1509,9 +1509,13 @@ class INatClient:
         d2: Optional[str] = None,
         page: int = 1,
         per_page: int = 200,
+        category: Optional[str] = None,
     ) -> Dict:
         """
         Fetch identifications by a user.
+
+        ``category`` is the v1 identification category filter
+        (``improving``, ``supporting``, ``leading``, or ``maverick``).
 
         NOTE: The 'taxon_id' parameter automatically includes descendant taxa
         on the iNaturalist API — no separate descendant flag needed here.
@@ -1531,6 +1535,7 @@ class INatClient:
             "per_page": per_page,
             "order_by": "created_at",
             "order": "desc",
+            "category": category,
         }
         if leading is True:
             # NOTE: 'leading' may not be a valid API parameter; kept for forward-compat.
